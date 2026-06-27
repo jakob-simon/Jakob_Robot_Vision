@@ -1,0 +1,199 @@
+<?xml version="1.0" ?>
+<sdf version="1.10" xmlns:xacro="http://ros.org/wiki/xacro">
+
+<model name='scout' canonical_link='chassis'>
+
+  <xacro:property name="update_rate_odom" value="1" />
+  <xacro:property name="update_rate_imu" value="1" />
+  <xacro:property name="update_rate_pose" value="3" />
+  <xacro:property name="linear_speed" value="0.5" />
+  <xacro:property name="angular_speed" value="0.5" />
+
+  <!-- base_link -->
+
+  <link name='chassis'>
+    <pose relative_to='__model__'>0 0 1 0 0 0</pose>
+    <inertial auto="true">
+      <mass>67</mass>
+    </inertial>
+    <visual name='visual'>
+      <geometry>
+        <mesh><uri>meshes/scout_base.dae</uri></mesh>
+      </geometry>
+    </visual>
+    <collision name='collision'>
+      <geometry>
+        <box>
+          <size>0.93 0.42 0.19</size>
+        </box>
+      </geometry>
+    </collision>
+    <sensor name="imu_sensor" type="imu">
+      <always_on>true</always_on>
+      <update_rate>${update_rate_imu}</update_rate>
+      <visualize>true</visualize>
+      <topic>scout/imu</topic>
+    </sensor>
+  </link>
+
+  <!-- wheels -->
+
+  <xacro:property name="wheel_radius" value="0.16" />
+  <xacro:property name="wheel_width" value="0.11" />
+  <xacro:property name="wheel_base" value="0.498" />
+  <xacro:property name="wheel_separation" value="0.58306" />
+
+  <xacro:macro name="wheel" params="N T X Y Z r p y">
+    <link name='${N}_wheel'>
+      <pose relative_to="chassis">${X} ${Y} ${Z} ${r} ${p} ${y}</pose>
+      <inertial auto="true">
+        <mass>8</mass>
+      </inertial>
+      <visual name='visual'>
+        <geometry>
+          <mesh><uri>meshes/wheel_type${T}.dae</uri></mesh>
+        </geometry>
+      </visual>
+      <collision name='collision'>
+        <pose
+                        relative_to="chassis"
+                    >${X} ${Y} ${Z} ${((pi/2)-r)} ${p} ${y}</pose>
+        <geometry>
+          <cylinder>
+            <radius>${wheel_radius}</radius>
+            <length>${wheel_width}</length>
+          </cylinder>
+        </geometry>
+      </collision>
+    </link>
+    <joint name='${N}_wheel_joint' type='revolute'>
+      <pose relative_to='${N}_wheel' />
+      <parent>chassis</parent>
+      <child>${N}_wheel</child>
+      <axis>
+        <xyz expressed_in='__model__'>0 1 0</xyz>
+        <limit>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+      </axis>
+    </joint>
+  </xacro:macro>
+
+  <xacro:wheel
+            N='front_left'
+            T='2'
+            X='${(wheel_base/2)}'
+            Y='${(wheel_separation/2)}'
+            Z='-0.0702'
+            r='0.0'
+            p='0.0'
+            y='0.0'
+        />
+  <xacro:wheel
+            N='front_right'
+            T='1'
+            X='${(wheel_base/2)}'
+            Y='${(-wheel_separation/2)}'
+            Z='-0.0702'
+            r='${pi}'
+            p='0.0'
+            y='0.0'
+        />
+  <xacro:wheel
+            N='back_left'
+            T='1'
+            X='${(-wheel_base/2)}'
+            Y='${(wheel_separation/2)}'
+            Z='-0.0702'
+            r='0.0'
+            p='0.0'
+            y='0.0'
+        />
+  <xacro:wheel
+            N='back_right'
+            T='2'
+            X='${(-wheel_base/2)}'
+            Y='${(-wheel_separation/2)}'
+            Z='-0.0702'
+            r='${pi}'
+            p='0.0'
+            y='0.0'
+        />
+
+  <!-- plugins -->
+
+  <plugin
+            filename="gz-sim-diff-drive-system"
+            name="gz::sim::systems::DiffDrive"
+        >
+    <!-- wheels -->
+    <left_joint>front_left_wheel_joint</left_joint>
+    <right_joint>front_right_wheel_joint</right_joint>
+    <left_joint>back_left_wheel_joint</left_joint>
+    <right_joint>back_right_wheel_joint</right_joint>
+
+    <!-- kinematics -->
+    <wheel_separation>${wheel_separation}</wheel_separation>
+    <wheel_radius>${wheel_radius}</wheel_radius>
+
+    <!-- input -->
+    <topic>/cmd_vel</topic>
+
+    <!-- output -->
+    <odom_publish_frequency>${update_rate_odom}</odom_publish_frequency>
+  </plugin>
+
+  <plugin
+            filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher"
+        >
+      <topic>joint_states</topic>
+  </plugin>
+
+  <xacro:macro name="keymap" params="D L A">
+    <plugin
+                filename="gz-sim-triggered-publisher-system"
+                name="gz::sim::systems::TriggeredPublisher"
+            >
+      <input type="gz.msgs.Int32" topic="/keyboard/keypress">
+        <match field="data">${D}</match>
+      </input>
+      <output type="gz.msgs.Twist" topic="/cmd_vel">
+        linear: {x: ${L}}, angular: {z: ${A}}
+      </output>
+    </plugin>
+  </xacro:macro>
+  <!-- FrontArrowKey: drive frontward -->
+  <xacro:keymap D='16777235' L='${linear_speed}' A='0.0' />
+  <!-- BackArrowKey: drive backward -->
+  <xacro:keymap D='16777237' L='${(-linear_speed)}' A='0.0' />
+  <!-- LeftArrowKey: turn left -->
+  <xacro:keymap D='16777234' L='0.0' A='${angular_speed}' />
+  <!-- RightArrowKey: turn right -->
+  <xacro:keymap D='16777236' L='0.0' A='${(-angular_speed)}' />
+  <!-- s: stop -->
+  <xacro:keymap D='83' L='0.0' A='0.0' />
+
+  <plugin
+            filename="gz-sim-pose-publisher-system"
+            name="gz::sim::systems::PosePublisher"
+        >
+    <publish_link_pose>False</publish_link_pose>
+    <publish_visual_pose>False</publish_visual_pose>
+    <publish_collision_pose>False</publish_collision_pose>
+    <publish_sensor_pose>False</publish_sensor_pose>
+    <publish_model_pose>True</publish_model_pose>
+    <publish_nested_model_pose>True</publish_nested_model_pose>
+    <use_pose_vector_msg>False</use_pose_vector_msg>
+    <update_frequency>${update_rate_pose}</update_frequency>
+    <static_publisher>False</static_publisher>
+    <static_update_frequency>${update_rate_pose}</static_update_frequency>
+  </plugin>
+
+  <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu">
+  </plugin>
+
+</model>
+
+</sdf>

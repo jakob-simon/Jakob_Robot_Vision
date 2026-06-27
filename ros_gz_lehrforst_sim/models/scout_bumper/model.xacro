@@ -1,0 +1,496 @@
+<?xml version="1.0" ?>
+<sdf version="1.10" xmlns:xacro="http://ros.org/wiki/xacro">
+
+<model name='scout' canonical_link='chassis'>
+
+  <xacro:property name="update_rate_odom" value="10" />
+  <xacro:property name="update_rate_imu" value="10" />
+  <xacro:property name="update_rate_pose" value="10" />
+  <xacro:property name="update_rate_force_bar" value="25" />
+  <xacro:property name="update_rate_lidar" value="10" />
+  <xacro:property name="linear_speed" value="0.5" />
+  <xacro:property name="angular_speed" value="0.5" />
+
+  <!-- base_link -->
+
+  <link name='chassis'>
+    <pose relative_to='__model__'>0 0 1 0 0 0</pose>
+    <inertial auto="true">
+      <mass>67</mass>
+    </inertial>
+    <visual name='visual'>
+      <geometry>
+        <mesh><uri>meshes/scout_base.dae</uri></mesh>
+      </geometry>
+    </visual>
+    <collision name='collision'>
+      <geometry>
+        <box>
+          <size>0.93 0.42 0.19</size>
+        </box>
+      </geometry>
+    </collision>
+    <sensor name="imu_sensor" type="imu">
+      <always_on>true</always_on>
+      <update_rate>${update_rate_imu}</update_rate>
+      <visualize>false</visualize>
+      <topic>scout/imu</topic>
+    </sensor>
+  </link>
+
+  <!-- wheels -->
+
+  <xacro:property name="wheel_radius" value="0.16" />
+  <xacro:property name="wheel_width" value="0.11" />
+  <xacro:property name="wheel_base" value="0.498" />
+  <xacro:property name="wheel_separation" value="0.58306" />
+
+  <xacro:macro name="wheel" params="N T X Y Z r p y">
+    <link name='${N}_wheel'>
+      <pose relative_to="chassis">${X} ${Y} ${Z} ${r} ${p} ${y}</pose>
+      <inertial auto="true">
+        <mass>8</mass>
+      </inertial>
+      <visual name='visual'>
+        <geometry>
+          <mesh><uri>meshes/wheel_type${T}.dae</uri></mesh>
+        </geometry>
+      </visual>
+      <collision name='collision'>
+        <pose
+                        relative_to="chassis"
+                    >${X} ${Y} ${Z} ${((pi/2)-r)} ${p} ${y}</pose>
+        <geometry>
+          <cylinder>
+            <radius>${wheel_radius}</radius>
+            <length>${wheel_width}</length>
+          </cylinder>
+        </geometry>
+      </collision>
+    </link>
+    <joint name='${N}_wheel_joint' type='revolute'>
+      <pose relative_to='${N}_wheel' />
+      <parent>chassis</parent>
+      <child>${N}_wheel</child>
+      <axis>
+        <xyz expressed_in='__model__'>0 1 0</xyz>
+        <limit>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+      </axis>
+    </joint>
+  </xacro:macro>
+
+  <xacro:wheel
+            N='front_left'
+            T='2'
+            X='${(wheel_base/2)}'
+            Y='${(wheel_separation/2)}'
+            Z='-0.0702'
+            r='0.0'
+            p='0.0'
+            y='0.0'
+        />
+  <xacro:wheel
+            N='front_right'
+            T='1'
+            X='${(wheel_base/2)}'
+            Y='${(-wheel_separation/2)}'
+            Z='-0.0702'
+            r='${pi}'
+            p='0.0'
+            y='0.0'
+        />
+  <xacro:wheel
+            N='back_left'
+            T='1'
+            X='${(-wheel_base/2)}'
+            Y='${(wheel_separation/2)}'
+            Z='-0.0702'
+            r='0.0'
+            p='0.0'
+            y='0.0'
+        />
+  <xacro:wheel
+            N='back_right'
+            T='2'
+            X='${(-wheel_base/2)}'
+            Y='${(-wheel_separation/2)}'
+            Z='-0.0702'
+            r='${pi}'
+            p='0.0'
+            y='0.0'
+        />
+
+  <!-- visual connection -->
+
+  <xacro:macro name="force_bar_material">
+    <material>
+      <ambient>0.25 0.25 0.25 1.0</ambient>
+      <diffuse>0.25 0.25 0.25 1.0</diffuse>
+      <specular>0.25 0.25 0.25 1.0</specular>
+    </material>
+  </xacro:macro>
+
+  <xacro:macro name="force_bar_connection_visual" params="N X Y Z r p y L W H">
+    <visual name='force_bar_connection_visual_${N}'>
+      <pose relative_to="chassis">${X} ${Y} ${Z} ${r} ${p} ${y}</pose>
+      <geometry>
+        <box>
+          <size>${L} ${W} ${H}</size>
+        </box>
+      </geometry>
+      <xacro:force_bar_material />
+    </visual>
+  </xacro:macro>
+
+  <link name='force_bar_connection_visual'>
+    <xacro:force_bar_connection_visual
+                N='center_bar_left'
+                X='0.4'
+                Y='0.04'
+                Z='0'
+                r='0'
+                p='0'
+                y='0'
+                L='0.2'
+                W='0.025'
+                H='0.025'
+            />
+    <xacro:force_bar_connection_visual
+                N='center_bar_right'
+                X='0.4'
+                Y='-0.04'
+                Z='0'
+                r='0'
+                p='0'
+                y='0'
+                L='0.2'
+                W='0.025'
+                H='0.025'
+            />
+    <xacro:force_bar_connection_visual
+                N='front_bar_top'
+                X='0.4875'
+                Y='0'
+                Z='0'
+                r='0'
+                p='0'
+                y='0'
+                L='0.025'
+                W='0.41'
+                H='0.025'
+            />
+    <xacro:force_bar_connection_visual
+                N='front_bar_left'
+                X='0.4575'
+                Y='0.265'
+                Z='0'
+                r='0'
+                p='0'
+                y='0.43633'
+                L='0.025'
+                W='0.15'
+                H='0.025'
+            />
+    <xacro:force_bar_connection_visual
+                N='front_bar_right'
+                X='0.4575'
+                Y='-0.265'
+                Z='0'
+                r='0'
+                p='0'
+                y='-0.43633'
+                L='0.025'
+                W='0.15'
+                H='0.025'
+            />
+  </link>
+  <joint name='force_bar_connection_visual_joint' type='fixed'>
+    <pose relative_to='force_bar_connection_visual' />
+    <parent>chassis</parent>
+    <child>force_bar_connection_visual</child>
+  </joint>
+
+  <!-- 3D LiDAR -->
+
+  <link name='lidar_link'>
+    <pose relative_to='chassis'>0.25 0 0.22 0 0 0</pose>
+    <inertial auto="true">
+      <mass>0.5</mass>
+    </inertial>
+    <visual name='body_visual'>
+      <geometry>
+        <cylinder>
+          <radius>0.075</radius>
+          <length>0.09</length>
+        </cylinder>
+      </geometry>
+      <material>
+        <ambient>0.03 0.08 0.12 1</ambient>
+        <diffuse>0.03 0.22 0.32 1</diffuse>
+        <specular>0.4 0.6 0.7 1</specular>
+      </material>
+    </visual>
+    <visual name='front_lens_visual'>
+      <pose>0.072 0 0.0 0 0 0</pose>
+      <geometry>
+        <box>
+          <size>0.018 0.08 0.04</size>
+        </box>
+      </geometry>
+      <material>
+        <ambient>0.0 0.55 0.95 1</ambient>
+        <diffuse>0.0 0.75 1.0 1</diffuse>
+        <specular>0.8 0.9 1.0 1</specular>
+      </material>
+    </visual>
+    <visual name='mount_visual'>
+      <pose>0 0 -0.065 0 0 0</pose>
+      <geometry>
+        <box>
+          <size>0.14 0.12 0.03</size>
+        </box>
+      </geometry>
+      <material>
+        <ambient>0.45 0.32 0.02 1</ambient>
+        <diffuse>0.95 0.68 0.08 1</diffuse>
+        <specular>0.3 0.25 0.1 1</specular>
+      </material>
+    </visual>
+    <collision name='collision'>
+      <geometry>
+        <cylinder>
+          <radius>0.075</radius>
+          <length>0.09</length>
+        </cylinder>
+      </geometry>
+    </collision>
+    <sensor name='lidar_sensor' type='gpu_lidar'>
+      <pose>0 0 0.04 0 0 0</pose>
+      <always_on>true</always_on>
+      <update_rate>${update_rate_lidar}</update_rate>
+      <visualize>false</visualize>
+      <topic>/scan</topic>
+      <lidar>
+        <scan>
+          <horizontal>
+            <samples>720</samples>
+            <resolution>1</resolution>
+            <min_angle>-2.35619</min_angle>
+            <max_angle>2.35619</max_angle>
+          </horizontal>
+          <vertical>
+            <samples>4</samples>
+            <resolution>1</resolution>
+            <min_angle>-0.45</min_angle>
+            <max_angle>0.15</max_angle>
+          </vertical>
+        </scan>
+        <range>
+          <min>0.08</min>
+          <max>20.0</max>
+          <resolution>0.01</resolution>
+        </range>
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.01</stddev>
+        </noise>
+      </lidar>
+    </sensor>
+  </link>
+  <joint name='lidar_joint' type='fixed'>
+    <pose relative_to='lidar_link' />
+    <parent>chassis</parent>
+    <child>lidar_link</child>
+  </joint>
+
+  <!-- sensor bar -->
+
+  <xacro:macro name="force_bar_segment" params="P X Y Z r p y L W H">
+    <link name='force_bar_P${P}_link'>
+      <pose relative_to="chassis">${X} ${Y} ${Z} ${r} ${p} ${y}</pose>
+      <inertial auto="true">
+        <mass>1</mass>
+      </inertial>
+      <visual name='visual'>
+        <geometry>
+          <box>
+            <size>${L} ${W} ${H}</size>
+          </box>
+        </geometry>
+        <xacro:force_bar_material />
+      </visual>
+      <collision name='collision'>
+        <geometry>
+          <box>
+            <size>${L} ${W} ${H}</size>
+          </box>
+        </geometry>
+      </collision>
+    </link>
+    <joint name='force_bar_P${P}_joint' type='fixed'>
+      <pose relative_to='force_bar_P${P}_link' />
+      <parent>chassis</parent>
+      <child>force_bar_P${P}_link</child>
+      <sensor name='force_bar_P${P}_sensor' type='force_torque'>
+        <always_on>true</always_on>
+        <update_rate>${update_rate_force_bar}</update_rate>
+        <visualize>false</visualize>
+        <topic>/scout/force_bar/segment_${P}</topic>
+      </sensor>
+    </joint>
+  </xacro:macro>
+
+  <xacro:force_bar_segment
+            P='0'
+            X='0.466'
+            Y='0.28'
+            Z='0.0'
+            r='${pi/2}'
+            p='0.0'
+            y='0.43633'
+            L='0.005'
+            W='0.15'
+            H='0.14'
+        />
+  <xacro:force_bar_segment
+            P='1'
+            X='0.5'
+            Y='0.14'
+            Z='0.0'
+            r='${pi/2}'
+            p='0.0'
+            y='0.0'
+            L='0.005'
+            W='0.15'
+            H='0.13'
+        />
+  <xacro:force_bar_segment
+            P='2'
+            X='0.5'
+            Y='0.0'
+            Z='0.0'
+            r='${pi/2}'
+            p='0.0'
+            y='0.0'
+            L='0.005'
+            W='0.15'
+            H='0.13'
+        />
+  <xacro:force_bar_segment
+            P='3'
+            X='0.5'
+            Y='-0.14'
+            Z='0.0'
+            r='${pi/2}'
+            p='0.0'
+            y='0.0'
+            L='0.005'
+            W='0.15'
+            H='0.13'
+        />
+  <xacro:force_bar_segment
+            P='4'
+            X='0.466'
+            Y='-0.28'
+            Z='0.0'
+            r='${pi/2}'
+            p='0.0'
+            y='-0.43633'
+            L='0.005'
+            W='0.15'
+            H='0.14'
+        />
+
+  <!-- plugins -->
+
+  <plugin
+            filename="gz-sim-diff-drive-system"
+            name="gz::sim::systems::DiffDrive"
+        >
+    <!-- wheels -->
+    <left_joint>front_left_wheel_joint</left_joint>
+    <right_joint>front_right_wheel_joint</right_joint>
+    <left_joint>back_left_wheel_joint</left_joint>
+    <right_joint>back_right_wheel_joint</right_joint>
+
+    <!-- kinematics -->
+    <wheel_separation>${wheel_separation}</wheel_separation>
+    <wheel_radius>${wheel_radius}</wheel_radius>
+
+    <!-- limits -->
+    <!-- <max_linear_acceleration>0.1</max_linear_acceleration> -->
+
+    <!-- input -->
+    <topic>/cmd_vel</topic>
+
+    <!-- output -->
+    <odom_publish_frequency>${update_rate_odom}</odom_publish_frequency>
+    <!-- <odom_topic>/nav/odom</odom_topic> -->
+    <!-- <tf_topic>/tf</tf_topic> -->
+    <!-- <frame_id>odom</frame_id> -->
+    <!-- <child_frame_id>base_link</child_frame_id> -->
+  </plugin>
+
+  <plugin
+            filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher"
+        >
+      <topic>joint_states</topic>
+  </plugin>
+
+  <xacro:macro name="keymap" params="D L A">
+    <plugin
+                filename="gz-sim-triggered-publisher-system"
+                name="gz::sim::systems::TriggeredPublisher"
+            >
+      <input type="gz.msgs.Int32" topic="/keyboard/keypress">
+        <match field="data">${D}</match>
+      </input>
+      <output type="gz.msgs.Twist" topic="/cmd_vel">
+        linear: {x: ${L}}, angular: {z: ${A}}
+      </output>
+    </plugin>
+  </xacro:macro>
+  <!-- FrontArrowKey: drive frontward -->
+  <xacro:keymap D='16777235' L='${linear_speed}' A='0.0' />
+  <!-- BackArrowKey: drive backward -->
+  <xacro:keymap D='16777237' L='${(-linear_speed)}' A='0.0' />
+  <!-- LeftArrowKey: turn left -->
+  <xacro:keymap D='16777234' L='0.0' A='${angular_speed}' />
+  <!-- RightArrowKey: turn right -->
+  <xacro:keymap D='16777236' L='0.0' A='${(-angular_speed)}' />
+  <!-- s: stop -->
+  <xacro:keymap D='83' L='0.0' A='0.0' />
+
+  <plugin
+            filename="gz-sim-pose-publisher-system"
+            name="gz::sim::systems::PosePublisher"
+        >
+    <publish_link_pose>False</publish_link_pose>
+    <publish_visual_pose>False</publish_visual_pose>
+    <publish_collision_pose>False</publish_collision_pose>
+    <publish_sensor_pose>False</publish_sensor_pose>
+    <publish_model_pose>True</publish_model_pose>
+    <publish_nested_model_pose>True</publish_nested_model_pose>
+    <use_pose_vector_msg>False</use_pose_vector_msg>
+    <update_frequency>${update_rate_pose}</update_frequency>
+    <static_publisher>False</static_publisher>
+    <static_update_frequency>${update_rate_pose}</static_update_frequency>
+  </plugin>
+
+  <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu">
+  </plugin>
+
+  <plugin
+            filename="gz-sim-forcetorque-system"
+            name="gz::sim::systems::ForceTorque"
+        >
+  </plugin>
+
+</model>
+
+</sdf>

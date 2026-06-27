@@ -1,0 +1,28 @@
+services:
+  robot-vision:
+    build:
+      context: ./docker
+      args:
+        USERNAME: ${USER:-jacob}
+        USER_UID: ${USER_UID:-1002}
+        USER_GID: ${USER_GID:-1002}
+    image: robot-vision-jazzy:latest
+    container_name: robot-vision-jazzy
+    runtime: nvidia
+    network_mode: host
+    ipc: host
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+    environment:
+      DISPLAY: ${DISPLAY}
+      XAUTHORITY: /tmp/.docker.xauth
+      QT_X11_NO_MITSHM: "1"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
+    volumes:
+      - .:/workspace
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${XAUTHORITY:-/tmp/.Xauthority}:/tmp/.docker.xauth:ro
+    command: bash

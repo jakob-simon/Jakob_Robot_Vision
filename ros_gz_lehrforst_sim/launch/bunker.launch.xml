@@ -1,0 +1,9 @@
+<launch>
+	<executable
+		cmd="gz sim install/ros_gz_lehrforst_sim/share/ros_gz_lehrforst_sim/worlds/bunker_lehrforst.sdf"
+	/>
+	<ros_gz_bridge
+		bridge_name="ros_gz_bunker_bridge"
+		config_file="install/ros_gz_lehrforst_sim/share/ros_gz_lehrforst_sim/config/bunker_bridges.yaml"
+	></ros_gz_bridge>
+</launch>

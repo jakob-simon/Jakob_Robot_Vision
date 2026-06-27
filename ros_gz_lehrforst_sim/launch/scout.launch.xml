@@ -1,0 +1,10 @@
+<launch>
+	<executable
+		cmd="gz sim install/ros_gz_lehrforst_sim/share/ros_gz_lehrforst_sim/worlds/scout_lehrforst.sdf"
+	/>
+	<ros_gz_bridge
+		bridge_name="ros_gz_scout_bridge"
+		config_file="install/ros_gz_lehrforst_sim/share/ros_gz_lehrforst_sim/config/scout_bridges.yaml"
+	>
+	</ros_gz_bridge>
+</launch>

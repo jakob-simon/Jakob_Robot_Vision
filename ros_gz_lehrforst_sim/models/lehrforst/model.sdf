@@ -1,0 +1,31 @@
+<?xml version="1.0" ?>
+<sdf version="1.10">
+
+<!--
+  The map is glitchi if not flipped upside down.
+  The ground map and the tree map are rotated on the y-axis by 180 degree.
+  Each tree is individually rotated by 180 degree to compensate for the flip.
+    change trees in: models/lehrforst_trees/generate_model_sdf.py
+
+  TODO: Merge all lehforst model into one folder.
+-->
+
+<model name="lehrforst">
+
+  <static>true</static>
+
+  <include>
+    <uri>install/ros_gz_lehrforst_sim/share/ros_gz_lehrforst_sim/models/lehrforst_ground</uri>
+    <name>ground_plane</name>
+    <pose>0 0 0 0 3.14159 0</pose>
+  </include>
+
+  <include>
+    <uri>install/ros_gz_lehrforst_sim/share/ros_gz_lehrforst_sim/models/lehrforst_trees</uri>
+    <name>trees</name>
+    <pose>0 0 0 0 3.14159 0</pose>
+  </include>
+
+</model>
+
+</sdf>

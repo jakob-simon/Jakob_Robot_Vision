@@ -1,0 +1,16 @@
+<launch>
+    <executable
+        cmd="gz sim -r install/ros_gz_lehrforst_sim/share/ros_gz_lehrforst_sim/worlds/scout_bumper_lehrforst_vegetation.sdf"
+    />
+    <ros_gz_bridge
+        bridge_name="ros_gz_scout_bridge"
+        config_file="install/ros_gz_lehrforst_sim/share/ros_gz_lehrforst_sim/config/scout_bumper_bridges.yaml"
+    >
+    </ros_gz_bridge>
+    <executable
+        cmd="ros2 run tf2_ros static_transform_publisher --x 0.25 --y 0 --z 0.26 --frame-id scout/chassis --child-frame-id scout/lidar_link/lidar_sensor"
+    />
+    <executable
+        cmd="bash install/ros_gz_lehrforst_sim/share/ros_gz_lehrforst_sim/scripts/unpause_world.sh"
+    />
+</launch>

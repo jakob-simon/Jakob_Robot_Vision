@@ -1,0 +1,90 @@
+<?xml version="1.0" ?>
+<sdf version="1.10">
+
+<world name="scout_lehrforst">
+
+
+  <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics">
+  </plugin>
+
+  <plugin
+            filename="gz-sim-user-commands-system"
+            name="gz::sim::systems::UserCommands"
+        >
+  </plugin>
+
+  <plugin
+            filename="gz-sim-scene-broadcaster-system"
+            name="gz::sim::systems::SceneBroadcaster"
+        >
+  </plugin>
+
+  <plugin
+            filename="gz-sim-sensors-system"
+            name="gz::sim::systems::Sensors"
+        >
+    <render_engine>ogre2</render_engine>
+  </plugin>
+
+
+  <physics name="2ms" type="ignored">
+    <max_step_size>0.002</max_step_size>
+    <real_time_factor>1.0</real_time_factor>
+  </physics>
+
+
+  <light type="directional" name="sun">
+    <cast_shadows>false</cast_shadows>
+    <pose>0 0 10 0 0 0</pose>
+    <diffuse>0.8 0.8 0.8 1</diffuse>
+    <specular>0.2 0.2 0.2 1</specular>
+    <attenuation>
+      <range>1000</range>
+      <constant>0.9</constant>
+      <linear>0.01</linear>
+      <quadratic>0.001</quadratic>
+    </attenuation>
+    <direction>-0.5 0.1 -0.9</direction>
+  </light>
+
+
+  <scene>
+    <ambient>1 1 1</ambient>
+    <grid>false</grid>
+  </scene>
+
+  <gui fullscreen="0">
+    <camera name="user_camera">
+      <pose>9 -5 4.0 0 0.50 2.35</pose>
+      <view_controller>orbit</view_controller>
+      <projection_type>perspective</projection_type>
+    </camera>
+  </gui>
+
+
+  <model name="lehrforst">
+    <pose>42 0 0 0 0 0</pose>
+    <static>true</static>
+    <include merge="true">
+      <uri
+                >install/ros_gz_lehrforst_sim/share/ros_gz_lehrforst_sim/models/lehrforst</uri>
+    </include>
+  </model>
+
+  <include>
+    <name>soft_vegetation_contact_field</name>
+    <uri>install/ros_gz_lehrforst_sim/share/ros_gz_lehrforst_sim/models/soft_vegetation_contact_field</uri>
+    <pose>0 0 0 0 0 0</pose>
+  </include>
+
+  <model name='scout'>
+    <pose relative_to='world'>0 2.118 0 0 0 0</pose>
+    <include merge="true">
+      <uri
+                >install/ros_gz_lehrforst_sim/share/ros_gz_lehrforst_sim/models/scout_bumper</uri>
+    </include>
+  </model>
+
+</world>
+
+</sdf>

@@ -1,0 +1,405 @@
+<?xml version="1.0" ?>
+<sdf version="1.10" xmlns:xacro="http://ros.org/wiki/xacro">
+
+<model name='bunker' canonical_link='base_link'>
+
+  <xacro:property name="update_rate_odom" value="1" />
+  <xacro:property name="update_rate_imu" value="1" />
+  <xacro:property name="update_rate_pose" value="1" />
+  <xacro:property name="linear_speed" value="1" />
+  <xacro:property name="angular_speed" value="1" />
+
+  <!-- base_link -->
+
+  <link name='base_link'>
+    <pose relative_to='__model__'>0 0 1 0 0 0</pose>
+    <inertial auto="true">
+      <mass>130</mass>
+    </inertial>
+    <visual name='visual'>
+      <geometry>
+        <mesh><uri>meshes/base_link.STL</uri></mesh>
+      </geometry>
+      <material>
+        <ambient>0.25 0.25 0.25 1.0</ambient>
+        <diffuse>0.25 0.25 0.25 1.0</diffuse>
+        <specular>0.25 0.25 0.25 1.0</specular>
+      </material>
+    </visual>
+    <visual name='visual2'>
+      <geometry>
+        <mesh><uri>meshes/base2_Link.STL</uri></mesh>
+      </geometry>
+      <material>
+        <ambient>0.75 0.75 0.75 1.0</ambient>
+        <diffuse>0.75 0.75 0.75 1.0</diffuse>
+        <specular>0.75 0.75 0.75 1.0</specular>
+      </material>
+    </visual>
+    <!-- <visual name='visual_collision'>
+      <pose>0 0 -0.15 0 0 0</pose>
+      <geometry>
+        <box>
+          <size>0.95 0.4 0.2</size>
+        </box>
+      </geometry>
+      <material>
+        <ambient>0.75 0.75 0.75 1.0</ambient>
+        <diffuse>0.75 0.75 0.75 1.0</diffuse>
+        <specular>0.75 0.75 0.75 1.0</specular>
+      </material>
+    </visual> -->
+    <collision name='collision'>
+      <pose>0 0 -0.15 0 0 0</pose>
+      <geometry>
+        <box>
+          <size>0.95 0.4 0.2</size>
+        </box>
+      </geometry>
+    </collision>
+    <sensor name="imu_sensor" type="imu">
+      <always_on>true</always_on>
+      <update_rate>${update_rate_imu}</update_rate>
+      <visualize>true</visualize>
+      <topic>bunker/imu</topic>
+    </sensor>
+  </link>
+
+  <!-- wheels -->
+
+  <xacro:macro name="wheel" params="N m R W P X Y Z r p y">
+    <link name="wheel${N}_Link">
+      <pose relative_to="base_link">${X} ${Y} ${Z} ${r} ${p} ${y}</pose>
+      <inertial auto="true">
+        <mass>${m}</mass>
+      </inertial>
+      <visual name='visual'>
+        <pose relative_to="base_link">${X} ${Y} ${Z} ${r} ${p} ${y}</pose>
+        <geometry>
+          <mesh><uri>meshes/wheel${N}_Link.STL</uri></mesh>
+        </geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 1.0</ambient>
+          <diffuse>0.5 0.5 0.5 1.0</diffuse>
+          <specular>0.5 0.5 0.5 1.0</specular>
+        </material>
+      </visual>
+      <!-- <visual name='visual_collision'>
+        <pose relative_to="base_link">${X} ${Y+P} ${Z} ${r} ${p} ${y}</pose>
+        <geometry>
+          <cylinder>
+            <radius>${R}</radius>
+            <length>${W}</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 1.0</ambient>
+          <diffuse>0.5 0.5 0.5 1.0</diffuse>
+          <specular>0.5 0.5 0.5 1.0</specular>
+        </material>
+      </visual> -->
+      <collision name='collision'>
+        <pose relative_to="base_link">${X} ${Y+P} ${Z} ${r} ${p} ${y}</pose>
+        <geometry>
+          <cylinder>
+            <radius>${R}</radius>
+            <length>${W}</length>
+          </cylinder>
+        </geometry>
+      </collision>
+    </link>
+    <joint name="wheel${N}_joint" type="revolute">
+      <pose relative_to='wheel${N}_Link' />
+      <parent>base_link</parent>
+      <child>wheel${N}_Link</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+      </axis>
+    </joint>
+  </xacro:macro>
+
+  <xacro:wheel
+            N='1'
+            R='0.05'
+            W='0.15'
+            P='-0.075'
+            m='2'
+            X='0.44403'
+            Y='0.3495'
+            Z='-0.12853'
+            r='1.5708'
+            p='0.0'
+            y='-3.1416'
+        />
+  <xacro:wheel
+            N='1.1'
+            R='0.04'
+            W='0.15'
+            P='-0.075'
+            m='1'
+            X='0.37551'
+            Y='0.3495'
+            Z='-0.22305'
+            r='1.5708'
+            p='0.0'
+            y='-3.1416'
+        />
+  <xacro:wheel
+            N='1.2'
+            R='0.05'
+            W='0.15'
+            P='-0.075'
+            m='1'
+            X='0.29039'
+            Y='0.3495'
+            Z='-0.28104'
+            r='1.5708'
+            p='0.0'
+            y='-3.1416'
+        />
+  <xacro:wheel
+            N='1.3'
+            R='0.05'
+            W='0.15'
+            P='-0.075'
+            m='1'
+            X='0.29603'
+            Y='0.3495'
+            Z='-0.087'
+            r='1.5708'
+            p='0.0'
+            y='-3.1416'
+        />
+  <xacro:wheel
+            N='2'
+            R='0.05'
+            W='0.15'
+            P='0.075'
+            m='2'
+            X='0.44403'
+            Y='-0.3495'
+            Z='-0.12853'
+            r='1.5708'
+            p='0.0'
+            y='-3.1416'
+        />
+  <xacro:wheel
+            N='2.1'
+            R='0.04'
+            W='0.15'
+            P='0.075'
+            m='1'
+            X='0.37551'
+            Y='-0.3495'
+            Z='-0.22305'
+            r='1.5708'
+            p='0.0'
+            y='-3.1416'
+        />
+  <xacro:wheel
+            N='2.2'
+            R='0.05'
+            W='0.15'
+            P='0.075'
+            m='1'
+            X='0.29039'
+            Y='-0.3495'
+            Z='-0.28104'
+            r='1.5708'
+            p='0.0'
+            y='-3.1416'
+        />
+  <xacro:wheel
+            N='2.3'
+            R='0.05'
+            W='0.15'
+            P='0.075'
+            m='1'
+            X='0.29603'
+            Y='-0.3495'
+            Z='-0.087'
+            r='1.5708'
+            p='0.0'
+            y='-3.1416'
+        />
+  <xacro:wheel
+            N='3'
+            R='0.075'
+            W='0.15'
+            P='-0.025'
+            m='8'
+            X='-0.38871'
+            Y='0.295'
+            Z='-0.19381'
+            r='1.5708'
+            p='0.0'
+            y='-3.1416'
+        />
+  <xacro:wheel
+            N='3.1'
+            R='0.05'
+            W='0.15'
+            P='-0.075'
+            m='1'
+            X='-0.23111'
+            Y='0.3495'
+            Z='-0.27671'
+            r='1.5708'
+            p='0.0'
+            y='-3.1416'
+        />
+  <xacro:wheel
+            N='3.2'
+            R='0.05'
+            W='0.15'
+            P='-0.075'
+            m='1'
+            X='0.043885'
+            Y='0.3495'
+            Z='-0.27671'
+            r='1.5708'
+            p='0.0'
+            y='-3.1416'
+        />
+  <xacro:wheel
+            N='3.3'
+            R='0.05'
+            W='0.15'
+            P='-0.075'
+            m='1'
+            X='-0.28597'
+            Y='0.3495'
+            Z='-0.087'
+            r='1.5708'
+            p='0.0'
+            y='-3.1416'
+        />
+  <xacro:wheel
+            N='4'
+            R='0.075'
+            W='0.15'
+            P='0.025'
+            m='8'
+            X='-0.38871'
+            Y='-0.295'
+            Z='-0.19381'
+            r='1.5708'
+            p='0.0'
+            y='-3.1416'
+        />
+  <xacro:wheel
+            N='4.1'
+            R='0.05'
+            W='0.15'
+            P='0.075'
+            m='1'
+            X='-0.23111'
+            Y='-0.3495'
+            Z='-0.27671'
+            r='1.5708'
+            p='0.0'
+            y='-3.1416'
+        />
+  <xacro:wheel
+            N='4.2'
+            R='0.05'
+            W='0.15'
+            P='0.075'
+            m='1'
+            X='0.043885'
+            Y='-0.3495'
+            Z='-0.27671'
+            r='1.5708'
+            p='0.0'
+            y='-3.1416'
+        />
+  <xacro:wheel
+            N='4.3'
+            R='0.05'
+            W='0.15'
+            P='0.075'
+            m='1'
+            X='-0.28597'
+            Y='-0.3495'
+            Z='-0.087'
+            r='1.5708'
+            p='0.0'
+            y='-3.1416'
+        />
+
+  <!-- plugins -->
+
+  <plugin
+            filename="gz-sim-diff-drive-system"
+            name="gz::sim::systems::DiffDrive"
+        >
+    <left_joint>wheel1_joint</left_joint>
+    <left_joint>wheel1.1_joint</left_joint>
+    <left_joint>wheel1.2_joint</left_joint>
+    <left_joint>wheel1.3_joint</left_joint>
+    <left_joint>wheel3_joint</left_joint>
+    <left_joint>wheel3.1_joint</left_joint>
+    <left_joint>wheel3.2_joint</left_joint>
+    <left_joint>wheel3.3_joint</left_joint>
+    <right_joint>wheel2_joint</right_joint>
+    <right_joint>wheel2.1_joint</right_joint>
+    <right_joint>wheel2.2_joint</right_joint>
+    <right_joint>wheel2.3_joint</right_joint>
+    <right_joint>wheel4_joint</right_joint>
+    <right_joint>wheel4.1_joint</right_joint>
+    <right_joint>wheel4.2_joint</right_joint>
+    <right_joint>wheel4.3_joint</right_joint>
+    <odom_publish_frequency>${update_rate_odom}</odom_publish_frequency>
+    <topic>cmd_vel</topic>
+  </plugin>
+
+  <xacro:macro name="keymap" params="D L A">
+    <plugin
+                filename="gz-sim-triggered-publisher-system"
+                name="gz::sim::systems::TriggeredPublisher"
+            >
+      <input type="gz.msgs.Int32" topic="/keyboard/keypress">
+        <match field="data">${D}</match>
+      </input>
+      <output type="gz.msgs.Twist" topic="/cmd_vel">
+        linear: {x: ${L}}, angular: {z: ${A}}
+      </output>
+    </plugin>
+  </xacro:macro>
+  <!-- FrontArrowKey: drive frontward -->
+  <xacro:keymap D='16777235' L='${linear_speed}' A='0.0' />
+  <!-- BackArrowKey: drive backward -->
+  <xacro:keymap D='16777237' L='${(-linear_speed)}' A='0.0' />
+  <!-- LeftArrowKey: turn left -->
+  <xacro:keymap D='16777234' L='0.0' A='${angular_speed}' />
+  <!-- RightArrowKey: turn right -->
+  <xacro:keymap D='16777236' L='0.0' A='${(-angular_speed)}' />
+  <!-- s: stop -->
+  <xacro:keymap D='83' L='0.0' A='0.0' />
+
+  <plugin
+            filename="gz-sim-pose-publisher-system"
+            name="gz::sim::systems::PosePublisher"
+        >
+    <publish_link_pose>False</publish_link_pose>
+    <publish_visual_pose>False</publish_visual_pose>
+    <publish_collision_pose>False</publish_collision_pose>
+    <publish_sensor_pose>False</publish_sensor_pose>
+    <publish_model_pose>True</publish_model_pose>
+    <publish_nested_model_pose>True</publish_nested_model_pose>
+    <use_pose_vector_msg>False</use_pose_vector_msg>
+    <update_frequency>${update_rate_pose}</update_frequency>
+    <static_publisher>False</static_publisher>
+    <static_update_frequency>${update_rate_pose}</static_update_frequency>
+  </plugin>
+
+  <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu">
+  </plugin>
+
+</model>
+
+</sdf>
