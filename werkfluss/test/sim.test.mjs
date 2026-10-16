@@ -55,6 +55,7 @@ defTest('determinism', 8, 'Determinism: same seed ⇒ identical state hash after
 defTest('kpi', 9, 'KPIs numeric in [0,1], time monotonic, history consistent (§3.10, §3.11.9)');
 defTest('api', 10, 'API surface & actions: views, snapshot < 12 kB, triggerFault/repair, ack/resolve, addOrder … (§3.10)');
 defTest('realism', 11, 'Realism smoke over 24 h (warnings only)', { warnOnly: true });
+defTest('regress', 12, 'Regression: ghost-shift advice, announced/manual tool changes, tool break only while cutting, no task outlives its op, rework on last part, chronological op chain');
 
 function fail(key, msg, dedup) {
   const t = TB[key];
@@ -154,7 +155,17 @@ function mountedTools(st, m, mid) {
 // Routing-Definitionen {type, cutMinPerPart} sind keine Werkzeug-Instanzen
 const isRoutingTools = (arr) => Array.isArray(arr) && arr.length > 0 && arr.every((x) => x && typeof x === 'object' && 'cutMinPerPart' in x && !('used' in x) && !('life' in x));
 
-const partProgress = (m) => firstDef(m.partProgress, m.progress, (m.part && typeof m.part === 'object') ? m.part.progress : undefined);
+/** Teilefortschritt: explizites Feld, sonst aus dem Engine-Teil {rem, dur, sub} abgeleitet.
+ *  Ein reserviertes Teil (auch während des Einlegens) zählt als „mitten im Teil“ (> 0); kein Teil = 0. */
+function partProgress(m) {
+  const v = firstDef(m.partProgress, m.progress, (m.part && typeof m.part === 'object') ? m.part.progress : undefined);
+  if (v !== undefined) return v;
+  if (m.part === null) return 0;
+  if (m.part && typeof m.part === 'object' && num(m.part.rem) && num(m.part.dur) && m.part.dur > 0) {
+    return Math.min(0.998, Math.max(0.0005, 1 - m.part.rem / m.part.dur));
+  }
+  return undefined;
+}
 /** true = mitten im Teil, false = an einer Teilegrenze, null = unbekannt */
 function inPart(m, op) {
   const pp = partProgress(m);
@@ -178,6 +189,11 @@ function opInfo(st, m) {
   if (raw && typeof raw === 'object') {
     orderId = idOf(firstDef(raw.orderId, raw.order, raw.fa, raw.oid));
     seq = firstDef(raw.seq, raw.opSeq);
+    // Engine-Variante: {oid, idx} – idx = Index im Arbeitsplan
+    if (seq === undefined && num(raw.idx) && orderId != null) {
+      const rt = routingOf(st.orders ? st.orders[orderId] : undefined, orderId);
+      if (rt[raw.idx]) seq = rt[raw.idx].seq;
+    }
   } else if (typeof raw === 'string' && raw) {
     for (const oid of Object.keys(st.orders || {})) {
       if (raw.startsWith(oid)) { orderId = oid; const mm = /(\d+)\s*$/.exec(raw.slice(oid.length)); if (mm) seq = Number(mm[1]); break; }
@@ -266,12 +282,14 @@ const taskTypeOf = (tk) => tk ? String(firstDef(tk.type, tk.kind, '')) : '';
 const taskStationOf = (tk) => tk ? idOf(firstDef(tk.machine, tk.machineId, tk.station, tk.stationId, tk.target, tk.at)) : undefined;
 const skillsOf = (p, pid) => firstDef(p.skills, P_PERSON[pid] && P_PERSON[pid].skills) || [];
 const shiftOf = (p, pid) => firstDef(p.shift, P_PERSON[pid] && P_PERSON[pid].shift);
-function qualified(skills, tk) {
+function qualified(skills, tk, pid) {
   const type = taskTypeOf(tk).toLowerCase(), sk = new Set(skills);
-  const stn = STATION[taskStationOf(tk)], own = !!(stn && stn.skill && sk.has(stn.skill));
+  const sid = taskStationOf(tk), stn = STATION[sid], own = !!(stn && stn.skill && sk.has(stn.skill));
+  const assigned = !!(pid && P_PERSON[pid] && (P_PERSON[pid].machines || []).includes(sid));
   switch (type) {
     case 'setup': case 'correction': case 'load': return sk.has('setup') || own;
-    case 'toolchange': return sk.has('toolchange') || sk.has('setup');
+    // Wendeplatte/Werkzeug an der eigenen Maschine wechseln darf auch der dafür qualifizierte Stammbediener
+    case 'toolchange': return sk.has('toolchange') || sk.has('setup') || (own && assigned);
     case 'fpi': case 'inspect': return sk.has('qs');
     case 'repair': return sk.has('repair');
     case 'forklift': case 'bars': return sk.has('forklift');
@@ -384,7 +402,7 @@ function newCtx(name) {
   return {
     name, active: true, t0: null, lastT: null, lastEvT: -Infinity, nEvents: 0, nStateEvents: 0, typeCounts: {},
     initState: {}, lastTo: {}, curState: {}, enterT: {}, chunkSeg: {}, flap: {},
-    obs: {}, toolLast: {}, markT: {}, lastFaultT: {}, lastSetupT: {}, lastPlannedT: {},
+    obs: {}, toolLast: {}, markT: {}, lastFaultT: {}, lastSetupT: {}, lastPlannedT: {}, plannedTool: {},
     personTask: {}, lastObsT: {}, lastTaskSeen: {}, qualChecked: new Set(),
     prevOps: {}, doneChecked: {}, orderSig: {}, orderProgT: {}, machProgT: {}, contSig: {},
     night: {}, trSeen: new Map(), trEvents: { AGV: 0, Stapler: 0 }, extSeen: new Set(), extReturned: new Set(),
@@ -437,7 +455,7 @@ function handleEvent(ctx, e) {
   const mid = machineOfEvent(st, e);
   if (type === 'state') onStateEvent(ctx, e, st, t);
   else if (type === 'toolChanged') { ctx.markT[mid || '*'] = t; onToolChanged(ctx, e, st, t, mid); }
-  else if (type === 'toolPlanned') { ctx.count.toolPlanned++; if (mid) ctx.lastPlannedT[mid] = t; }
+  else if (type === 'toolPlanned') { ctx.count.toolPlanned++; if (mid) ctx.lastPlannedT[mid] = t; if (e.data && e.data.toolId) ctx.plannedTool[e.data.toolId] = t; }
   if (type !== 'state' && /fault|störung|alarm|toolbreak|bruch/i.test(type) && mid) { ctx.lastFaultT[mid] = t; ctx.markT[mid] = t; }
   if (type !== 'state' && /setup|rüst/i.test(type) && mid) { ctx.lastSetupT[mid] = t; ctx.markT[mid] = t; }
   if (/transport|deliver|drop|pickup|abgel/i.test(type) && e.data) { const md = trMode(e.data); if (md === 'AGV' || md === 'Stapler') ctx.trEvents[md]++; }
@@ -591,6 +609,13 @@ function checkChangeWasDue(ctx, st, m, mid, e, t) {
   if (m.state === 'setup' || (ctx.lastSetupT[mid] ?? -Infinity) >= pre.t) return;
   if ((ctx.lastFaultT[mid] ?? -Infinity) >= pre.t - 3 * H || m.state === 'fault') return;   // Bruch / Störung
   const d = e.data || {};
+  // Jedes getauschte Werkzeug muss vorher angekündigt sein (Ereignis toolPlanned für genau dieses Werkzeug) – sonst
+  // „zeigt 65 %, dann plötzlich getauscht“ (Regression: Mitwechseln ohne Ankündigung)
+  if (Array.isArray(d.tools)) for (const x of d.tools) {
+    if (!x || !x.oldToolId || /bruch/i.test(String(x.reason || ''))) continue;
+    ok('tools');
+    if (!(num(ctx.plannedTool[x.oldToolId]) && ctx.plannedTool[x.oldToolId] <= t)) fail('tools', `${at(t)} ${mid}: tool ${x.oldToolId} (${x.typeId}) swapped (${x.reason}) without a preceding toolPlanned event for this tool – unannounced swap`, 'unannounced:' + mid + ':' + x.typeId);
+  }
   if (d.toolBreak || /bruch|break/i.test(String(firstDef(d.cause, d.reason, '')) + ' ' + String(e.msg || ''))) return;
   const cur = opTools(st, m, mid, op);
   if (!cur) return;
@@ -605,6 +630,14 @@ function checkChangeWasDue(ctx, st, m, mid, e, t) {
     if (!req || !num(req.cutMinPerPart) || !num(p.used) || !num(p.life)) continue;
     const remPre = Math.floor((p.life - p.used) / req.cutMinPerPart + 1e-9);
     ok('tools');
+    // angekündigtes Mitwechseln (≤ 25 % Reststandzeit, zweiter Stopp vermieden) bzw. beauftragter vorbeugender Wechsel ist erklärt
+    const rec = Array.isArray(d.tools) ? d.tools.find((x) => x && x.oldToolId === p.id) : null;
+    const announced = rec && num(ctx.plannedTool[p.id]);
+    if (announced && rec.manual) continue;
+    if (announced && rec.bundled) {
+      if (num(rec.wearPct) && rec.wearPct < 60) fail('tools', `${at(t)} ${mid}: tool ${p.id} (${p.type}) 'mitgewechselt' at only ${rec.wearPct} % wear (rule: ≤ 35 % remaining life)`, 'bundlewaste:' + mid + ':' + p.type);
+      continue;
+    }
     if (remPre - maxParts > PLAN_AT) {
       fail('tools', `${at(t)} ${mid}: tool ${p.id} (${p.type}) swapped while it still had ≥ ${remPre - maxParts} parts of life (wear ${pctStr(p.used, p.life)} at ${clk(pre.t)}; rule: change when remainingParts ≤ ${PLAN_AT}) – no fault/setup explains it`, 'early:' + mid + ':' + p.type);
     }
@@ -661,6 +694,9 @@ function checkMachines(ctx, st, t) {
         else {
           for (const ty of ot.missingTypes) fail('running', `${at(t)} ${mid} is running ${op.key} without a mounted tool of type ${ty}`, 'nomount:' + mid + ty);
           if (inPart(m, op) !== false) {
+            // ein gebrochenes Werkzeug schneidet nie (Werkzeugbruch nur während der Bearbeitung → Teil Ausschuss, Wechsel)
+            const cutting = !(m.part && typeof m.part === 'object' && m.part.sub === 'load');
+            for (const it of ot.items) if (cutting && it.tool && it.tool.broken) fail('running', `${at(t)} ${mid} running ${op.key} with broken tool ${it.id} (${it.type})`, 'broken:' + mid + it.type);
             for (const [ty, best] of bestByType(ot.items)) {
               if (!num(best.rest) || !num(best.cut)) { missing('running', 'tool used/life or cutMinPerPart'); continue; }
               ok('running');
@@ -759,6 +795,8 @@ function checkQty(ctx, st, t) {
     if (!ops.some((x) => x.done !== undefined)) { missing('qty', 'order op counters (order.ops[seq].done)'); continue; }
     const prev = ctx.prevOps[oid] || (ctx.prevOps[oid] = {});
     let scrapSum = 0, prevDone = null, prevSeq = null;
+    // Ausschuss im ersten Arbeitsgang wird aus Rohmaterial nachgefertigt (Teile kommen aus dem Lager, nicht „aus dem Nichts“)
+    const scrapFirst = ops.length && num(ops[0].scrap) ? ops[0].scrap : 0;
     for (const x of ops) {
       const d = x.done, s = num(x.scrap) ? x.scrap : 0;
       if (x.scrap !== undefined && (!num(x.scrap) || x.scrap < 0 || !Number.isInteger(x.scrap))) fail('qty', `${at(t)} ${oid} op ${x.seq}: scrap = ${x.scrap} (must be a non-negative integer)`, 'sneg:' + oid + x.seq);
@@ -782,25 +820,58 @@ function checkQty(ctx, st, t) {
     const shippedCounter = firstDef(o.shipped, o.delivered, versOp && versOp.done);
     const shipped = Math.max(b.versand, num(shippedCounter) ? shippedCounter : 0);
     const ip = inProc[oid] || 0;
-    const total = b.wip + shipped + scrapSum;
+    const total = b.wip + shipped + scrapSum, cap = qty + scrapFirst;
     ok('qty');
-    if (total > qty) fail('qty', `${at(t)} ${oid}: shipped/at VERSAND ${shipped} + WIP containers ${b.wip} + scrap ${scrapSum} = ${total} > qty ${qty} [${b.list.slice(0, 6).join(', ')}${b.list.length > 6 ? ', …' : ''}]`, 'tot:' + oid);
-    else if (total + ip > qty) warn('qty', `${at(t)} ${oid}: containers + scrap + ${ip} part(s) in machines = ${total + ip} > qty ${qty} – input part counted twice (reserved in container and in machine)?`, 'totip:' + oid);
+    if (total > cap) fail('qty', `${at(t)} ${oid}: shipped/at VERSAND ${shipped} + WIP containers ${b.wip} + scrap ${scrapSum} = ${total} > qty ${qty}${scrapFirst ? ' + ' + scrapFirst + ' replacement(s) for op-1 scrap' : ''} [${b.list.slice(0, 6).join(', ')}${b.list.length > 6 ? ', …' : ''}]`, 'tot:' + oid);
+    else if (total + ip > cap) warn('qty', `${at(t)} ${oid}: containers + scrap + ${ip} part(s) in machines = ${total + ip} > ${cap} – input part counted twice (reserved in container and in machine)?`, 'totip:' + oid);
+    checkOpBalance(ctx, st, t, o, oid);
     if (isDone(o)) {
-      if (!ctx.seenFertig.has(oid)) { ctx.seenFertig.add(oid); note('qty', `${oid} fertig at ${clk(t)}: shipped ${shipped || (ops.filter((x) => x.station !== 'VERSAND').pop() || {}).done}, scrap ${scrapSum}, qty ${qty}`); }
+      if (!ctx.seenFertig.has(oid)) { ctx.seenFertig.add(oid); note('qty', `${oid} fertig at ${clk(t)}: shipped ${shipped || (ops.filter((x) => x.station !== 'VERSAND').pop() || {}).done}, scrap ${scrapSum}${scrapFirst ? ' (' + scrapFirst + ' in op 1, replaced)' : ''}, qty ${qty}`); }
       if (!ctx.doneChecked[oid]) {
         ctx.doneChecked[oid] = t;
         const lastProc = ops.filter((x) => x.station !== 'VERSAND').pop();
         const fin = shipped || (lastProc && num(lastProc.done) ? lastProc.done : 0);
-        if (fin + scrapSum === qty) ok('qty');
-        else if (fin === qty && scrapSum > 0) warn('qty', `${oid} fertig: shipped ${fin} = qty although ${scrapSum} scrapped – replacement parts produced (shipped + scrap = ${fin + scrapSum} ≠ qty)`, 'repl:' + oid);
-        else fail('qty', `${at(t)} ${oid} is 'fertig' but shipped ${fin} + scrap ${scrapSum} = ${fin + scrapSum} ≠ qty ${qty}`, 'fin:' + oid);
+        const scrapDown = scrapSum - scrapFirst;   // Ausschuss in Folgearbeitsgängen fehlt in der Liefermenge
+        if (fin + scrapDown === qty) ok('qty');
+        else fail('qty', `${at(t)} ${oid} is 'fertig' but shipped ${fin} + downstream scrap ${scrapDown} = ${fin + scrapDown} ≠ qty ${qty} (op-1 scrap ${scrapFirst} is re-made)`, 'fin:' + oid);
         if (b.wip > 0) fail('qty', `${at(t)} ${oid} is 'fertig' but ${b.wip} parts are still in containers outside VERSAND [${b.list.join(', ')}]`, 'finwip:' + oid);
         const busy = MACHINE_IDS_LIST.filter((mid) => { const m = st.machines[mid]; return m && ACTIVE_WORK.has(m.state) && opInfo(st, m).orderId === oid; });
         if (busy.length) fail('qty', `${at(t)} ${oid} is 'fertig' while ${busy.join(', ')} still work on it`, 'finbusy:' + oid);
       }
     }
   }
+}
+
+/** SPEC §3.11.3 wörtlich, je Arbeitsgang (Felder der Engine: op.received/good/scrap/inProc/passed,
+ *  Behälter {orderId, src (Quell-AG-Index), idx (Ziel-AG-Index), state, relocate}):
+ *    erhalten = gut + Ausschuss + in Bearbeitung + wartend
+ *    gut = weitergegeben + im Ausgangspuffer
+ *    weitergegeben = beim Nachfolger erhalten + unterwegs */
+function checkOpBalance(ctx, st, t, o, oid) {
+  const ops = Array.isArray(o.ops) ? o.ops : null;
+  if (!ops || !ops.length || !['received', 'passed', 'inProc'].every((k) => num(ops[0][k]))) { missing('qty', 'op.received / op.passed / op.inProc (§3.11.3 balance)'); return; }
+  const rt = routingOf(o, oid);
+  const waiting = {}, out = {}, transit = {};
+  for (const cid of Object.keys(st.containers || {})) {
+    const c = st.containers[cid];
+    if (!c || cOrder(c) !== oid || !num(c.idx)) continue;
+    const q = num(cQty(c)) ? cQty(c) : 0;
+    if (c.state === 'input') waiting[c.idx] = (waiting[c.idx] || 0) + q;
+    if (num(c.src) && c.src >= 0) {
+      if ((c.state === 'filling' || c.state === 'ready') && !c.relocate) out[c.src] = (out[c.src] || 0) + q;
+      if (c.state === 'transit' || (c.state === 'ready' && c.relocate)) transit[c.src] = (transit[c.src] || 0) + q;
+    }
+  }
+  ops.forEach((op, i) => {
+    const r = rt[i] || {};
+    if (r.station === 'VERSAND') return;
+    ok('qty', 3);
+    const w = waiting[i] || 0, where = `${at(t)} ${oid} AG ${r.seq} (${r.station})`;
+    if (op.received !== op.good + op.scrap + op.inProc + w) fail('qty', `${where}: received ${op.received} ≠ good ${op.good} + scrap ${op.scrap} + in process ${op.inProc} + waiting ${w}`, 'bal-recv:' + oid + r.seq);
+    if (op.good !== op.passed + (out[i] || 0)) fail('qty', `${where}: good ${op.good} ≠ passed on ${op.passed} + in output buffer ${out[i] || 0}`, 'bal-good:' + oid + r.seq);
+    if (i + 1 < ops.length && op.passed !== ops[i + 1].received + (transit[i] || 0)) fail('qty', `${where}: passed on ${op.passed} ≠ received by AG ${rt[i + 1] && rt[i + 1].seq} ${ops[i + 1].received} + in transit ${transit[i] || 0}`, 'bal-pass:' + oid + r.seq);
+    if (op.inProc < 0 || op.passed < 0 || op.received < 0) fail('qty', `${where}: negative counter (received ${op.received}, inProc ${op.inProc}, passed ${op.passed})`, 'bal-neg:' + oid + r.seq);
+  });
 }
 
 // ------------------------------------------------------------------ Test 4: Material, AGV, Transporte
@@ -817,7 +888,9 @@ function checkStock(ctx, st, t) {
   }
   for (const mid of MACHINE_IDS_LIST) {
     const m = st.machines && st.machines[mid];
-    if (m && m.barStockM !== undefined) { ok('stock'); if (!num(m.barStockM) || m.barStockM < -1e-9) fail('stock', `${at(t)} ${mid} barStockM = ${m.barStockM} < 0`, 'bar:' + mid); }
+    // null = Maschine ohne Stangenlader (nicht zutreffend)
+    if (m && m.barStockM !== undefined && m.barStockM !== null) { ok('stock'); if (!num(m.barStockM) || m.barStockM < -1e-9) fail('stock', `${at(t)} ${mid} barStockM = ${m.barStockM} < 0`, 'bar:' + mid); }
+    if (m && m.barStockM != null && num(m.barMagazineM) && m.barMagazineM > 0 && m.barStockM > m.barMagazineM + 1e-6) fail('stock', `${at(t)} ${mid} barStockM ${f2(m.barStockM)} m > magazine capacity ${m.barMagazineM} m`, 'barcap:' + mid);
   }
   if (st.toolStock) for (const k of Object.keys(st.toolStock)) {
     const s = st.toolStock[k] || {};
@@ -886,7 +959,7 @@ function checkPeople(ctx, st, t) {
       const qk = pid + '|' + key;
       if (!ctx.qualChecked.has(qk)) {
         ctx.qualChecked.add(qk);
-        if (qualified(skillsOf(p, pid), tk) === false) warn('people', `${pid} (${name}, ${P_PERSON[pid] ? P_PERSON[pid].role : '?'}) got task '${taskTypeOf(tk)}' at ${taskStationOf(tk)} without matching skill`, 'qual:' + pid + taskTypeOf(tk));
+        if (qualified(skillsOf(p, pid), tk, pid) === false) warn('people', `${pid} (${name}, ${P_PERSON[pid] ? P_PERSON[pid].role : '?'}) got task '${taskTypeOf(tk)}' at ${taskStationOf(tk)} without matching skill`, 'qual:' + pid + taskTypeOf(tk));
       }
     }
     if (p.state === 'offShift' && key) fail('people', `${at(t)} ${pid} (${name}) is offShift but still holds task ${key} (${taskTypeOf(tk)}) – it can never finish`, 'offtask:' + pid);
@@ -925,7 +998,11 @@ function checkKpi(ctx, t) {
   for (const f of ['oee', 'availability', 'performance', 'quality', 'fpy']) {
     const v = k[f];
     if (v === undefined) fail('kpi', `kpis().${f} missing (§3.10)`, 'kmiss:' + f);
-    else if (v === null) warn('kpi', `kpis().${f} is null at ${clk(t)} (no data yet?) – UI must cope`, 'knull:' + f);
+    else if (v === null) {
+      // dokumentiert: OEE/Verfügbarkeit/Leistung sind null, solange heute keine Bezugszeit angefallen ist (z. B. nachts)
+      if ((f === 'oee' || f === 'availability' || f === 'performance') && !(num(k.availability) && k.availability > 0 && f === 'oee')) ok('kpi');
+      else warn('kpi', `kpis().${f} is null at ${clk(t)} (no data yet?) – UI must cope`, 'knull:' + f);
+    }
     else if (!num(v) || v < -1e-9 || v > 1 + 1e-9) fail('kpi', `${at(t)} kpis().${f} = ${v} is not a number in [0,1]`, 'krange:' + f);
     else ok('kpi');
   }
@@ -1035,6 +1112,7 @@ function chunkCheck(ctx, dtExpected) {
   guard('segments', () => checkOngoingSegments(ctx, st, t));
   guard('transports', () => sampleTransports(ctx, st));
   guard('buffers', () => checkBuffers(ctx, st, t));
+  guard('stale tasks', () => checkStaleTasks(st, t, 'chunk'));
 }
 
 // ------------------------------------------------------------------ Test 8: Projektion / Hash
@@ -1125,7 +1203,16 @@ function checkToolView(st, mid, v, t) {
       const exp = Math.floor((l - u) / req.cutMinPerPart + 1e-9);
       ok('tools');
       if (rp !== exp) fail('tools', `${at(t)} machineView('${mid}') shows tool ${id || ty} 'noch ${rp} Teile' but floor((life−used)/cutMinPerPart) = ${exp}`, 'vrp:' + mid + (id || ty));
-      if (exp <= PLAN_AT && !firstDef(vt.planned, vt.plan, vt.changeAt, vt.changePlanned, vt.nextChange)) warn('tools', `machineView: tool with remainingParts ≤ ${PLAN_AT} shows no planned change (SPEC §3.4 'Wechsel nach Teil … ca. hh:mm')`, 'vplan');
+      // ≤ planAtParts: entweder ein geplanter Wechsel („nach Teil N · ca. hh:mm“) oder eine sichtbare Begründung
+      // (Reststandzeit reicht für den Rest des Arbeitsgangs / wird gerade gewechselt)
+      const plan = firstDef(vt.plannedChange, vt.planned, vt.plan, vt.changeAt, vt.changePlanned, vt.nextChange);
+      if (exp <= PLAN_AT && !plan && vt.status !== 'changing' && !(typeof vt.explain === 'string' && vt.explain.trim())) warn('tools', `machineView: tool with remainingParts ≤ ${PLAN_AT} shows neither a planned change nor an explanation (SPEC §3.4 'Wechsel nach Teil … ca. hh:mm')`, 'vplan');
+      if (plan && typeof plan === 'object' && num(plan.afterPart)) {
+        ok('tools');
+        const done = opCount(st, op);
+        if (num(done) && plan.afterPart < done) fail('tools', `${at(t)} machineView('${mid}') plans the change of ${id || ty} 'nach Teil ${plan.afterPart}' although ${done} parts are already done`, 'vpast:' + mid + (id || ty));
+        if (num(plan.etaT) && plan.etaT < t - 60) warn('tools', `${at(t)} machineView('${mid}') shows planned change of ${id || ty} at ${clk(plan.etaT)} in the past`, 'vpastt:' + mid);
+      }
     }
   }
 }
@@ -1139,7 +1226,11 @@ function viewChecks(ctx, t, opts = {}) {
     if (!v || typeof v !== 'object') { fail('api', `machineView('${mid}') returned ${short(v)}`, 'mv:' + mid); continue; }
     ok('api');
     guard('tool view', () => checkToolView(st, mid, v, t));
-    if (opts.oee) { const oee = firstDef(v.oee, v.oeeToday, v.kpi && v.kpi.oee); if (num(oee)) opts.oee[mid] = oee; }
+    if (opts.oee) {
+      let oee = firstDef(v.oee, v.oeeToday, v.kpi && v.kpi.oee);
+      if (oee && typeof oee === 'object') oee = oee.oee;          // Engine: oeeToday {oee, availability, performance, quality}
+      if (num(oee)) opts.oee[mid] = oee;
+    }
   }
   for (const oid of Object.keys(st.orders || {})) {
     if (typeof SIM.orderView !== 'function') break;
@@ -1364,19 +1455,21 @@ function evaluateRealism(r, oee, ctx) {
   if (!r) { warn('realism', 'no 24 h realism snapshot (run aborted early)'); return; }
   note('realism', `first 24 h: toolChanged ${r.toolChanged} (planned ${r.toolPlanned}), setups ${r.setup}, first-piece ${r.fpi}, faults ${r.faults}, AGV transports ${r.agv} (done ${r.agvDone}), forklift ${r.stapler} (done ${r.stapDone}), ext out ${r.extOut} / returns ${r.extIn}, ghost-shift samples ${r.ghostRun}`);
   const need = [['toolChanged', 3, 'tool changes'], ['setup', 3, 'setups'], ['fpi', 2, 'first-piece inspections'], ['agv', 5, 'AGV transports'], ['stapler', 2, 'forklift transports'], ['extIn', 1, 'returns from external hardening']];
-  for (const [k, n, label] of need) if (!(r[k] >= n)) warn('realism', `only ${r[k]} ${label} in the first 24 h (expected ≥ ${n})`, 'rz:' + k);
-  if (!(r.faults >= 1)) warn('realism', 'no machine fault in 24 h (13 machines, MTBF 35–60 h → several expected)', 'rz:fault');
-  if (!(r.ghostRun > 0)) warn('realism', "no 'auto' machine ran while nobody was in the hall (Geisterschicht §3.1)", 'rz:ghost');
+  for (const [k, n, label] of need) { if (!(r[k] >= n)) warn('realism', `only ${r[k]} ${label} in the first 24 h (expected ≥ ${n})`, 'rz:' + k); else ok('realism'); }
+  if (!(r.faults >= 1)) warn('realism', 'no machine fault in 24 h (13 machines, MTBF 35–60 h → several expected)', 'rz:fault'); else ok('realism');
+  if (!(r.ghostRun > 0)) warn('realism', "no 'auto' machine ran while nobody was in the hall (Geisterschicht §3.1)", 'rz:ghost'); else ok('realism');
   const out = [];
   for (const mid of MACHINE_IDS_LIST) {
     if (STATION[mid].kind !== 'machine') continue;
     let v = oee[mid], src = 'machineView.oee';
     if (!num(v)) { const s = ctx.staffedSamples[mid] || {}; const tot = Object.values(s).reduce((a, b) => a + b, 0); v = tot ? (s.running || 0) / tot : NaN; src = 'running share'; }
-    if (num(v) && (v < 0.25 || v > 0.95)) out.push(`${mid} ${(v * 100).toFixed(0)} %`);
+    if (num(v) && (v < 0.25 || v > 0.95)) out.push(`${mid} ${(v * 100).toFixed(0)} %`); else if (num(v)) ok('realism');
     if (num(v) && (v < -1e-9 || v > 1 + 1e-9)) warn('kpi', `machineView('${mid}').oee = ${v} outside [0,1] (fmtPct expects 0..1)`, 'moee:' + mid);
     if (src === 'running share') warn('realism', 'machineView(id).oee missing – realism uses the sampled running share instead', 'oeesrc');
   }
-  if (out.length) warn('realism', `machine OEE outside 25–95 %: ${out.join(', ')}`, 'oee');
+  if (out.length) warn('realism', `machine OEE${ctx.oeeDay ? ' (Mo 00:00–23:50)' : ''} outside 25–95 %: ${out.join(', ')}`, 'oee');
+  const ov = MACHINE_IDS_LIST.filter((mid) => num(oee[mid])).map((mid) => `${mid} ${(oee[mid] * 100).toFixed(0)}`).join(' · ');
+  if (ov) note('realism', `machine OEE %${ctx.oeeDay ? ' Mo (first production day)' : ''}: ${ov}`);
   const st = ctx.stateSamples, never = MACHINE_IDS_LIST.filter((mid) => STATION[mid].kind === 'machine' && !(st[mid] && st[mid].running));
   if (never.length) warn('realism', `machines never seen 'running' in the whole run: ${never.join(', ')}`, 'neverrun');
 }
@@ -1556,6 +1649,235 @@ function apiPhase(ctx) {
   void st0;
 }
 
+// ------------------------------------------------------------------ Test 12: Regressionen aus dem Review (Engine-Interna)
+// Diese Szenarien nutzen bewusst Engine-Interna (state.tasks, machine.tasks, machine.toolchange …), um die behobenen
+// Fehlerklassen festzunageln: Geisterschicht-Empfehlung, angekündigte Werkzeugwechsel, Werkzeugbruch nur beim Schneiden,
+// keine Aufgabe überlebt ihren Arbeitsgang, Erstteil-Nacharbeit am letzten Teil, chronologische Auftragskette.
+const OPKEYS = ['setup', 'corr', 'load', 'fpi', 'tc', 'offset'];
+/** Maschinenaufgaben, die zu einem anderen (beendeten/verlagerten) Arbeitsgang gehören bzw. ohne Arbeitsgang existieren */
+function staleTasks(st) {
+  const out = [];
+  for (const mid of MACHINE_IDS_LIST) {
+    const m = st.machines[mid]; if (!m || !m.tasks) continue;
+    for (const key of OPKEYS) {
+      const tid = m.tasks[key]; if (!tid) continue;
+      const tk = st.tasks && st.tasks[tid]; if (!tk || tk.orderId == null) continue;
+      if (key === 'tc' && m.toolchange) continue;
+      const op = m.op ? st.orders[m.op.oid] : null, seq = op ? op.routing[m.op.idx].seq : null;
+      if (!op || tk.orderId !== op.id || tk.seq !== seq) out.push(`${mid}.${key} ${tk.id} (${tk.orderId}/${tk.seq}, ${tk.status}${tk.assignee ? ' ' + tk.assignee : ''}) vs op ${op ? op.id + '/' + seq : '–'}`);
+    }
+  }
+  return out;
+}
+function checkStaleTasks(st, t, where) {
+  const s = staleTasks(st);
+  ok('regress');
+  if (s.length) fail('regress', `${at(t)} ${where}: machine task survives its operation – ${s[0]}${s.length > 1 ? ' (+' + (s.length - 1) + ')' : ''}`, 'stale:' + s[0].split(' ')[0]);
+  const errs = st.engineErrors || [];
+  if (errs.length) fail('regress', `${at(t)} engine error caught in a work step: ${errs[0].where} – ${errs[0].msg}`, 'engerr:' + errs[0].msg);
+}
+function checkOrderChain(t) {
+  for (const oid of Object.keys(S().orders)) {
+    const ov = SIM.orderView(oid); if (!ov || !Array.isArray(ov.ops)) continue;
+    let ps = -Infinity, pe = -Infinity;
+    for (const op of ov.ops) {
+      ok('regress');
+      if (num(op.plannedEnd) && op.plannedEnd < pe - 1) { fail('regress', `${at(t)} orderView('${oid}') AG ${op.seq} plannedEnd ${clk(op.plannedEnd)} lies before the predecessor's end ${clk(pe)} – op chain not chronological`, 'chain:' + oid); break; }
+      if (num(op.plannedStart) && !op.complete && op.received === 0 && op.plannedStart < ps - 1) { fail('regress', `${at(t)} orderView('${oid}') AG ${op.seq} plannedStart before predecessor start`, 'chainS:' + oid); break; }
+      if (num(op.plannedEnd)) pe = Math.max(pe, op.plannedEnd);
+      if (num(op.plannedStart)) ps = Math.max(ps, op.plannedStart);
+    }
+  }
+}
+function regressionPhase() {
+  const A = SIM.actions;
+  const st = () => S();
+  const evs = []; const offEv = WF.bus.on('sim:event', (e) => evs.push(e));
+  const fresh = () => { evs.length = 0; SIM.init(PROFILE); };
+  const step1 = () => SIM.step();
+  const stepUntil = (pred, maxSec) => { for (let k = 0; k < maxSec; k++) { if (pred()) return true; step1(); } return pred(); };
+  const mv = (id) => SIM.machineView(id);
+  const scen = (name, fn) => { try { fn(); } catch (e) { warn('load', `test suite error in regression scenario ${name}: ${errStr(e)}`); } };
+  try {
+    scen('ghost', () => {
+    // ---- H1 Geisterschicht: Prognose stimmt, Aktion wechselt die begrenzenden Werkzeuge und verlängert die Laufzeit
+    fresh();
+    stepUntil(() => tod(st().t) === 21 * H + 5 && Math.floor(st().t / DAY) === 0, 20 * H);
+    const ghosts = vals(st().notifications).filter((n) => n.status !== 'resolved' && String(n.key).startsWith('ghost:'));
+    if (!ghosts.length) note('regress', 'no ghost-shift notice on Monday 21:00 – scenario not checked');
+    const g0 = ghosts.map((n) => ({ mid: n.key.split(':')[1], stopT: n.ghost && n.ghost.stopT, act: (n.actions || []).map((a) => a.action).find((a) => a.type === 'planToolChange'), sugg: n.suggestion }));
+    const stopOf = (mids, until) => { const r = {}; while (st().t < until) { step1(); for (const mid of mids) { const m = st().machines[mid]; if (r[mid] == null && (m.state === 'waitTool' || (m.state !== 'running' && m.state !== 'toolchange' && m.state !== 'firstPiece' && tod(st().t) >= 22 * H))) r[mid] = st().t; } } return r; };
+    const untilT = Math.floor(st().t / DAY) * DAY + DAY + 6 * H;
+    const stopsA = stopOf(g0.map((g) => g.mid), untilT);
+    for (const g of g0) {
+      ok('regress');
+      if (num(g.stopT) && num(stopsA[g.mid]) && Math.abs(stopsA[g.mid] - g.stopT) > 20 * MIN) fail('regress', `ghost notice ${g.mid} predicted stop ${clk(g.stopT)} but the machine stopped at ${clk(stopsA[g.mid])}`, 'ghostpred:' + g.mid);
+      if (!g.act && !/Schwesterwerkzeug|Nachtbemannung|Rufbereitschaft/.test(String(g.sugg))) fail('regress', `ghost notice ${g.mid} offers no action but does not explain why (suggestion: ${short(g.sugg)})`, 'ghostwhy:' + g.mid);
+    }
+    if (g0.some((g) => g.act)) {
+      fresh();
+      stepUntil(() => tod(st().t) === 21 * H + 5 && Math.floor(st().t / DAY) === 0, 20 * H);
+      for (const g of g0.filter((x) => x.act)) {
+        const r = SIM.runAction(g.act);
+        ok('regress');
+        if (!r || !r.ok) { fail('regress', `ghost action for ${g.mid} (${short(g.act)}) failed: ${r && r.msg}`, 'ghostact:' + g.mid); continue; }
+        const v = mv(g.mid);
+        for (const ty of g.act.types || []) {
+          const tl = v.tools.find((x) => x.typeId === ty);
+          ok('regress');
+          if (!tl || tl.status !== 'planned' || !tl.plannedChange || !tl.manualOrder) fail('regress', `${g.mid}: after ordering the preventive change, machineView shows ${ty} as '${tl && tl.status}' / manualOrder ${short(tl && tl.manualOrder)} (expected 'planned' + manualOrder)`, 'manualview:' + ty);
+        }
+      }
+      const n0 = evs.length;
+      const stopsB = stopOf(g0.map((g) => g.mid), untilT);
+      for (const g of g0.filter((x) => x.act)) {
+        const changed = new Set();
+        for (const e of evs.slice(n0)) if (e.type === 'toolChanged' && e.entity && e.entity.id === g.mid && e.t < Math.floor(e.t / DAY) * DAY + 22 * H + 15 * MIN) for (const x of (e.data && e.data.tools) || []) changed.add(x.typeId);
+        ok('regress');
+        for (const ty of g.act.types) if (!changed.has(ty)) fail('regress', `ghost action for ${g.mid}: ${ty} was not changed before the ghost shift`, 'ghostnot:' + ty);
+        const a = stopsA[g.mid] ?? untilT, b = stopsB[g.mid] ?? untilT;
+        if (b < a + 20 * MIN) fail('regress', `ghost action for ${g.mid} did not extend the unattended run (stop ${clk(a)} → ${clk(b)})`, 'ghostgain:' + g.mid);
+        else note('regress', `ghost shift ${g.mid}: stop ${clk(a)} without, ${num(stopsB[g.mid]) ? clk(b) : 'none until 06:00'} with the recommended change (${g.act.types.join(', ')})`);
+      }
+    }
+
+    });
+    scen('announced', () => {
+    // ---- H2/H7 Jeder Werkzeugwechsel ist eine Sekunde vorher in machineView als 'planned'/'due'/'broken' sichtbar
+    fresh();
+    const m3 = st().machines.M03;
+    if (m3 && m3.op && m3.setupDone) {
+      const r = A.planToolChange('M03');
+      ok('regress');
+      if (!r || !r.ok) note('regress', `planToolChange('M03') at start: ${r && r.msg}`);
+      else for (const ty of r.types || []) { const tl = mv('M03').tools.find((x) => x.typeId === ty); if (!tl || tl.status !== 'planned' || !(tl.plannedChange && tl.plannedChange.manual) || !/Vorbeugender Wechsel beauftragt/.test(tl.explain)) fail('regress', `planToolChange('M03'): machineView shows ${ty} as '${tl && tl.status}' (${short(tl && tl.explain)}) – manual change not visible`, 'manual03'); }
+    }
+    let changes = 0, unannounced = 0;
+    const prevView = {};
+    for (let k = 0; k < 20 * H; k++) {
+      for (const mid of MACHINE_IDS_LIST) {
+        const m = st().machines[mid];
+        if (!m.toolchange && m.op && (st().tasks[m.tasks.tc] || m.manualTC) && (!m.part || m.part.rem <= 1)) prevView[mid] = { t: st().t, tools: mv(mid).tools };
+      }
+      const had = {}; for (const mid of MACHINE_IDS_LIST) had[mid] = !!st().machines[mid].toolchange;
+      step1();
+      for (const mid of MACHINE_IDS_LIST) {
+        const m = st().machines[mid];
+        if (!m.toolchange || had[mid]) continue;
+        changes++;
+        const pv = prevView[mid];
+        for (const x of m.toolchange.list) {
+          const v = pv && pv.t >= st().t - 2 ? pv.tools.find((y) => y.id === x.toolId) : null;
+          ok('regress');
+          if (!v || !['planned', 'due', 'broken'].includes(v.status)) { unannounced++; fail('regress', `${at(st().t)} ${mid}: ${x.type} swapped although machineView one second earlier showed '${v ? v.status : 'nothing'}'${v ? ' (' + v.wearPct + ' %, „' + String(v.explain).slice(0, 90) + '“)' : ''}`, 'unann:' + mid + x.type); }
+        }
+      }
+    }
+    note('regress', `announced tool changes: ${changes - unannounced}/${changes} tool-change starts in 20 h showed every swapped tool as planned beforehand`);
+
+    });
+    scen('toolbreak', () => {
+    // ---- H3 Werkzeugbruch nur beim Schneiden; danach wird nie mit dem gebrochenen Werkzeug geschnitten
+    fresh();
+    const brkCode = (PROFILE.faults.generic || []).find((f) => f.toolBreak);
+    if (brkCode) {
+      let lm = null;
+      stepUntil(() => (lm = MACHINE_IDS_LIST.map((id) => st().machines[id]).find((m) => m.loading === 'perPart' && m.part && m.part.sub === 'load' && !m.fault && ['lathe', 'biglathe', 'mill3', 'mill5', 'hobber', 'deephole'].includes(m.type))), 6 * H);
+      if (lm) {
+        const r = A.triggerFault(lm.id, brkCode.code);
+        ok('regress');
+        if (r && r.ok) fail('regress', `${at(st().t)} triggerFault('${lm.id}', '${brkCode.code}') accepted while the part is being loaded (nothing is cut)`, 'brkload');
+        else note('regress', `tool break during loading on ${lm.id} rejected: ${r && r.msg}`);
+      } else note('regress', 'no machine in load phase found – tool-break-on-load scenario not checked');
+      let cm = null;
+      stepUntil(() => (cm = MACHINE_IDS_LIST.map((id) => st().machines[id]).find((m) => m.part && m.part.sub === 'cut' && !m.fault && !m.setupRun && !m.toolchange && ['lathe', 'mill3', 'mill5', 'hobber', 'deephole', 'swiss', 'biglathe'].includes(m.type) && m.part.rem > 60)), 6 * H);
+      if (cm) {
+        const usedBefore = {}; for (const tid of cm.tools) usedBefore[tid] = st().tools[tid].used;
+        const r = A.triggerFault(cm.id, brkCode.code);
+        ok('regress');
+        if (!r || !r.ok) fail('regress', `triggerFault('${cm.id}', '${brkCode.code}') rejected while cutting: ${r && r.msg}`, 'brkcut');
+        else {
+          const broken = cm.tools.map((id) => st().tools[id]).filter((tl) => tl.broken);
+          if (cm.part) fail('regress', `${cm.id}: part still in the machine after a tool break (should be scrap)`, 'brkpart');
+          if (broken.length !== 1) fail('regress', `${cm.id}: tool break marked ${broken.length} tools as broken`, 'brkn');
+          for (const tl of broken) if (Math.abs(tl.used - usedBefore[tl.id]) > 1e-9) fail('regress', `${cm.id}: broken tool ${tl.id} wear jumped ${usedBefore[tl.id]} → ${tl.used} (should keep its real wear)`, 'brkused');
+          A.repair(cm.id);
+          let changed = false;
+          for (let k = 0; k < 3 * H && !changed; k++) {
+            step1();
+            const m = st().machines[cm.id];
+            if (m.part && m.part.sub === 'cut' && m.tools.some((id) => st().tools[id] && st().tools[id].broken)) { fail('regress', `${at(st().t)} ${cm.id} cuts with a broken tool after the repair`, 'brkcutafter'); break; }
+            if (evs.some((e) => e.type === 'toolChanged' && e.entity.id === cm.id && /bruch/i.test(String(e.data && e.data.cause)))) changed = true;
+          }
+          ok('regress');
+          if (!changed) warn('regress', `${cm.id}: broken tool not changed within 3 h after the repair (staffing?)`, 'brknochg');
+          else note('regress', `tool break while cutting on ${cm.id}: part scrapped, ${broken.map((x) => x.typeId).join(', ')} broken at real wear, changed after the repair before the next cut`);
+        }
+      }
+    }
+
+    });
+    scen('stale', () => {
+    // ---- H4/H5 Keine Aufgabe überlebt ihren Arbeitsgang (Verlagern während Rüst-/Werkzeugauftrag), kein Absturz
+    fresh();
+    let moves = 0, lastPlanRefused = false;
+    const tryMove = (m) => {
+      const o = st().orders[m.op.oid], r = o.routing[m.op.idx];
+      for (const to of MACHINE_IDS_LIST) { if (to === m.id) continue; const res = A.moveOp(o.id, r.seq, to); if (res && res.ok) { moves++; return true; } }
+      return false;
+    };
+    for (let k = 0; k < 30 * H; k++) {
+      step1();
+      if (k % 10) continue;
+      checkStaleTasks(st(), st().t, 'per 10 s');
+      if (moves < 6) for (const mid of MACHINE_IDS_LIST) {
+        const m = st().machines[mid]; if (!m.op || m.part || m.fpi || m.setupRun || m.toolchange || m.fault || m.needCorr) continue;
+        const su = st().tasks[m.tasks.setup], tc = st().tasks[m.tasks.tc];
+        const fetching = tc && tc.assignee && tc.workStarted && tc.steps[tc.si] && tc.steps[tc.si].act === 'fetch';
+        if ((su && su.assignee && !su.workStarted) || fetching) { if (tryMove(m)) { step1(); checkStaleTasks(st(), st().t, 'right after moveOp'); } }
+      }
+      if (!lastPlanRefused && k % 60 === 0) for (const mid of MACHINE_IDS_LIST) {
+        const m = st().machines[mid];
+        if (m.op && m.setupDone && m.part && SIM.partsLeft(m.op.oid, st().orders[m.op.oid].routing[m.op.idx].seq) === 0 && !m.rework) {
+          const r = A.planToolChange(mid);
+          ok('regress');
+          if (r && r.ok) fail('regress', `${at(st().t)} planToolChange('${mid}') accepted while the last part of the operation runs`, 'planlast');
+          lastPlanRefused = true; break;
+        }
+      }
+      if (k % H === 0) checkOrderChain(st().t);
+    }
+    note('regress', `stale-task scenario: ${moves} moveOp calls during pending setups/tool fetches, invariants checked every 10 s over 30 h`);
+
+    });
+    scen('rework', () => {
+    // ---- H6 Erstteil-Nacharbeit am einzigen Teil: Auftrag wird fertig, keine negativen Zähler
+    fresh();
+    const pp = PROFILE.sim.fpiPassProb;
+    const id = A.addOrder({ customer: 'Regression', part: { name: 'Einzelteil Ø40', weightKg: 1 }, qty: 1, priority: 'eil',
+      routing: [{ op: 'Fräsen', station: 'M06', setupMin: 10, cycleMin: 6, firstPiece: true, tools: [{ type: 'TT-VHM16', cutMinPerPart: 2 }], material: { id: 'MAT-ALBL', perPart: 1 } }, { op: 'Prüfung', station: 'QS', cycleMin: 1 }] });
+    if (typeof id === 'string') {
+      PROFILE.sim.fpiPassProb = 0;
+      let reworked = false, negIP = false;
+      for (let k = 0; k < 40 * H; k++) {
+        step1();
+        if (!reworked && evs.some((e) => e.type === 'fpiNok' && e.data && e.data.rework && e.data.orderId === id)) { reworked = true; PROFILE.sim.fpiPassProb = pp; }
+        if (st().orders[id].ops.some((x) => x.inProc < 0)) negIP = true;
+        if (st().orders[id].status === 'fertig') break;
+      }
+      PROFILE.sim.fpiPassProb = pp;
+      const o = st().orders[id];
+      ok('regress');
+      if (!reworked) note('regress', 'qty-1 rework scenario: no rework FPI occurred (measurement out of tolerance → scrap path)');
+      if (negIP) fail('regress', `${id}: op.inProc became negative (rework part leaked)`, 'negip');
+      if (o.status !== 'fertig') fail('regress', `${id} (qty 1, first piece reworked) not finished after 40 h – status ${o.status}, ops ${short(o.ops.map((x) => [x.station, x.good, x.inProc]))}`, 'rework1');
+      else note('regress', `qty-1 order with first-piece rework finished ${clk(o.doneT)} (${o.shippedQty}/${o.qty})`);
+    }
+    });
+  } catch (e) { warn('load', `test suite error in regression phase: ${errStr(e)}`); }
+  finally { offEv(); PROFILE.sim.fpiPassProb = PROFILE.sim.fpiPassProb ?? 0.94; }
+}
+
 // ------------------------------------------------------------------ Bericht
 function report(wallMs, simInfo) {
   const lines = [];
@@ -1572,7 +1894,7 @@ function report(wallMs, simInfo) {
     const wl = [...t.warns.values()];
     for (const e of wl.slice(0, MAX_MSGS)) lines.push(`        warn ${e.msg}${e.n > 1 ? `  (×${e.n})` : ''}`);
     if (wl.length > MAX_MSGS) lines.push(`        … ${wl.length - MAX_MSGS} more warnings`);
-    const showNotes = VERBOSE || t.key === 'deadlock' || t.key === 'realism' || t.key === 'api';
+    const showNotes = VERBOSE || t.key === 'deadlock' || t.key === 'realism' || t.key === 'api' || t.key === 'regress';
     if (showNotes) for (const n of t.notes.slice(0, VERBOSE ? 200 : 14)) lines.push(`        info ${n}`);
   }
   lines.push(`Totals: ${nP} PASS · ${nW} WARN · ${nF} FAIL${nS ? ` · ${nS} SKIP (not reached)` : ''}${wallMs > 20000 ? `  (suite took ${(wallMs / 1000).toFixed(1)} s > 20 s target)` : ''}`);
@@ -1609,13 +1931,15 @@ function main() {
     chunkCheck(A, CHUNK);
     if (i === n24) { P24 = projection(S()); C24 = compactProjection(S()); A.r24 = realismSnapshot(A); }
     if (i > n24 && i % 6 === 0) viewChecks(A, S().t);
+    // Maschinen-OEE des ersten vollen Produktionstags (Mo bis 23:50) für den Realismus-Check
+    if (!A.oeeDay && tod(S().t) === 23 * H + 50 * MIN) { A.oeeDay = {}; viewChecks(A, S().t, { oee: A.oeeDay }); }
     if (performance.now() - wall0 > BUDGET_MS) { warn('deadlock', `stopped after ${simSecA / H} sim-h: wall-clock budget ${BUDGET_MS / 1000} s exceeded`); break; }
   }
   const wallA = performance.now() - tA;
   const oee = {};
   viewChecks(A, S().t, { oee });
   finalChecksA(A);
-  evaluateRealism(A.r24, oee, A);
+  evaluateRealism(A.r24, A.oeeDay && Object.keys(A.oeeDay).length ? A.oeeDay : oee, A);
   if (A.maxSnap) note('api', `largest snapshot(): ${A.maxSnap} chars`);
   if (WF.util.hash(safeJSON(PROFILE) || '') !== profHash0) warn('determinism', 'engine mutated WF.profile during the run – re-init/reset may not reproduce the start state');
   simInfo = `run A ${simSecA / H} sim-h in ${(wallA / 1000).toFixed(1)} s (${Math.round(simSecA / Math.max(0.001, wallA / 1000))} sim-s/s)`;
@@ -1647,6 +1971,8 @@ function main() {
       }
     }
   }
+  CUR = null;
+  regressionPhase();
   if (nonDet.random) warn('determinism', `engine called Math.random() ${nonDet.random}× during simulation/views (SPEC: seeded RNG only)`);
   if (nonDet.dateNow) note('determinism', `engine called Date.now() ${nonDet.dateNow}×`);
   CUR = null;

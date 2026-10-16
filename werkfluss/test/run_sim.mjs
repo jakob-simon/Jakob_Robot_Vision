@@ -37,10 +37,18 @@ function checkInvariants() {
     if (m.part && m.part.sub === 'cut' && m.op) {
       // Werkzeuge müssen beim Start gereicht haben: Reststandzeit (vor Buchung) >= Bedarf
       const o = S.orders[m.op.oid], r = o.routing[m.op.idx];
-      for (const tid of m.tools) { const tl = S.tools[tid]; const c = (r.tools || []).find(t => t.type === tl.typeId); if (c && !tl.broken && tl.life - tl.used + 1e-9 < c.cutMinPerPart) v('cut-insufficient', `${id} ${tl.typeId}`); }
+      // auch ein gebrochenes Werkzeug darf nie schneiden (Bruch nur während der Bearbeitung → Teil Ausschuss, Wechsel vor dem nächsten Teil)
+      for (const tid of m.tools) { const tl = S.tools[tid]; const c = (r.tools || []).find(t => t.type === tl.typeId); if (c && tl.broken) v('cut-broken-tool', `${id} ${tl.typeId}`); else if (c && tl.life - tl.used + 1e-9 < c.cutMinPerPart) v('cut-insufficient', `${id} ${tl.typeId}`); }
+    }
+    // keine Maschinenaufgabe überlebt ihren Arbeitsgang
+    for (const key of ['setup', 'corr', 'load', 'fpi', 'tc', 'offset']) {
+      const tk = m.tasks && S.tasks[m.tasks[key]]; if (!tk || tk.orderId == null || (key === 'tc' && m.toolchange)) continue;
+      const o = m.op && S.orders[m.op.oid];
+      if (!o || tk.orderId !== o.id || tk.seq !== o.routing[m.op.idx].seq) v('stale-task', `${id}.${key} ${tk.id} ${tk.orderId}/${tk.seq}`);
     }
   }
   for (const id in S.materials) if (S.materials[id].onHand < -1e-9) v('stock-neg', id);
+  if ((S.engineErrors || []).length) v('engine-error', S.engineErrors[0].where + ' ' + S.engineErrors[0].msg);
   for (const id in S.agvs) { const a = S.agvs[id]; if (a.battery < 0 || a.battery > 100) v('battery', id); if (a.load) { const c = S.containers[a.load]; if (c && c.weightKg > a.maxKg) v('agv-overload', id); } }
   const tasksPer = {};
   for (const id in S.people) { const p = S.people[id]; if (p.task) { tasksPer[p.id] = (tasksPer[p.id] || 0) + 1; if (p.state === 'offShift') v('offshift-task', p.id); } }
@@ -53,8 +61,8 @@ function checkInvariants() {
       const c = S.containers[cid]; if (c.orderId !== oid) continue;
       if (c.state === 'input' || (c.state === 'shipped')) waiting[c.idx] = (waiting[c.idx] || 0) + (c.state === 'input' ? c.qty : 0);
       if ((c.state === 'filling' || c.state === 'ready') && !c.relocate) { if (c.src >= 0) out[c.src] = (out[c.src] || 0) + c.qty; }
-      if (c.state === 'ready' && c.relocate) waiting[c.idx] = (waiting[c.idx] || 0);
-      if (c.state === 'transit' && c.src >= 0 && !c.relocate) transit[c.src] = (transit[c.src] || 0) + c.qty;
+      // unterwegs: auf AGV/Stapler, oder wegen Verlagerung (moveOp) zur neuen Maschine umzulagern
+      if (c.src >= 0 && (c.state === 'transit' || (c.state === 'ready' && c.relocate))) transit[c.src] = (transit[c.src] || 0) + c.qty;
     }
     o.ops.forEach((op, i) => {
       const r = o.routing[i];
@@ -86,7 +94,8 @@ const runMs = performance.now() - t0;
 // ---------------------------------------------------------------- Ausgabe
 const k = WF.sim.kpis();
 console.log(`\n=== werkfluss Sim: Warmup ${warmMs.toFixed(0)} ms, ${HOURS} h in ${runMs.toFixed(0)} ms (max ${Math.max(...stepMs).toFixed(0)} ms/h) → ${WF.sim.clock()} ===`);
-console.log('KPIs heute:', JSON.stringify({ oee: +k.oee.toFixed(3), A: +k.availability.toFixed(3), P: +k.performance.toFixed(3), Q: +k.quality.toFixed(3), good: k.good, scrap: k.scrap, scrapBy: k.scrapBy, onTime: +k.onTimePct.toFixed(2), lossEur: k.lossEur, kWh: k.energyKwh, kW: k.powerKw, wip: k.wip, transports: k.transportsToday, toolCost: k.toolCostToday }));
+const f3 = (x) => x == null ? null : +x.toFixed(3);
+console.log('KPIs heute:', JSON.stringify({ oee: f3(k.oee), A: f3(k.availability), P: f3(k.performance), Q: f3(k.quality), good: k.good, scrap: k.scrap, scrapBy: k.scrapBy, onTime: +k.onTimePct.toFixed(2), lossEur: k.lossEur, kWh: k.energyKwh, kW: k.powerKw, wip: k.wip, transports: k.transportsToday, toolCost: k.toolCostToday }));
 console.log('\nAufträge:');
 for (const id in S.orders) {
   const o = S.orders[id], ov = WF.sim.orderView(id);
@@ -98,7 +107,7 @@ for (const id in S.machines) {
   const mv = WF.sim.machineView(id);
   const st = mv.stateTimes, tot = Object.values(st).reduce((a, b) => a + b, 0) || 1;
   const top = Object.entries(st).filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([s, x]) => `${s} ${Math.round(x / tot * 100)}%`).join(', ');
-  console.log(`  ${id.padEnd(4)} ${mv.state.padEnd(12)} OEE ${(mv.oeeToday.oee * 100).toFixed(0).padStart(3)}%  gut ${String(mv.goodToday).padStart(4)}  ${mv.order ? mv.order.id + '/' + mv.order.seq : '–'.padEnd(11)}  [${top}]  ${mv.cause.slice(0, 80)}`);
+  console.log(`  ${id.padEnd(4)} ${mv.state.padEnd(12)} OEE ${mv.oeeToday.oee == null ? '  –' : (mv.oeeToday.oee * 100).toFixed(0).padStart(3)}%  gut ${String(mv.goodToday).padStart(4)}  ${mv.order ? mv.order.id + '/' + mv.order.seq : '–'.padEnd(11)}  [${top}]  ${mv.cause.slice(0, 80)}`);
   for (const tl of mv.tools.filter(x => x.status !== 'idle')) console.log(`        ${tl.typeId.padEnd(9)} ${String(tl.wearPct).padStart(5)}% rest ${String(tl.remainingParts).padStart(3)} ${tl.plannedChange ? 'Wechsel nach Teil ' + tl.plannedChange.afterPart + ' ca. ' + U.fmtClock(tl.plannedChange.etaT) : ''}`);
 }
 console.log('\nPersonen:');
@@ -122,6 +131,25 @@ const hash = () => U.hash(JSON.stringify({ t: WF.sim.state.t, m: Object.values(W
 WF.sim.init(WF.profile); WF.sim.advance(3600); const h1 = hash();
 WF.sim.init(WF.profile); WF.sim.advance(3600); const h2 = hash();
 console.log('Determinismus:', h1 === h2 ? 'ok (' + h1 + ')' : 'FEHLER ' + h1 + ' != ' + h2);
+// Aktionen (Smoke-Test auf frischem Zustand)
+WF.sim.init(WF.profile);
+const A = WF.sim.actions, res = {};
+try {
+  const fm = Object.values(WF.sim.state.machines).find(m => m.kind === 'machine' && m.state === 'running') || WF.sim.state.machines.M05;
+  res.triggerFault = A.triggerFault(fm.id).ok; WF.sim.advance(120); res.repair = A.repair(fm.id).ok && WF.sim.state.machines[fm.id].state !== 'fault';
+  res.reorder = A.reorder('MAT-ALBL').ok; res.setPriority = A.setPriority('FA-24122', 'eil').ok;
+  res.connect = A.connectMachine('M10', 2, 'OPC UA').ok; res.planToolChange = A.planToolChange('M03').ok;
+  const nid = A.addOrder({ customer: 'Test GmbH', part: { name: 'Flansch', weightKg: 0.8 }, qty: 20, due: WF.sim.state.t + 2 * 86400,
+    routing: [{ op: 'Fräsen', station: 'M06', setupMin: 20, cycleMin: 5, tools: [{ type: 'TT-VHM16', cutMinPerPart: 2 }], material: { id: 'MAT-ALBL', perPart: 1 } }, { op: 'Prüfung', station: 'QS', cycleMin: 1 }] });
+  res.addOrder = typeof nid === 'string' ? nid : nid.msg;
+  res.moveOp = A.moveOp('FA-24121', 20, 'M05').msg;
+  const n = WF.sim.state.notifications.find(x => x.status === 'open'); res.ack = A.ack(n.id, 'Test').ok; res.resolve = A.resolve(n.id).ok;
+  res.invalid = [A.triggerFault('XX').ok, A.setPriority('FA-24122', 'x').ok, A.addOrder({}).ok, A.moveOp('FA-24122', 30, 'M05').ok].join('/');
+  for (let h = 0; h < 30; h++) { WF.sim.advance(3600); checkInvariants(); }
+  res.newOrderStatus = WF.sim.state.orders[nid].status;
+} catch (e) { errors.push('EXCEPTION (Aktionen) ' + (e && e.stack || e)); }
+console.log('Aktionen:', JSON.stringify(res));
+
 console.log('\nVerletzungen:', JSON.stringify(viol));
 if (errors.length) { console.log('Fehler:'); for (const e of errors.slice(0, 30)) console.log('  ' + e); }
 else console.log('Keine Fehler.');
