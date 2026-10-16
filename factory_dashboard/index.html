@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Factory Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1420; --panel: #171e2e; --line: #26304a; --text: #e6ebf5; --muted: #8a96b0;
+    --mat: #ff9f43; --info: #38d6ff; --ok: #2ecc71; --warn: #f1c40f; --err: #ff5c5c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  .app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 16px;
+    border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0 12px 0 0; letter-spacing: .3px; }
+  .kpi { background: #0f1420; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-width: 96px; }
+  .kpi b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .kpi span { font-size: 11px; color: var(--muted); }
+  .legend { margin-left: auto; display: flex; gap: 14px; font-size: 12px; color: var(--muted); align-items: center; }
+  .sw { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+  button { background: #22304d; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+  button:hover { background: #2b3c60; }
+  main { display: grid; grid-template-columns: 1fr 340px; min-height: 0; }
+  #view { position: relative; min-height: 0; }
+  canvas { width: 100%; height: 100%; display: block; cursor: pointer; }
+  aside { border-left: 1px solid var(--line); background: var(--panel); padding: 14px; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
+  aside h2 { font-size: 14px; margin: 0 0 6px; }
+  .card { background: #0f1420; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 13px; }
+  .row { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dashed #1f2840; }
+  .row:last-child { border-bottom: 0; }
+  .row span:first-child { color: var(--muted); }
+  .bar { height: 6px; background: #1f2840; border-radius: 3px; overflow: hidden; margin-top: 4px; }
+  .bar i { display: block; height: 100%; background: var(--ok); }
+  .tag { display: inline-block; font-size: 11px; padding: 2px 6px; border-radius: 4px; margin: 2px 4px 2px 0; border: 1px solid var(--line); }
+  .tag.info { color: var(--info); border-color: #1d5a6e; }
+  .tag.mat { color: var(--mat); border-color: #6e4a1d; }
+  #log { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; max-height: 260px; overflow: auto; }
+  #log div { padding: 2px 0; border-bottom: 1px solid #182036; }
+  #log .t { color: var(--muted); margin-right: 6px; }
+  .hint { position: absolute; left: 12px; bottom: 10px; font-size: 12px; color: var(--muted); }
+  @media (max-width: 860px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
+    aside { border-left: 0; border-top: 1px solid var(--line); }
+    .legend { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>🏭 Smart Factory – Digital Twin</h1>
+    <div class="kpi"><b id="kOut">0</b><span>Fertigteile</span></div>
+    <div class="kpi"><b id="kOee">0%</b><span>Ø Auslastung CNC</span></div>
+    <div class="kpi"><b id="kTool">0</b><span>Werkzeugwechsel</span></div>
+    <div class="kpi"><b id="kMsg">0</b><span>Nachrichten (OPC UA / MQTT)</span></div>
+    <button id="btnPause">⏸ Pause</button>
+    <button id="btnFast">⏩ 1x</button>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--mat)"></i>Material-Flow</span>
+      <span><i class="sw" style="background:var(--info)"></i>Informations-Flow</span>
+    </div>
+  </header>
+  <main>
+    <div id="view"><canvas id="c"></canvas><div class="hint">Klick auf eine Maschine für Details</div></div>
+    <aside>
+      <div><h2 id="selTitle">Fabrik-Übersicht</h2><div class="card" id="sel">Wähle eine Maschine im Hallenplan aus.</div></div>
+      <div><h2>Event-Log (MES)</h2><div class="card" id="log"></div></div>
+    </aside>
+  </main>
+</div>
+<script>
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const TW = 72, TH = 36, GRID = 13;
+let W = 0, H = 0, ox = 0, oy = 0, speed = 1, paused = false, simT = 0;
+
+// ---------- Factory model ----------
+const M = {
+  raw:   { name: 'Rohteil-Lager', type: 'storage', x: 1, y: 2,  w: 2, d: 2, h: 34, color: '#8e6b3d', stock: 40, iface: ['OPC UA', 'RFID'] },
+  tools: { name: 'Werkzeug-Magazin', type: 'tools', x: 1, y: 8, w: 2, d: 2, h: 40, color: '#6c5ce7', stock: 12, iface: ['OPC UA'] },
+  cnc1:  { name: 'CNC 1 – Fräse',  type: 'cnc', x: 6, y: 1, w: 2, d: 2, h: 46, color: '#3d7bd9', iface: ['OPC UA', 'MTConnect'] },
+  cnc2:  { name: 'CNC 2 – Fräse',  type: 'cnc', x: 6, y: 5, w: 2, d: 2, h: 46, color: '#3d7bd9', iface: ['OPC UA', 'MTConnect'] },
+  cnc3:  { name: 'CNC 3 – Drehmaschine', type: 'cnc', x: 6, y: 9, w: 2, d: 2, h: 46, color: '#2f9e8f', iface: ['OPC UA', 'MTConnect'] },
+  qc:    { name: 'Qualitätsprüfung', type: 'qc', x: 10, y: 5, w: 1, d: 2, h: 30, color: '#b0558a', iface: ['OPC UA', 'Vision'] },
+  out:   { name: 'Fertigteil-Lager', type: 'storage', x: 11, y: 9, w: 2, d: 2, h: 30, color: '#5a8a3d', stock: 0, iface: ['OPC UA', 'RFID'] },
+  mes:   { name: 'MES / Edge-Server', type: 'it', x: 10, y: 0, w: 1, d: 1, h: 60, color: '#34495e', iface: ['MQTT Broker', 'OPC UA Client', 'REST'] },
+};
+for (const k in M) Object.assign(M[k], { id: k, util: 0, busyT: 0 });
+['cnc1', 'cnc2', 'cnc3'].forEach((k, i) => Object.assign(M[k], {
+  state: 'idle', part: false, progress: 0, cycle: 7 + i * 1.5, wear: 20 + i * 25, tool: 'T0' + (i + 1), parts: 0, needTool: false, reserved: false,
+}));
+Object.assign(M.qc, { queue: 0, progress: 0, ok: 0, nok: 0 });
+
+// Robot (AMR with arm)
+const R = { name: 'Roboter (AMR + Arm)', type: 'robot', id: 'robot', x: 4, y: 5, carry: null, task: [], label: 'wartet', iface: ['ROS 2', 'MQTT'], moves: 0 };
+// Dock points in front of stations
+const dock = { raw: [3.4, 3], tools: [3.4, 9], cnc1: [5.4, 2], cnc2: [5.4, 6], cnc3: [5.4, 10], qc: [9.4, 6], out: [10.6, 10] };
+
+// Connections
+const matLinks = [['raw','cnc1'],['raw','cnc2'],['raw','cnc3'],['tools','cnc1'],['tools','cnc2'],['tools','cnc3'],['cnc1','qc'],['cnc2','qc'],['cnc3','qc'],['qc','out']];
+const infoLinks = ['raw','tools','cnc1','cnc2','cnc3','qc','out','robot'].map(k => [k, 'mes']);
+
+const packets = []; // {from,to,t,kind,label}
+const stats = { out: 0, tool: 0, msg: 0 };
+
+// ---------- helpers ----------
+const iso = (x, y, z = 0) => [ (x - y) * TW / 2 + ox, (x + y) * TH / 2 + oy - z ];
+const center = id => id === 'robot' ? [R.x, R.y] : [M[id].x + M[id].w / 2, M[id].y + M[id].d / 2];
+const logEl = document.getElementById('log');
+function log(msg, cls = '') {
+  const m = Math.floor(simT / 60), s = Math.floor(simT % 60);
+  const d = document.createElement('div');
+  d.innerHTML = `<span class="t">${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}</span><span style="color:${cls}">${msg}</span>`;
+  logEl.prepend(d); while (logEl.children.length > 80) logEl.lastChild.remove();
+}
+function send(from, to, label, kind = 'info') {
+  packets.push({ from, to, t: 0, kind, label }); if (kind === 'info') stats.msg++;
+}
+
+// ---------- simulation ----------
+function planRobot() {
+  if (R.task.length) return;
+  const cncs = ['cnc1', 'cnc2', 'cnc3'].map(k => M[k]);
+  const done = cncs.find(c => c.state === 'done');
+  if (done) {
+    R.task = [{ go: done.id }, { act: 'unload', m: done.id }, { go: 'qc' }, { act: 'toQC' }];
+    R.label = `entlädt ${done.name.split(' –')[0]}`;
+  } else {
+    const worn = cncs.find(c => c.state === 'idle' && c.needTool && !c.reserved);
+    const empty = cncs.find(c => c.state === 'idle' && !c.part && !c.needTool && !c.reserved);
+    if (worn) {
+      worn.reserved = true;
+      R.task = [{ go: 'tools' }, { act: 'pickTool' }, { go: worn.id }, { act: 'toolChange', m: worn.id }];
+      R.label = `Werkzeugwechsel ${worn.name.split(' –')[0]}`;
+    } else if (empty && M.raw.stock > 0) {
+      empty.reserved = true;
+      R.task = [{ go: 'raw' }, { act: 'pickRaw' }, { go: empty.id }, { act: 'load', m: empty.id }];
+      R.label = `belädt ${empty.name.split(' –')[0]}`;
+    } else { R.label = 'wartet'; return; }
+  }
+  send('mes', 'robot', 'Auftrag: ' + R.label);
+  log(`MES → Roboter: ${R.label}`, 'var(--info)');
+}
+
+function step(dt) {
+  simT += dt;
+  // CNCs
+  for (const k of ['cnc1', 'cnc2', 'cnc3']) {
+    const c = M[k];
+    if (c.state === 'running') {
+      c.busyT += dt; c.progress += dt / c.cycle; c.wear += dt * 2.2;
+      if (c.progress >= 1) {
+        c.progress = 1; c.state = 'done'; c.parts++;
+        if (c.wear >= 100) c.needTool = true;
+        send(k, 'mes', 'Teil fertig'); log(`${c.name}: Bearbeitung fertig${c.needTool ? ' – Werkzeug verschlissen!' : ''}`, c.needTool ? 'var(--warn)' : '');
+      }
+    } else if (c.state === 'toolchange') {
+      c.busyT += dt; c.progress += dt / 2.5;
+      if (c.progress >= 1) { c.state = 'idle'; c.progress = 0; c.wear = 0; c.needTool = false; c.reserved = false;
+        c.tool = 'T' + String(10 + Math.floor(Math.random() * 89)); send(k, 'mes', 'Werkzeug ' + c.tool); log(`${c.name}: neues Werkzeug ${c.tool} eingesetzt`, 'var(--ok)'); R.task.shift(); }
+    }
+    c.util = simT > 0 ? c.busyT / simT : 0;
+  }
+  // QC
+  const q = M.qc;
+  if (q.queue > 0) {
+    q.progress += dt / 2;
+    if (q.progress >= 1) {
+      q.progress = 0; q.queue--;
+      const ok = Math.random() > 0.08; ok ? q.ok++ : q.nok++;
+      send('qc', 'mes', ok ? 'Prüfung i.O.' : 'Prüfung n.i.O.');
+      if (ok) { send('qc', 'out', 'Teil', 'mat'); log('QC: Teil i.O. → Fertigteil-Lager', 'var(--ok)'); }
+      else log('QC: Teil n.i.O. – Ausschuss', 'var(--err)');
+    }
+  }
+  // Robot
+  planRobot();
+  const t = R.task[0];
+  if (t && t.go) {
+    const [tx, ty] = dock[t.go], dx = tx - R.x, dy = ty - R.y, dist = Math.hypot(dx, dy), v = 3.2 * dt;
+    if (dist <= v) { R.x = tx; R.y = ty; R.task.shift(); R.moves++; } else { R.x += dx / dist * v; R.y += dy / dist * v; }
+  } else if (t && t.act) {
+    t.wait = (t.wait || 0) + dt;
+    if (t.act === 'toolChange') {
+      const c = M[t.m]; if (c.state !== 'toolchange') { c.state = 'toolchange'; c.progress = 0; R.carry = null; stats.tool++; send('robot', 'mes', 'Tool getauscht'); }
+      return; // finished by CNC
+    }
+    if (t.wait < 0.6) return;
+    if (t.act === 'pickRaw') { M.raw.stock--; R.carry = 'raw'; send('raw', 'mes', 'Bestand ' + M.raw.stock); }
+    if (t.act === 'pickTool') { M.tools.stock = Math.max(0, M.tools.stock - 1); R.carry = 'tool'; }
+    if (t.act === 'load') { const c = M[t.m]; c.part = true; c.state = 'running'; c.progress = 0; c.reserved = false; R.carry = null;
+      send('robot', 'mes', 'Teil geladen'); log(`Roboter legt Rohteil in ${c.name}`, 'var(--mat)'); }
+    if (t.act === 'unload') { const c = M[t.m]; c.part = false; c.state = 'idle'; c.progress = 0; R.carry = 'part'; }
+    if (t.act === 'toQC') { R.carry = null; M.qc.queue++; }
+    R.task.shift();
+  }
+  // packets
+  for (const p of packets) p.t += dt / (p.kind === 'mat' ? 1.6 : 0.9);
+  for (let i = packets.length - 1; i >= 0; i--) if (packets[i].t >= 1) {
+    const p = packets[i]; if (p.kind === 'mat' && p.to === 'out') { M.out.stock++; stats.out++; }
+    packets.splice(i, 1);
+  }
+  if (M.raw.stock < 5 && Math.random() < dt * 0.15) { M.raw.stock += 20; log('Logistik: 20 Rohteile nachgeliefert', 'var(--mat)'); send('mes', 'raw', 'Nachschub'); }
+}
+
+// ---------- drawing ----------
+function resize() {
+  const r = cv.parentElement.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  W = r.width; H = r.height; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const s = Math.min(W / (GRID * TW), H / (GRID * TH * 1.15), 1.3);
+  scale = s; ox = W / 2 / s; oy = (H / s - GRID * TH) / 2 + 30;
+}
+let scale = 1;
+function shade(hex, f) { const n = parseInt(hex.slice(1), 16); let r = n >> 16, g = n >> 8 & 255, b = n & 255;
+  r = Math.min(255, r * f) | 0; g = Math.min(255, g * f) | 0; b = Math.min(255, b * f) | 0; return `rgb(${r},${g},${b})`; }
+function poly(pts, fill, stroke) { ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); } if (stroke) { ctx.strokeStyle = stroke; ctx.stroke(); } }
+function box(x, y, w, d, h, color, z = 0) {
+  const a = iso(x, y, z + h), b = iso(x + w, y, z + h), c = iso(x + w, y + d, z + h), e = iso(x, y + d, z + h);
+  const b0 = iso(x + w, y, z), c0 = iso(x + w, y + d, z), e0 = iso(x, y + d, z);
+  poly([e, c, c0, e0], shade(color, 0.75)); // left/front
+  poly([c, b, b0, c0], shade(color, 0.55)); // right
+  poly([a, b, c, e], shade(color, 1.15), 'rgba(255,255,255,.15)');
+  return { top: [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2] };
+}
+function drawGround() {
+  for (let x = 0; x < GRID; x++) for (let y = 0; y < GRID; y++)
+    poly([iso(x, y), iso(x + 1, y), iso(x + 1, y + 1), iso(x, y + 1)], (x + y) % 2 ? '#1b2335' : '#1e273b', '#252f47');
+  // robot lane
+  ctx.globalAlpha = .25; poly([iso(3.2, 1), iso(5.8, 1), iso(5.8, 11), iso(3.2, 11)], '#f1c40f'); ctx.globalAlpha = 1;
+}
+function linkPts(a, b, z) { const [ax, ay] = center(a), [bx, by] = center(b); return [iso(ax, ay, z), iso(bx, by, z)]; }
+function drawLinks() {
+  ctx.lineWidth = 2; ctx.setLineDash([]);
+  for (const [a, b] of matLinks) { const [p, q] = linkPts(a, b, 0); ctx.strokeStyle = 'rgba(255,159,67,.35)'; ctx.beginPath(); ctx.moveTo(...p); ctx.lineTo(...q); ctx.stroke(); }
+  ctx.setLineDash([5, 6]); ctx.lineDashOffset = -simT * 20;
+  for (const [a, b] of infoLinks) { const [p, q] = [iso(...center(a), a === 'robot' ? 30 : M[a].h), iso(...center(b), 60)];
+    ctx.strokeStyle = 'rgba(56,214,255,.35)'; ctx.beginPath(); ctx.moveTo(...p); ctx.lineTo(...q); ctx.stroke(); }
+  ctx.setLineDash([]);
+}
+function drawPackets() {
+  for (const p of packets) {
+    let P, Q;
+    if (p.kind === 'mat') [P, Q] = linkPts(p.from, p.to, 6);
+    else { P = iso(...center(p.from), p.from === 'robot' ? 30 : M[p.from].h); Q = iso(...center(p.to), p.to === 'robot' ? 30 : M[p.to].h); }
+    const x = P[0] + (Q[0] - P[0]) * p.t, y = P[1] + (Q[1] - P[1]) * p.t;
+    ctx.fillStyle = p.kind === 'mat' ? '#ff9f43' : '#38d6ff';
+    ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 10;
+    if (p.kind === 'mat') ctx.fillRect(x - 5, y - 5, 10, 10); else { ctx.beginPath(); ctx.arc(x, y, 4, 0, 7); ctx.fill(); }
+    ctx.shadowBlur = 0;
+  }
+}
+const statusColor = m => m.type !== 'cnc' ? '#2ecc71' : m.state === 'running' ? '#2ecc71' : m.state === 'done' ? '#38d6ff' : m.state === 'toolchange' ? '#f1c40f' : m.needTool ? '#ff5c5c' : '#8a96b0';
+function drawMachine(m) {
+  const sel = selected === m.id;
+  const { top } = box(m.x + .1, m.y + .1, m.w - .2, m.d - .2, m.h, sel ? '#5d7fbf' : m.color);
+  if (m.type === 'cnc') { // spindle housing + status lamp
+    box(m.x + .6, m.y + .6, .7, .7, 18, '#cfd8e3', m.h);
+    const l = iso(m.x + .3, m.y + .3, m.h + 30); ctx.fillStyle = statusColor(m); ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.arc(l[0], l[1], 5, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+    // progress bar
+    const bx = top[0] - 26, by = top[1] - 52; ctx.fillStyle = '#0b0f18'; ctx.fillRect(bx, by, 52, 6);
+    ctx.fillStyle = m.state === 'toolchange' ? '#f1c40f' : '#2ecc71'; ctx.fillRect(bx, by, 52 * m.progress, 6);
+    ctx.fillStyle = m.wear > 80 ? '#ff5c5c' : '#8a96b0'; ctx.fillRect(bx, by + 8, 52 * Math.min(1, m.wear / 100), 3);
+  }
+  if (m.type === 'it') { for (let i = 0; i < 4; i++) { const p = iso(m.x + .5, m.y + 1, 12 + i * 12); ctx.fillStyle = (Math.floor(simT * 3 + i) % 2) ? '#38d6ff' : '#1b6b80'; ctx.fillRect(p[0] - 4, p[1] - 2, 3, 3); } }
+  if (m.type === 'storage' || m.type === 'tools') { const n = Math.min(9, Math.ceil((m.stock || 0) / (m.type === 'tools' ? 2 : 5)));
+    for (let i = 0; i < n; i++) box(m.x + .3 + (i % 3) * .5, m.y + .3 + Math.floor(i / 3) * .5, .35, .35, 8, m.type === 'tools' ? '#a29bfe' : '#ff9f43', m.h); }
+  ctx.fillStyle = '#e6ebf5'; ctx.font = '600 12px system-ui'; ctx.textAlign = 'center';
+  ctx.fillText(m.name.split(' –')[0], top[0], top[1] - (m.type === 'cnc' ? 60 : 22));
+}
+function drawRobot() {
+  const sel = selected === 'robot';
+  box(R.x - .35, R.y - .35, .7, .7, 12, sel ? '#ffd166' : '#f39c12');
+  const base = iso(R.x, R.y, 12), sw = Math.sin(simT * 4) * 6;
+  ctx.strokeStyle = '#ecf0f1'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(base[0], base[1]); ctx.lineTo(base[0] + sw, base[1] - 22); ctx.lineTo(base[0] + 14 + sw, base[1] - 30); ctx.stroke();
+  if (R.carry) { ctx.fillStyle = R.carry === 'tool' ? '#a29bfe' : R.carry === 'part' ? '#2ecc71' : '#ff9f43'; ctx.fillRect(base[0] + 10 + sw, base[1] - 38, 10, 10); }
+  ctx.fillStyle = '#ffd166'; ctx.font = '600 11px system-ui'; ctx.textAlign = 'center'; ctx.fillText('Roboter: ' + R.label, base[0], base[1] - 46);
+}
+function draw() {
+  ctx.save(); ctx.clearRect(0, 0, W, H); ctx.fillStyle = '#0f1420'; ctx.fillRect(0, 0, W, H); ctx.scale(scale, scale);
+  drawGround(); drawLinks();
+  const items = Object.values(M).map(m => ({ k: m.x + m.y + m.w + m.d, f: () => drawMachine(m) }));
+  items.push({ k: R.x + R.y + .7, f: drawRobot }); items.sort((a, b) => a.k - b.k).forEach(i => i.f());
+  drawPackets(); ctx.restore();
+}
+
+// ---------- UI ----------
+let selected = null;
+cv.addEventListener('click', e => {
+  const r = cv.getBoundingClientRect(), mx = (e.clientX - r.left) / scale, my = (e.clientY - r.top) / scale;
+  // inverse iso on ground plane, check footprint (tolerant for height)
+  let hit = null;
+  const rp = iso(R.x, R.y, 20); if (Math.hypot(mx - rp[0], my - rp[1]) < 26) hit = 'robot';
+  if (!hit) for (const m of Object.values(M)) for (let z = 0; z <= m.h && !hit; z += 6) {
+    const X = mx - ox, Y = my - oy + z, gx = (X / (TW / 2) + Y / (TH / 2)) / 2, gy = (Y / (TH / 2) - X / (TW / 2)) / 2;
+    if (gx >= m.x && gx <= m.x + m.w && gy >= m.y && gy <= m.y + m.d) hit = m.id;
+  }
+  selected = hit; renderPanel();
+});
+function rows(o) { return Object.entries(o).map(([k, v]) => `<div class="row"><span>${k}</span><span>${v}</span></div>`).join(''); }
+const pct = v => Math.round(v * 100) + '%';
+function renderPanel() {
+  const el = document.getElementById('sel'), ti = document.getElementById('selTitle');
+  if (!selected) { ti.textContent = 'Fabrik-Übersicht';
+    el.innerHTML = rows({ 'Maschinen': '3 CNC, 1 Roboter, QC, 2 Lager', 'Verbindungen Material': matLinks.length, 'Verbindungen Info': infoLinks.length,
+      'Rohteile': M.raw.stock, 'QC i.O. / n.i.O.': `${M.qc.ok} / ${M.qc.nok}` }) + '<p style="color:var(--muted);margin:8px 0 0">Klick auf eine Maschine für Live-Daten.</p>'; return; }
+  const m = selected === 'robot' ? R : M[selected];
+  ti.textContent = m.name;
+  let html = '';
+  if (m.type === 'cnc') {
+    const st = { idle: m.needTool ? 'Wartet auf Werkzeug' : (m.reserved ? 'Wartet auf Roboter' : 'Leerlauf'), running: 'Bearbeitung', done: 'Fertig – Entladen', toolchange: 'Werkzeugwechsel' }[m.state];
+    html = rows({ Status: `<b style="color:${statusColor(m)}">${st}</b>`, Werkzeug: m.tool, 'Zykluszeit': m.cycle.toFixed(1) + ' s', 'Gefertigte Teile': m.parts, Auslastung: pct(m.util) })
+      + `<div style="margin-top:6px">Fortschritt<div class="bar"><i style="width:${pct(m.progress)}"></i></div></div>`
+      + `<div style="margin-top:6px">Werkzeugverschleiß ${Math.round(m.wear)}%<div class="bar"><i style="width:${Math.min(100, m.wear)}%;background:${m.wear > 80 ? 'var(--err)' : 'var(--warn)'}"></i></div></div>`;
+  } else if (m.type === 'robot') {
+    html = rows({ Aufgabe: R.label, Trägt: { raw: 'Rohteil', tool: 'Werkzeug', part: 'Fertigteil' }[R.carry] || '–', Position: `(${R.x.toFixed(1)}, ${R.y.toFixed(1)})`, Fahrten: R.moves, Werkzeugwechsel: stats.tool });
+  } else if (m.type === 'qc') {
+    html = rows({ Warteschlange: m.queue, 'i.O.': m.ok, 'n.i.O.': m.nok, 'Qualitätsrate': m.ok + m.nok ? pct(m.ok / (m.ok + m.nok)) : '–' });
+  } else if (m.type === 'it') {
+    html = rows({ 'Nachrichten gesamt': stats.msg, 'Verbundene Geräte': infoLinks.length, Protokolle: 'OPC UA, MQTT, REST' });
+  } else html = rows({ Bestand: m.stock });
+  const mat = matLinks.filter(l => l.includes(m.id)).map(l => l[0] === m.id ? '→ ' + M[l[1]].name : '← ' + M[l[0]].name);
+  if (m.id === 'robot') mat.push('transportiert zwischen allen Stationen');
+  html += `<div style="margin-top:10px">Schnittstellen<br>${m.iface.map(i => `<span class="tag info">${i}</span>`).join('')}</div>`;
+  if (mat.length) html += `<div style="margin-top:6px">Material-Verbindungen<br>${mat.map(i => `<span class="tag mat">${i}</span>`).join('')}</div>`;
+  el.innerHTML = html;
+}
+function updateKpis() {
+  document.getElementById('kOut').textContent = stats.out;
+  document.getElementById('kOee').textContent = pct((M.cnc1.util + M.cnc2.util + M.cnc3.util) / 3);
+  document.getElementById('kTool').textContent = stats.tool;
+  document.getElementById('kMsg').textContent = stats.msg;
+}
+document.getElementById('btnPause').onclick = e => { paused = !paused; e.target.textContent = paused ? '▶ Start' : '⏸ Pause'; };
+document.getElementById('btnFast').onclick = e => { speed = speed === 1 ? 3 : speed === 3 ? 6 : 1; e.target.textContent = '⏩ ' + speed + 'x'; };
+
+let last = performance.now(), uiT = 0;
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (!paused) for (let i = 0; i < speed; i++) step(dt);
+  draw(); uiT += dt; if (uiT > 0.25) { uiT = 0; updateKpis(); renderPanel(); }
+  requestAnimationFrame(loop);
+}
+window.addEventListener('resize', resize); resize();
+log('System gestartet – alle Maschinen über OPC UA / MQTT mit MES verbunden', 'var(--info)');
+renderPanel(); requestAnimationFrame(loop);
+</script>
+</body>
+</html>
