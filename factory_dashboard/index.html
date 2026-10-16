@@ -148,7 +148,7 @@
         <div id="agChips"></div>
         <form id="agForm"><input id="agIn" placeholder="Frag die Fabrik… z. B. „Wo ist der Engpass?“" autocomplete="off"><button>➤</button></form>
       </div>
-      <div id="banner">⚠ Analoge Fabrik: keine Vernetzung, keine Echtzeit-Daten.<br><span style="font-weight:400">Werker läuft Rundgang mit Papierliste · Werkzeugverschleiß wird erst am Ausschuss bemerkt</span></div>
+      <div id="banner">⚠ Analoge Fabrik: keine Vernetzung, keine Echtzeit-Daten.<br><span style="font-weight:400">Werker läuft Rundgang mit Papierliste · Werkzeug läuft bis 100 % → Maschine stoppt, Teil wird Ausschuss</span></div>
     </div>
     <aside>
       <div><h2>Fertigungsauftrag</h2><div class="card">
@@ -213,6 +213,7 @@ const matLinks = [['raw', 'robot'], ['tools', 'robot'], ['robot', 'cnc1'], ['rob
 const NETZ = 78, TRAY_Y = -0.3;
 const netDevices = ['raw', 'tools', 'cnc1', 'cnc2', 'cnc3', 'qc', 'out', 'robot'];
 const packets = [];
+const WEAR_RATE = 2.4; // % Verschleiß pro Sekunde Bearbeitung
 const stats = { out: 0, tool: 0, msg: 0, kwh: 0 };
 const history = [0]; let sparkT = 0; let ORDER = 60;
 let digital = true, view = 'iso';
@@ -269,7 +270,12 @@ function planRobot() {
   if (!digital) { R.idleT = (R.idleT || 0) + lastDt; if (R.idleT < 4) { R.label = 'wartet auf Werker'; return; } }
   R.idleT = 0;
   const cncs = ['cnc1', 'cnc2', 'cnc3'].map(k => M[k]);
-  const worn = cncs.find(c => c.state === 'idle' && c.needTool && !c.reserved);
+  // digital: MES prüft vor jedem Zyklus die Rest-Standzeit – reicht sie nicht für ein ganzes Teil, wird vorher gewechselt
+  if (digital) for (const c of cncs) if (c.state === 'idle' && !c.needTool && !c.reserved && c.wear + c.cycle * WEAR_RATE > 100) {
+    c.needTool = true; send(c.id, 'mes', 'Standzeit');
+    log(`MES: ${c.short} Rest-Standzeit ${Math.round(100 - c.wear)}% reicht nicht für nächsten Zyklus → Werkzeugwechsel`, 'var(--warn)'); }
+  // analog: verschlissenes Werkzeug wird erst bemerkt, wenn der Werker an der stehenden Maschine vorbeikommt
+  const worn = cncs.find(c => c.state === 'idle' && c.needTool && !c.reserved && (digital || c.stopT > 6));
   const empty = cncs.find(c => c.state === 'idle' && !c.needTool && !c.reserved);
   if (worn) { worn.reserved = true; R.task = [{ go: 'tools' }, { act: 'pickTool' }, { go: worn.id }, { act: 'toolChange', m: worn.id }]; R.label = `Werkzeugwechsel ${worn.short}`; }
   else if (empty && M.raw.stock > 0) { empty.reserved = true; R.task = [{ go: 'raw' }, { act: 'pickRaw' }, { go: empty.id }, { act: 'load', m: empty.id }]; R.label = `belädt ${empty.short}`; }
@@ -288,16 +294,20 @@ function step(dt) {
   for (const k of ['cnc1', 'cnc2', 'cnc3']) {
     const c = M[k];
     if (c.state === 'running') {
-      c.busyT += dt; c.progress += dt / c.cycle; c.wear += dt * 2.4;
+      c.busyT += dt; c.progress += dt / c.cycle; c.wear = Math.min(100, c.wear + dt * WEAR_RATE);
+      if (c.wear >= 100 && c.progress < 1) { // Werkzeug am Ende: Maschine kann nicht weiterfertigen
+        c.state = 'idle'; c.progress = 0; c.needTool = true; c.stopT = 0; M.qc.nok++; modeStats[digital].nok++;
+        send(k, 'mes', 'ALARM Werkzeug');
+        log(`⛔ ${c.short}: Werkzeug ${c.tool} verschlissen (100 %) – Bearbeitung abgebrochen, Teil ist Ausschuss, Maschine steht`, 'var(--err)');
+        continue;
+      }
       if (c.progress >= 1) {
         c.parts++; c.state = 'idle'; c.progress = 0;
-        // digital: Verschleiß wird live überwacht → Wechsel bei 100 %. analog: erst bemerkt, wenn's deutlich zu spät ist
-        if (c.wear >= (digital ? 100 : 160)) c.needTool = true;
-        const worn = c.wear > 115;
-        ship(beltOf[k], () => { M.qc.queue++; if (worn) M.qc.bad++; }); flowEvent(k, 'qc');
+        ship(beltOf[k], () => { M.qc.queue++; }); flowEvent(k, 'qc');
         send(k, 'mes', 'Teil fertig');
-        log(`${c.short}: Teil fertig → Förderband zur QC${c.needTool ? ' · Werkzeug verschlissen!' : ''}`, c.needTool ? 'var(--warn)' : 'var(--mat)');
+        log(`${c.short}: Teil fertig → Förderband zur QC · Standzeit noch ${Math.round(100 - c.wear)}%`, 'var(--mat)');
       }
+    } else if (c.state === 'idle' && c.needTool) { c.stopT = (c.stopT || 0) + dt;
     } else if (c.state === 'toolchange') {
       c.busyT += dt; c.progress += dt / 2.5;
       if (c.progress >= 1) { c.state = 'idle'; c.progress = 0; c.wear = 0; c.needTool = false; c.reserved = false;
@@ -307,7 +317,7 @@ function step(dt) {
   }
   const q = M.qc;
   if (q.queue > 0) { q.progress += dt / 1.8;
-    if (q.progress >= 1) { q.progress = 0; q.queue--; let pBad = cfg.scrap; if (q.bad > 0) { q.bad--; pBad = 0.6; }
+    if (q.progress >= 1) { q.progress = 0; q.queue--; const pBad = cfg.scrap;
       const ok = Math.random() > pBad; ok ? q.ok++ : q.nok++; const ms = modeStats[digital]; ok ? ms.ok++ : ms.nok++;
       send('qc', 'mes', ok ? 'i.O.' : 'n.i.O.');
       if (ok) { flowEvent('qc', 'out'); const md = digital; ship('b4', () => { M.out.stock++; stats.out++; modeStats[md].out++; }); log('QC: Teil i.O. → Versand', 'var(--ok)'); } else log('QC: Teil n.i.O. – Ausschuss', 'var(--err)'); } }
@@ -429,7 +439,7 @@ const stateInfo = m => {
   if (m.state === 'fault') return ['#ff6b6b', 'STÖRUNG'];
   if (m.state === 'running') return ['#2ee59d', 'Bearbeitung'];
   if (m.state === 'toolchange') return ['#ffc94d', 'Werkzeugwechsel'];
-  if (m.needTool) return ['#ff6b6b', 'Werkzeug verschlissen'];
+  if (m.needTool) return m.wear >= 100 ? ['#ff6b6b', 'Werkzeug verschlissen – steht'] : ['#ffc94d', 'Werkzeugwechsel fällig'];
   return ['#8b97b5', m.reserved ? 'wartet auf Roboter' : 'Leerlauf'];
 };
 function shadow(x, y, w, d) { poly(quad(x + .12, y + .18, w, d), 'rgba(0,0,0,.28)'); }
@@ -704,8 +714,8 @@ function drawAnalytics() {
   [...cncs, 'robot'].forEach((k, i) => { const m = get(k); hbar(x + 16, y + 52 + i * s1, cw - 32, m.short, m.util || 0, i === 3 ? '#ffc94d' : '#2ee59d', pct(m.util || 0)); });
   // 2 Verschleiß
   [x, y] = P(1); panel(x, y, cw, ch, 'Werkzeugverschleiß');
-  cncs.forEach((k, i) => { const m = M[k]; hbar(x + 16, y + 52 + i * s1, cw - 32, m.short, m.wear / 100, m.wear > 80 ? '#ff6b6b' : '#7c8cff', Math.round(Math.min(999, m.wear)) + '% · ' + m.tool); });
-  txt(digital ? '✔ Live-Überwachung: Wechsel automatisch bei 100 %' : '⚠ Analog: Verschleiß wird nicht gemessen', x + 16, y + ch - 20, '500 11px Inter, system-ui', digital ? '#2ee59d' : '#ffc94d');
+  cncs.forEach((k, i) => { const m = M[k]; hbar(x + 16, y + 52 + i * s1, cw - 32, m.short, m.wear / 100, m.wear > 80 ? '#ff6b6b' : '#7c8cff', Math.round(m.wear) + '% · ' + m.tool); });
+  txt(digital ? '✔ Vorausschauend: Wechsel, bevor ein Zyklus über 100 % käme' : '⚠ Analog: Werkzeug läuft bis 100 % → Abbruch & Ausschuss', x + 16, y + ch - 20, '500 11px Inter, system-ui', digital ? '#2ee59d' : '#ffc94d');
   // 3 Durchsatz
   [x, y] = P(2); panel(x, y, cw, ch, 'Durchsatz-Verlauf');
   const rate = history.slice(1).map((v, i) => v - history[i]), mx = Math.max(2, ...rate), gx = x + 16, gy = y + 40, gw = cw - 32, gh = ch - 64;
@@ -818,7 +828,8 @@ const agentTools = [
 ];
 const RULES = `Du bist "Factory-Agent", der KI-Assistent im Digital-Twin-Dashboard einer Zerspanungsfabrik: 3 CNC-Maschinen (cnc1, cnc2 Fräsen; cnc3 Drehmaschine), ein mobiler Roboter (AMR mit Arm), der Rohteile einlegt und Werkzeuge wechselt, Förderbänder zur Qualitätsprüfung (QC), Rohteil-/Werkzeug-/Fertigteillager und ein MES, das alles über OPC UA/MQTT vernetzt. Die Seite simuliert die Fabrik live.
 Antworte immer auf Deutsch, knapp und konkret (höchstens ~6 Sätze oder kurze Stichpunkte mit "- "), mit Zahlen aus dem Live-Zustand. Nutze **fett** für Kernaussagen, sonst kein Markdown.
-Wenn der Nutzer eine Aktion möchte (Störung auslösen/quittieren, Zykluszeit/Tempo/Robotergeschwindigkeit ändern, Digitalisierung schalten, Ansicht wechseln, Maschine zeigen), führe sie mit den Tools aus und sag kurz, was du getan hast. Für Analysen (Engpass, Optimierung, Wartung, Energie, Qualität) argumentiere aus den Daten.`;
+Wenn der Nutzer eine Aktion möchte (Störung auslösen/quittieren, Zykluszeit/Tempo/Robotergeschwindigkeit ändern, Digitalisierung schalten, Ansicht wechseln, Maschine zeigen), führe sie mit den Tools aus und sag kurz, was du getan hast. Wichtig: Ein Werkzeug mit 100 % Verschleiß kann nicht fertigen – erreicht es 100 % im Zyklus, bricht die CNC ab, das Teil ist Ausschuss und die Maschine steht bis zum Werkzeugwechsel. Digital prüft das MES vor jedem Zyklus, ob die Rest-Standzeit reicht (Verschleiß ${WEAR_RATE} %/s × Zykluszeit), und lässt sonst vorher wechseln.
+Für Analysen (Engpass, Optimierung, Wartung, Energie, Qualität) argumentiere aus den Daten.`;
 const turns = [];
 async function ask(q) {
   if (agBusy || !q.trim()) return; agBusy = true;
@@ -849,7 +860,7 @@ function localAgent(q) {
   if (/engpass|bottleneck|langsam|optimier|verbesser/.test(s)) { const slow = cn.reduce((a, b) => a.cycle > b.cycle ? a : b), worn = cn.filter(c => c.wear > 80);
     return `**Engpass: ${slow.short}** mit der längsten Zykluszeit (${slow.cycle.toFixed(1)} s, Auslastung ${pct(slow.util)}).\n- Roboter-Auslastung: ${pct(R.util || 0)}${(R.util || 0) > .8 ? ' – der Roboter ist selbst nahe am Limit' : ''}\n- Empfehlung: Zykluszeit von ${slow.short} senken (Einstellungen) oder Teile auf die anderen CNCs verteilen.${worn.length ? `\n- Bald Werkzeugwechsel nötig: ${worn.map(c => c.short).join(', ')}` : ''}`; }
   if (/werkzeug|verschleiß|verschleiss|wartung|tool/.test(s)) return '**Werkzeugzustand:**\n' + cn.map(c => `- ${c.short}: ${c.tool}, Verschleiß ${Math.round(c.wear)}%${c.wear > 80 ? ' ⚠' : ''}`).join('\n') + `\nBisher ${stats.tool} Wechsel, Magazinbestand ${M.tools.stock}.`;
-  if (/ausschuss|qualit|nio|n\.i\.o/.test(s)) { const t = M.qc.ok + M.qc.nok; return `**Qualitätsrate ${t ? pct(M.qc.ok / t) : '–'}** (${M.qc.ok} i.O., ${M.qc.nok} n.i.O.). Hauptursache für Ausschuss ist verschlissenes Werkzeug – mit Digitalisierung wird es rechtzeitig bei 100 % gewechselt.`; }
+  if (/ausschuss|qualit|nio|n\.i\.o/.test(s)) { const t = M.qc.ok + M.qc.nok; return `**Qualitätsrate ${t ? pct(M.qc.ok / t) : '–'}** (${M.qc.ok} i.O., ${M.qc.nok} n.i.O.). Ausschuss entsteht v. a., wenn ein Werkzeug mitten im Zyklus 100 % erreicht: dann bricht die CNC ab. Digital prüft das MES vor jedem Zyklus die Rest-Standzeit und wechselt vorher.`; }
   if (/energie|strom|kw/.test(s)) return `Aktuell **${totalPower().toFixed(1)} kW**, gesamt ${stats.kwh.toFixed(1)} kWh (${stats.out ? (stats.kwh / stats.out).toFixed(2) : '–'} kWh/Teil). Größte Verbraucher sind laufende CNCs (~14,5 kW).`;
   if (/digital|vorteil|bringt|nutzen|analog/.test(s)) { const st = factoryState().vergleich_teile_min; return `**Digitalisierung bringt:** Echtzeit-Aufträge an den Roboter, Verschleißüberwachung und sofortige Alarme.\n- Analog: ${st.analog ?? '–'} Teile/min\n- Digital: ${st.digital ?? '–'} Teile/min${st.analog && st.digital ? `\n- **+${Math.round((st.digital / st.analog - 1) * 100)}% Durchsatz**` : '\nSchalte die Digitalisierung kurz aus, dann kann ich vergleichen.'}`; }
   if (id) { const c = M[id]; return `**${c.name}:** ${stateInfo(c)[1]}, Werkzeug ${c.tool} (${Math.round(c.wear)}% Verschleiß), ${c.parts} Teile, Auslastung ${pct(c.util)}.`; }
