@@ -4,334 +4,416 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Smart Factory Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0f1420; --panel: #171e2e; --line: #26304a; --text: #e6ebf5; --muted: #8a96b0;
-    --mat: #ff9f43; --info: #38d6ff; --ok: #2ecc71; --warn: #f1c40f; --err: #ff5c5c;
+    --bg: #0b1020; --bg2: #111830; --panel: #141c33; --card: #1a2440; --line: #26314f; --text: #e8edf7; --muted: #8b97b5;
+    --mat: #ff9f43; --info: #3ad8ff; --ok: #2ee59d; --warn: #ffc94d; --err: #ff6b6b; --accent: #7c8cff;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; }
   .app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
-  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 16px;
-    border-bottom: 1px solid var(--line); background: var(--panel); }
-  header h1 { font-size: 16px; margin: 0 12px 0 0; letter-spacing: .3px; }
-  .kpi { background: #0f1420; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-width: 96px; }
-  .kpi b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+  header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 18px;
+    background: linear-gradient(180deg, #151e38, #101731); border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 10px; margin-right: 14px; }
+  .logo { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; font-size: 18px;
+    background: linear-gradient(135deg, var(--accent), var(--info)); }
+  .brand h1 { font-size: 15px; margin: 0; font-weight: 700; }
+  .brand small { color: var(--muted); font-size: 11.5px; }
+  .live { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ok); margin-left: 6px; }
+  .live::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); animation: pulse 1.4s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .kpis { display: flex; gap: 8px; flex-wrap: wrap; }
+  .kpi { background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 10px; padding: 7px 12px; min-width: 112px; }
+  .kpi b { display: block; font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .kpi span { font-size: 11px; color: var(--muted); }
-  .legend { margin-left: auto; display: flex; gap: 14px; font-size: 12px; color: var(--muted); align-items: center; }
-  .sw { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
-  button { background: #22304d; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
-  button:hover { background: #2b3c60; }
-  main { display: grid; grid-template-columns: 1fr 340px; min-height: 0; }
-  #view { position: relative; min-height: 0; }
+  .controls { margin-left: auto; display: flex; gap: 6px; }
+  button { font: inherit; font-size: 12.5px; background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  main { display: grid; grid-template-columns: 1fr 360px; min-height: 0; }
+  #view { position: relative; min-height: 0; background: radial-gradient(ellipse at 50% 40%, #18223f 0%, var(--bg) 70%); }
   canvas { width: 100%; height: 100%; display: block; cursor: pointer; }
-  aside { border-left: 1px solid var(--line); background: var(--panel); padding: 14px; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
-  aside h2 { font-size: 14px; margin: 0 0 6px; }
-  .card { background: #0f1420; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 13px; }
-  .row { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dashed #1f2840; }
+  .legend { position: absolute; left: 14px; top: 14px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted);
+    background: rgba(17,24,48,.8); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; backdrop-filter: blur(6px); }
+  .legend div { display: flex; align-items: center; gap: 8px; }
+  .sw { width: 22px; height: 4px; border-radius: 2px; }
+  .hint { position: absolute; left: 14px; bottom: 12px; font-size: 12px; color: var(--muted); }
+  aside { border-left: 1px solid var(--line); background: var(--panel); padding: 16px; overflow: auto; display: flex; flex-direction: column; gap: 16px; }
+  aside h2 { font-size: 11px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); font-weight: 600; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; font-size: 13px; }
+  .mlist { display: flex; flex-direction: column; gap: 6px; }
+  .mi { display: grid; grid-template-columns: 10px 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px;
+    background: var(--card); border: 1px solid var(--line); cursor: pointer; font-size: 12.5px; }
+  .mi:hover, .mi.sel { border-color: var(--accent); background: #1e2a4c; }
+  .mi .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .mi .st { color: var(--muted); font-size: 11.5px; }
+  .mi .bar { grid-column: 2 / 4; }
+  .row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #222d4c; }
   .row:last-child { border-bottom: 0; }
   .row span:first-child { color: var(--muted); }
-  .bar { height: 6px; background: #1f2840; border-radius: 3px; overflow: hidden; margin-top: 4px; }
-  .bar i { display: block; height: 100%; background: var(--ok); }
-  .tag { display: inline-block; font-size: 11px; padding: 2px 6px; border-radius: 4px; margin: 2px 4px 2px 0; border: 1px solid var(--line); }
-  .tag.info { color: var(--info); border-color: #1d5a6e; }
-  .tag.mat { color: var(--mat); border-color: #6e4a1d; }
-  #log { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; max-height: 260px; overflow: auto; }
-  #log div { padding: 2px 0; border-bottom: 1px solid #182036; }
+  .bar { height: 5px; background: #0f1630; border-radius: 3px; overflow: hidden; margin-top: 4px; }
+  .bar i { display: block; height: 100%; background: var(--ok); border-radius: 3px; transition: width .25s; }
+  .tag { display: inline-block; font-size: 11px; padding: 3px 7px; border-radius: 6px; margin: 4px 4px 0 0; }
+  .tag.info { color: var(--info); background: rgba(58,216,255,.1); }
+  .tag.mat { color: var(--mat); background: rgba(255,159,67,.1); }
+  .sub { margin-top: 10px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+  #log { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; max-height: 240px; overflow: auto; padding: 8px 10px; }
+  #log div { padding: 3px 0; border-bottom: 1px solid #222d4c; }
   #log .t { color: var(--muted); margin-right: 6px; }
-  .hint { position: absolute; left: 12px; bottom: 10px; font-size: 12px; color: var(--muted); }
-  @media (max-width: 860px) {
-    main { grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 58vh auto; }
     aside { border-left: 0; border-top: 1px solid var(--line); }
-    .legend { margin-left: 0; }
+    .controls { margin-left: 0; }
   }
 </style>
 </head>
 <body>
 <div class="app">
   <header>
-    <h1>🏭 Smart Factory – Digital Twin</h1>
-    <div class="kpi"><b id="kOut">0</b><span>Fertigteile</span></div>
-    <div class="kpi"><b id="kOee">0%</b><span>Ø Auslastung CNC</span></div>
-    <div class="kpi"><b id="kTool">0</b><span>Werkzeugwechsel</span></div>
-    <div class="kpi"><b id="kMsg">0</b><span>Nachrichten (OPC UA / MQTT)</span></div>
-    <button id="btnPause">⏸ Pause</button>
-    <button id="btnFast">⏩ 1x</button>
-    <div class="legend">
-      <span><i class="sw" style="background:var(--mat)"></i>Material-Flow</span>
-      <span><i class="sw" style="background:var(--info)"></i>Informations-Flow</span>
+    <div class="brand"><div class="logo">🏭</div><div><h1>Smart Factory · Digital Twin <span class="live">LIVE</span></h1><small>Halle 1 – Zerspanung</small></div></div>
+    <div class="kpis">
+      <div class="kpi"><b id="kOut">0</b><span>Fertigteile</span></div>
+      <div class="kpi"><b id="kOee">0%</b><span>Ø Auslastung CNC</span></div>
+      <div class="kpi"><b id="kQ">–</b><span>Qualitätsrate</span></div>
+      <div class="kpi"><b id="kTool">0</b><span>Werkzeugwechsel</span></div>
+      <div class="kpi"><b id="kMsg">0</b><span>Nachrichten</span></div>
     </div>
+    <div class="controls"><button id="btnPause">⏸ Pause</button><button id="btnFast">⏩ 1x</button></div>
   </header>
   <main>
-    <div id="view"><canvas id="c"></canvas><div class="hint">Klick auf eine Maschine für Details</div></div>
+    <div id="view">
+      <canvas id="c"></canvas>
+      <div class="legend">
+        <div><i class="sw" style="background:var(--mat)"></i>Material-Flow (Förderband / Roboter)</div>
+        <div><i class="sw" style="background:repeating-linear-gradient(90deg,var(--info) 0 5px,transparent 5px 9px)"></i>Informations-Flow (OPC UA / MQTT)</div>
+      </div>
+      <div class="hint">Klick auf eine Maschine für Details</div>
+    </div>
     <aside>
-      <div><h2 id="selTitle">Fabrik-Übersicht</h2><div class="card" id="sel">Wähle eine Maschine im Hallenplan aus.</div></div>
-      <div><h2>Event-Log (MES)</h2><div class="card" id="log"></div></div>
+      <div><h2>Anlagen</h2><div class="mlist" id="mlist"></div></div>
+      <div><h2 id="selTitle">Details</h2><div class="card" id="sel"></div></div>
+      <div><h2>Event-Log · MES</h2><div class="card" id="log"></div></div>
     </aside>
   </main>
 </div>
 <script>
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-const TW = 72, TH = 36, GRID = 13;
-let W = 0, H = 0, ox = 0, oy = 0, speed = 1, paused = false, simT = 0;
+const TW = 72, TH = 36, GX = 14, GY = 10;
+let W = 0, H = 0, ox = 0, oy = 0, scale = 1, speed = 1, paused = false, simT = 0;
 
-// ---------- Factory model ----------
+// ---------- Factory model (Fluss von links nach rechts) ----------
 const M = {
-  raw:   { name: 'Rohteil-Lager', type: 'storage', x: 1, y: 2,  w: 2, d: 2, h: 34, color: '#8e6b3d', stock: 40, iface: ['OPC UA', 'RFID'] },
-  tools: { name: 'Werkzeug-Magazin', type: 'tools', x: 1, y: 8, w: 2, d: 2, h: 40, color: '#6c5ce7', stock: 12, iface: ['OPC UA'] },
-  cnc1:  { name: 'CNC 1 – Fräse',  type: 'cnc', x: 6, y: 1, w: 2, d: 2, h: 46, color: '#3d7bd9', iface: ['OPC UA', 'MTConnect'] },
-  cnc2:  { name: 'CNC 2 – Fräse',  type: 'cnc', x: 6, y: 5, w: 2, d: 2, h: 46, color: '#3d7bd9', iface: ['OPC UA', 'MTConnect'] },
-  cnc3:  { name: 'CNC 3 – Drehmaschine', type: 'cnc', x: 6, y: 9, w: 2, d: 2, h: 46, color: '#2f9e8f', iface: ['OPC UA', 'MTConnect'] },
-  qc:    { name: 'Qualitätsprüfung', type: 'qc', x: 10, y: 5, w: 1, d: 2, h: 30, color: '#b0558a', iface: ['OPC UA', 'Vision'] },
-  out:   { name: 'Fertigteil-Lager', type: 'storage', x: 11, y: 9, w: 2, d: 2, h: 30, color: '#5a8a3d', stock: 0, iface: ['OPC UA', 'RFID'] },
-  mes:   { name: 'MES / Edge-Server', type: 'it', x: 10, y: 0, w: 1, d: 1, h: 60, color: '#34495e', iface: ['MQTT Broker', 'OPC UA Client', 'REST'] },
+  raw:   { name: 'Rohteil-Lager', short: 'Rohteile', type: 'storage', x: 0.5, y: 1, w: 2, d: 2, h: 30, color: '#a77b45', stock: 40, iface: ['OPC UA', 'RFID'] },
+  tools: { name: 'Werkzeug-Magazin', short: 'Werkzeuge', type: 'tools', x: 0.5, y: 6.5, w: 2, d: 2, h: 38, color: '#6d5ce8', stock: 12, iface: ['OPC UA'] },
+  cnc1:  { name: 'CNC 1 – Fräse', short: 'CNC 1', type: 'cnc', x: 6, y: 0.5, w: 2, d: 2, h: 46, color: '#3f7fe0', iface: ['OPC UA', 'MTConnect'] },
+  cnc2:  { name: 'CNC 2 – Fräse', short: 'CNC 2', type: 'cnc', x: 6, y: 4, w: 2, d: 2, h: 46, color: '#3f7fe0', iface: ['OPC UA', 'MTConnect'] },
+  cnc3:  { name: 'CNC 3 – Drehmaschine', short: 'CNC 3', type: 'cnc', x: 6, y: 7.5, w: 2, d: 2, h: 46, color: '#22a597', iface: ['OPC UA', 'MTConnect'] },
+  qc:    { name: 'Qualitätsprüfung', short: 'QC', type: 'qc', x: 10.5, y: 4, w: 2, d: 2, h: 32, color: '#c0558f', iface: ['OPC UA', 'Vision'] },
+  out:   { name: 'Fertigteil-Lager', short: 'Versand', type: 'storage', x: 10.5, y: 7.5, w: 2, d: 2, h: 26, color: '#4f9a4a', stock: 0, iface: ['OPC UA', 'RFID'] },
+  mes:   { name: 'MES / Edge-Server', short: 'MES', type: 'it', x: 11, y: 0.5, w: 1.2, d: 1.2, h: 64, color: '#3a4a6b', iface: ['MQTT Broker', 'OPC UA Client', 'REST'] },
 };
 for (const k in M) Object.assign(M[k], { id: k, util: 0, busyT: 0 });
 ['cnc1', 'cnc2', 'cnc3'].forEach((k, i) => Object.assign(M[k], {
-  state: 'idle', part: false, progress: 0, cycle: 7 + i * 1.5, wear: 20 + i * 25, tool: 'T0' + (i + 1), parts: 0, needTool: false, reserved: false,
+  state: 'idle', progress: 0, cycle: 7 + i * 1.5, wear: 45 + i * 20, tool: 'T0' + (i + 1), parts: 0, needTool: false, reserved: false,
 }));
 Object.assign(M.qc, { queue: 0, progress: 0, ok: 0, nok: 0 });
+const R = { name: 'Roboter (AMR + Arm)', short: 'Roboter', type: 'robot', id: 'robot', x: 4.2, y: 5, carry: null, task: [], label: 'wartet', iface: ['ROS 2', 'MQTT'], moves: 0, h: 30 };
 
-// Robot (AMR with arm)
-const R = { name: 'Roboter (AMR + Arm)', type: 'robot', id: 'robot', x: 4, y: 5, carry: null, task: [], label: 'wartet', iface: ['ROS 2', 'MQTT'], moves: 0 };
-// Dock points in front of stations
-const dock = { raw: [3.4, 3], tools: [3.4, 9], cnc1: [5.4, 2], cnc2: [5.4, 6], cnc3: [5.4, 10], qc: [9.4, 6], out: [10.6, 10] };
+// Roboter-Gasse: x=4.2, Andockpunkte vor den Stationen
+const LANE = 4.2;
+const dock = { raw: [LANE, 2], tools: [LANE, 7.5], cnc1: [LANE, 1.5], cnc2: [LANE, 5], cnc3: [LANE, 8.5] };
 
-// Connections
-const matLinks = [['raw','cnc1'],['raw','cnc2'],['raw','cnc3'],['tools','cnc1'],['tools','cnc2'],['tools','cnc3'],['cnc1','qc'],['cnc2','qc'],['cnc3','qc'],['qc','out']];
-const infoLinks = ['raw','tools','cnc1','cnc2','cnc3','qc','out','robot'].map(k => [k, 'mes']);
+// Förderbänder (orthogonal): CNC → Sammelband → QC → Versand
+const BUS_X = 9.3;
+const belts = [
+  { id: 'b1', pts: [[8, 1.5], [BUS_X, 1.5], [BUS_X, 5], [10.5, 5]] },
+  { id: 'b2', pts: [[8, 5], [10.5, 5]] },
+  { id: 'b3', pts: [[8, 8.5], [BUS_X, 8.5], [BUS_X, 5], [10.5, 5]] },
+  { id: 'b4', pts: [[11.5, 6], [11.5, 7.5]] },
+];
+const beltOf = { cnc1: 'b1', cnc2: 'b2', cnc3: 'b3' };
+const matLinks = [['raw', 'robot'], ['tools', 'robot'], ['robot', 'cnc1'], ['robot', 'cnc2'], ['robot', 'cnc3'], ['cnc1', 'qc'], ['cnc2', 'qc'], ['cnc3', 'qc'], ['qc', 'out']];
 
-const packets = []; // {from,to,t,kind,label}
+// Netzwerk: Kabeltrasse in Höhe Z über Zeile y=-0.2, dann zum MES
+const NETZ = 78, TRAY_Y = -0.3;
+const netDevices = ['raw', 'tools', 'cnc1', 'cnc2', 'cnc3', 'qc', 'out', 'robot'];
+const packets = [];
 const stats = { out: 0, tool: 0, msg: 0 };
 
 // ---------- helpers ----------
-const iso = (x, y, z = 0) => [ (x - y) * TW / 2 + ox, (x + y) * TH / 2 + oy - z ];
+const iso = (x, y, z = 0) => [(x - y) * TW / 2 + ox, (x + y) * TH / 2 + oy - z];
 const center = id => id === 'robot' ? [R.x, R.y] : [M[id].x + M[id].w / 2, M[id].y + M[id].d / 2];
+const topZ = id => id === 'robot' ? 34 : M[id].h + (M[id].type === 'cnc' ? 18 : 0);
+function netPath(id) { // Gerät → hoch zur Trasse → entlang → MES
+  const [cx, cy] = center(id), [mx, my] = center('mes');
+  return [[cx, cy, topZ(id)], [cx, cy, NETZ], [cx, TRAY_Y, NETZ], [mx, TRAY_Y, NETZ], [mx, my, NETZ], [mx, my, M.mes.h]];
+}
+function along(pts, t) { // pts in Weltkoordinaten [x,y,z]
+  const P = pts.map(p => iso(p[0], p[1], p[2] || 0)); let L = 0; const seg = [];
+  for (let i = 1; i < P.length; i++) { const l = Math.hypot(P[i][0] - P[i-1][0], P[i][1] - P[i-1][1]); seg.push(l); L += l; }
+  let d = t * L;
+  for (let i = 0; i < seg.length; i++) { if (d <= seg[i] || i === seg.length - 1) { const f = seg[i] ? Math.min(1, d / seg[i]) : 0;
+    return [P[i][0] + (P[i+1][0] - P[i][0]) * f, P[i][1] + (P[i+1][1] - P[i][1]) * f]; } d -= seg[i]; }
+}
 const logEl = document.getElementById('log');
-function log(msg, cls = '') {
-  const m = Math.floor(simT / 60), s = Math.floor(simT % 60);
-  const d = document.createElement('div');
-  d.innerHTML = `<span class="t">${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}</span><span style="color:${cls}">${msg}</span>`;
+function log(msg, col = '') {
+  const m = Math.floor(simT / 60), s = Math.floor(simT % 60), d = document.createElement('div');
+  d.innerHTML = `<span class="t">${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}</span><span style="color:${col}">${msg}</span>`;
   logEl.prepend(d); while (logEl.children.length > 80) logEl.lastChild.remove();
 }
-function send(from, to, label, kind = 'info') {
-  packets.push({ from, to, t: 0, kind, label }); if (kind === 'info') stats.msg++;
+function send(from, to, label) { // Informationspaket über die Trasse
+  const path = from === 'mes' ? netPath(to).reverse() : netPath(from);
+  packets.push({ kind: 'info', path, t: 0, label }); stats.msg++;
 }
+function ship(beltId, onArrive) { const b = belts.find(b => b.id === beltId); packets.push({ kind: 'mat', path: b.pts.map(p => [p[0], p[1], 6]), t: 0, dur: 2.2, onArrive }); }
 
-// ---------- simulation ----------
+// ---------- Simulation ----------
 function planRobot() {
   if (R.task.length) return;
   const cncs = ['cnc1', 'cnc2', 'cnc3'].map(k => M[k]);
-  const done = cncs.find(c => c.state === 'done');
-  if (done) {
-    R.task = [{ go: done.id }, { act: 'unload', m: done.id }, { go: 'qc' }, { act: 'toQC' }];
-    R.label = `entlädt ${done.name.split(' –')[0]}`;
-  } else {
-    const worn = cncs.find(c => c.state === 'idle' && c.needTool && !c.reserved);
-    const empty = cncs.find(c => c.state === 'idle' && !c.part && !c.needTool && !c.reserved);
-    if (worn) {
-      worn.reserved = true;
-      R.task = [{ go: 'tools' }, { act: 'pickTool' }, { go: worn.id }, { act: 'toolChange', m: worn.id }];
-      R.label = `Werkzeugwechsel ${worn.name.split(' –')[0]}`;
-    } else if (empty && M.raw.stock > 0) {
-      empty.reserved = true;
-      R.task = [{ go: 'raw' }, { act: 'pickRaw' }, { go: empty.id }, { act: 'load', m: empty.id }];
-      R.label = `belädt ${empty.name.split(' –')[0]}`;
-    } else { R.label = 'wartet'; return; }
-  }
-  send('mes', 'robot', 'Auftrag: ' + R.label);
-  log(`MES → Roboter: ${R.label}`, 'var(--info)');
+  const worn = cncs.find(c => c.state === 'idle' && c.needTool && !c.reserved);
+  const empty = cncs.find(c => c.state === 'idle' && !c.needTool && !c.reserved);
+  if (worn) { worn.reserved = true; R.task = [{ go: 'tools' }, { act: 'pickTool' }, { go: worn.id }, { act: 'toolChange', m: worn.id }]; R.label = `Werkzeugwechsel ${worn.short}`; }
+  else if (empty && M.raw.stock > 0) { empty.reserved = true; R.task = [{ go: 'raw' }, { act: 'pickRaw' }, { go: empty.id }, { act: 'load', m: empty.id }]; R.label = `belädt ${empty.short}`; }
+  else { R.label = 'wartet'; return; }
+  send('mes', 'robot', R.label); log(`MES → Roboter: ${R.label}`, 'var(--info)');
 }
-
 function step(dt) {
   simT += dt;
-  // CNCs
   for (const k of ['cnc1', 'cnc2', 'cnc3']) {
     const c = M[k];
     if (c.state === 'running') {
-      c.busyT += dt; c.progress += dt / c.cycle; c.wear += dt * 2.2;
+      c.busyT += dt; c.progress += dt / c.cycle; c.wear += dt * 2.4;
       if (c.progress >= 1) {
-        c.progress = 1; c.state = 'done'; c.parts++;
-        if (c.wear >= 100) c.needTool = true;
-        send(k, 'mes', 'Teil fertig'); log(`${c.name}: Bearbeitung fertig${c.needTool ? ' – Werkzeug verschlissen!' : ''}`, c.needTool ? 'var(--warn)' : '');
+        c.parts++; c.state = 'idle'; c.progress = 0; if (c.wear >= 100) c.needTool = true;
+        ship(beltOf[k], () => { M.qc.queue++; });
+        send(k, 'mes', 'Teil fertig');
+        log(`${c.short}: Teil fertig → Förderband zur QC${c.needTool ? ' · Werkzeug verschlissen!' : ''}`, c.needTool ? 'var(--warn)' : 'var(--mat)');
       }
     } else if (c.state === 'toolchange') {
       c.busyT += dt; c.progress += dt / 2.5;
       if (c.progress >= 1) { c.state = 'idle'; c.progress = 0; c.wear = 0; c.needTool = false; c.reserved = false;
-        c.tool = 'T' + String(10 + Math.floor(Math.random() * 89)); send(k, 'mes', 'Werkzeug ' + c.tool); log(`${c.name}: neues Werkzeug ${c.tool} eingesetzt`, 'var(--ok)'); R.task.shift(); }
+        c.tool = 'T' + (10 + Math.floor(Math.random() * 89)); send(k, 'mes', 'Werkzeug ' + c.tool); log(`${c.short}: neues Werkzeug ${c.tool} eingesetzt`, 'var(--ok)'); R.task.shift(); }
     }
     c.util = simT > 0 ? c.busyT / simT : 0;
   }
-  // QC
   const q = M.qc;
-  if (q.queue > 0) {
-    q.progress += dt / 2;
-    if (q.progress >= 1) {
-      q.progress = 0; q.queue--;
-      const ok = Math.random() > 0.08; ok ? q.ok++ : q.nok++;
-      send('qc', 'mes', ok ? 'Prüfung i.O.' : 'Prüfung n.i.O.');
-      if (ok) { send('qc', 'out', 'Teil', 'mat'); log('QC: Teil i.O. → Fertigteil-Lager', 'var(--ok)'); }
-      else log('QC: Teil n.i.O. – Ausschuss', 'var(--err)');
-    }
-  }
-  // Robot
+  if (q.queue > 0) { q.progress += dt / 1.8;
+    if (q.progress >= 1) { q.progress = 0; q.queue--; const ok = Math.random() > 0.08; ok ? q.ok++ : q.nok++;
+      send('qc', 'mes', ok ? 'i.O.' : 'n.i.O.');
+      if (ok) { ship('b4', () => { M.out.stock++; stats.out++; }); log('QC: Teil i.O. → Versand', 'var(--ok)'); } else log('QC: Teil n.i.O. – Ausschuss', 'var(--err)'); } }
   planRobot();
   const t = R.task[0];
-  if (t && t.go) {
-    const [tx, ty] = dock[t.go], dx = tx - R.x, dy = ty - R.y, dist = Math.hypot(dx, dy), v = 3.2 * dt;
+  if (t && t.go) { // erst auf Gasse in y fahren (Gasse ist gerade)
+    const [tx, ty] = dock[t.go], dx = tx - R.x, dy = ty - R.y, dist = Math.hypot(dx, dy), v = 3 * dt;
     if (dist <= v) { R.x = tx; R.y = ty; R.task.shift(); R.moves++; } else { R.x += dx / dist * v; R.y += dy / dist * v; }
   } else if (t && t.act) {
     t.wait = (t.wait || 0) + dt;
-    if (t.act === 'toolChange') {
-      const c = M[t.m]; if (c.state !== 'toolchange') { c.state = 'toolchange'; c.progress = 0; R.carry = null; stats.tool++; send('robot', 'mes', 'Tool getauscht'); }
-      return; // finished by CNC
-    }
+    if (t.act === 'toolChange') { const c = M[t.m]; if (c.state !== 'toolchange') { c.state = 'toolchange'; c.progress = 0; R.carry = null; stats.tool++; M.tools.stock = Math.max(0, M.tools.stock - 1); } return; }
     if (t.wait < 0.6) return;
     if (t.act === 'pickRaw') { M.raw.stock--; R.carry = 'raw'; send('raw', 'mes', 'Bestand ' + M.raw.stock); }
-    if (t.act === 'pickTool') { M.tools.stock = Math.max(0, M.tools.stock - 1); R.carry = 'tool'; }
-    if (t.act === 'load') { const c = M[t.m]; c.part = true; c.state = 'running'; c.progress = 0; c.reserved = false; R.carry = null;
-      send('robot', 'mes', 'Teil geladen'); log(`Roboter legt Rohteil in ${c.name}`, 'var(--mat)'); }
-    if (t.act === 'unload') { const c = M[t.m]; c.part = false; c.state = 'idle'; c.progress = 0; R.carry = 'part'; }
-    if (t.act === 'toQC') { R.carry = null; M.qc.queue++; }
+    if (t.act === 'pickTool') R.carry = 'tool';
+    if (t.act === 'load') { const c = M[t.m]; c.state = 'running'; c.progress = 0; c.reserved = false; R.carry = null; send('robot', 'mes', 'geladen'); log(`Roboter legt Rohteil in ${c.short}`, 'var(--mat)'); }
     R.task.shift();
   }
-  // packets
-  for (const p of packets) p.t += dt / (p.kind === 'mat' ? 1.6 : 0.9);
-  for (let i = packets.length - 1; i >= 0; i--) if (packets[i].t >= 1) {
-    const p = packets[i]; if (p.kind === 'mat' && p.to === 'out') { M.out.stock++; stats.out++; }
-    packets.splice(i, 1);
-  }
+  for (const p of packets) p.t += dt / (p.dur || 1.1);
+  for (let i = packets.length - 1; i >= 0; i--) if (packets[i].t >= 1) { packets[i].onArrive?.(); packets.splice(i, 1); }
   if (M.raw.stock < 5 && Math.random() < dt * 0.15) { M.raw.stock += 20; log('Logistik: 20 Rohteile nachgeliefert', 'var(--mat)'); send('mes', 'raw', 'Nachschub'); }
+  if (M.tools.stock < 3) { M.tools.stock += 8; log('Werkzeugausgabe: 8 Werkzeuge vermessen & eingelagert', '#a29bfe'); }
 }
 
-// ---------- drawing ----------
+// ---------- Zeichnen ----------
 function resize() {
   const r = cv.parentElement.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
   W = r.width; H = r.height; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const s = Math.min(W / (GRID * TW), H / (GRID * TH * 1.15), 1.3);
-  scale = s; ox = W / 2 / s; oy = (H / s - GRID * TH) / 2 + 30;
+  const worldW = (GX + GY) * TW / 2, worldH = (GX + GY) * TH / 2 + 120;
+  scale = Math.min(W / worldW, H / worldH, 1.4) * 0.94;
+  ox = (W / scale - worldW) / 2 + GY * TW / 2; oy = (H / scale - worldH) / 2 + 110;
 }
-let scale = 1;
-function shade(hex, f) { const n = parseInt(hex.slice(1), 16); let r = n >> 16, g = n >> 8 & 255, b = n & 255;
-  r = Math.min(255, r * f) | 0; g = Math.min(255, g * f) | 0; b = Math.min(255, b * f) | 0; return `rgb(${r},${g},${b})`; }
-function poly(pts, fill, stroke) { ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath();
-  if (fill) { ctx.fillStyle = fill; ctx.fill(); } if (stroke) { ctx.strokeStyle = stroke; ctx.stroke(); } }
-function box(x, y, w, d, h, color, z = 0) {
-  const a = iso(x, y, z + h), b = iso(x + w, y, z + h), c = iso(x + w, y + d, z + h), e = iso(x, y + d, z + h);
-  const b0 = iso(x + w, y, z), c0 = iso(x + w, y + d, z), e0 = iso(x, y + d, z);
-  poly([e, c, c0, e0], shade(color, 0.75)); // left/front
-  poly([c, b, b0, c0], shade(color, 0.55)); // right
-  poly([a, b, c, e], shade(color, 1.15), 'rgba(255,255,255,.15)');
-  return { top: [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2] };
+function shade(hex, f) { const n = parseInt(hex.slice(1), 16); const c = [n >> 16, n >> 8 & 255, n & 255].map(v => Math.min(255, v * f) | 0); return `rgb(${c})`; }
+function poly(pts, fill, stroke, lw = 1) { ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); } if (stroke) { ctx.lineWidth = lw; ctx.strokeStyle = stroke; ctx.stroke(); } }
+const quad = (x, y, w, d, z = 0) => [iso(x, y, z), iso(x + w, y, z), iso(x + w, y + d, z), iso(x, y + d, z)];
+function box(x, y, w, d, h, color, z = 0, edge = 'rgba(255,255,255,.18)') {
+  const T = quad(x, y, w, d, z + h), B = quad(x, y, w, d, z);
+  poly([T[3], T[2], B[2], B[3]], shade(color, .78));
+  poly([T[2], T[1], B[1], B[2]], shade(color, .58));
+  poly(T, shade(color, 1.12), edge);
+  return { top: [(T[0][0] + T[2][0]) / 2, (T[0][1] + T[2][1]) / 2], T };
+}
+function pill(x, y, text, col = '#e8edf7', bg = 'rgba(13,19,38,.85)', border = 'rgba(255,255,255,.12)') {
+  ctx.font = '600 11.5px Inter, system-ui'; const w = ctx.measureText(text).width + 16;
+  ctx.beginPath(); ctx.roundRect(x - w / 2, y - 10, w, 20, 10); ctx.fillStyle = bg; ctx.fill(); ctx.strokeStyle = border; ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = col; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, x, y + .5);
+}
+function zone(x, y, w, d, col, label) {
+  poly(quad(x, y, w, d), col.replace('A', '.07'), col.replace('A', '.45'), 1.2);
+  const p = iso(x + .15, y + d - .15); ctx.save(); ctx.translate(p[0], p[1]); ctx.transform(1, -.5, 1, .5, 0, 0);
+  ctx.font = '700 9px Inter, system-ui'; ctx.fillStyle = col.replace('A', '.75'); ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+  ctx.restore();
+  // Beschriftung flach an der Vorderkante
+  const q = iso(x + w / 2, y + d, 0); ctx.font = '700 10px Inter, system-ui'; ctx.fillStyle = col.replace('A', '.8'); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.fillText(label.toUpperCase(), q[0] + 10, q[1] + 6);
 }
 function drawGround() {
-  for (let x = 0; x < GRID; x++) for (let y = 0; y < GRID; y++)
-    poly([iso(x, y), iso(x + 1, y), iso(x + 1, y + 1), iso(x, y + 1)], (x + y) % 2 ? '#1b2335' : '#1e273b', '#252f47');
-  // robot lane
-  ctx.globalAlpha = .25; poly([iso(3.2, 1), iso(5.8, 1), iso(5.8, 11), iso(3.2, 11)], '#f1c40f'); ctx.globalAlpha = 1;
+  // Hallenboden
+  const F = quad(-0.2, -0.6, GX + .4, GY + .8);
+  const D = quad(-0.2, -0.6, GX + .4, GY + .8, -14);
+  poly([F[3], F[2], D[2], D[3]], '#121a31'); poly([F[2], F[1], D[1], D[2]], '#0d1428'); poly(F, '#18213b');
+  ctx.strokeStyle = 'rgba(255,255,255,.035)'; ctx.lineWidth = 1;
+  for (let x = 0; x <= GX; x++) { ctx.beginPath(); ctx.moveTo(...iso(x, -.6)); ctx.lineTo(...iso(x, GY + .2)); ctx.stroke(); }
+  for (let y = 0; y <= GY; y++) { ctx.beginPath(); ctx.moveTo(...iso(-.2, y)); ctx.lineTo(...iso(GX + .2, y)); ctx.stroke(); }
+  zone(0.2, 0.4, 2.6, 8.6, 'rgba(255,159,67,A)', '① Lager');
+  zone(3.4, 0.4, 1.6, 9, 'rgba(255,201,77,A)', '② Roboterzelle');
+  zone(5.6, 0.1, 2.8, 9.8, 'rgba(124,140,255,A)', '③ Fertigung');
+  zone(10.1, 3.6, 2.8, 6.3, 'rgba(46,229,157,A)', '④ Prüfung & Versand');
+  // Roboter-Gasse: Fahrschiene
+  ctx.strokeStyle = 'rgba(255,201,77,.55)'; ctx.lineWidth = 2; ctx.setLineDash([10, 8]);
+  ctx.beginPath(); ctx.moveTo(...iso(LANE, 0.8)); ctx.lineTo(...iso(LANE, 9.2)); ctx.stroke(); ctx.setLineDash([]);
 }
-function linkPts(a, b, z) { const [ax, ay] = center(a), [bx, by] = center(b); return [iso(ax, ay, z), iso(bx, by, z)]; }
-function drawLinks() {
-  ctx.lineWidth = 2; ctx.setLineDash([]);
-  for (const [a, b] of matLinks) { const [p, q] = linkPts(a, b, 0); ctx.strokeStyle = 'rgba(255,159,67,.35)'; ctx.beginPath(); ctx.moveTo(...p); ctx.lineTo(...q); ctx.stroke(); }
-  ctx.setLineDash([5, 6]); ctx.lineDashOffset = -simT * 20;
-  for (const [a, b] of infoLinks) { const [p, q] = [iso(...center(a), a === 'robot' ? 30 : M[a].h), iso(...center(b), 60)];
-    ctx.strokeStyle = 'rgba(56,214,255,.35)'; ctx.beginPath(); ctx.moveTo(...p); ctx.lineTo(...q); ctx.stroke(); }
-  ctx.setLineDash([]);
+function drawBelts() {
+  for (const b of belts) {
+    for (let i = 1; i < b.pts.length; i++) {
+      const [ax, ay] = b.pts[i - 1], [bx, by] = b.pts[i], hw = .16;
+      const x0 = Math.min(ax, bx) - (ax === bx ? hw : 0), y0 = Math.min(ay, by) - (ay === by ? hw : 0);
+      box(x0, y0, Math.abs(bx - ax) + (ax === bx ? 2 * hw : 0), Math.abs(by - ay) + (ay === by ? 2 * hw : 0), 4, '#3b3326', 0, 'rgba(255,159,67,.25)');
+    }
+    // laufende Markierungen
+    ctx.save(); ctx.strokeStyle = 'rgba(255,159,67,.55)'; ctx.lineWidth = 1.5; ctx.setLineDash([3, 9]); ctx.lineDashOffset = -simT * 25;
+    ctx.beginPath(); b.pts.forEach((p, i) => { const q = iso(p[0], p[1], 4); i ? ctx.lineTo(...q) : ctx.moveTo(...q); }); ctx.stroke(); ctx.restore();
+  }
+}
+function drawNetwork() {
+  ctx.save(); ctx.lineWidth = 1.6; ctx.strokeStyle = 'rgba(58,216,255,.35)'; ctx.setLineDash([5, 6]); ctx.lineDashOffset = -simT * 18;
+  for (const id of netDevices) { const P = netPath(id).map(p => iso(...p)); ctx.beginPath(); P.forEach((p, i) => i ? ctx.lineTo(...p) : ctx.moveTo(...p)); ctx.stroke(); }
+  ctx.restore();
+  // Kabeltrasse
+  ctx.strokeStyle = 'rgba(58,216,255,.6)'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(...iso(1.5, TRAY_Y, NETZ)); ctx.lineTo(...iso(center('mes')[0], TRAY_Y, NETZ)); ctx.stroke();
+  const p = iso(6.5, TRAY_Y, NETZ + 4); pill(p[0], p[1] - 10, 'Industrial Ethernet · OPC UA / MQTT', '#3ad8ff', 'rgba(13,19,38,.85)', 'rgba(58,216,255,.35)');
 }
 function drawPackets() {
   for (const p of packets) {
-    let P, Q;
-    if (p.kind === 'mat') [P, Q] = linkPts(p.from, p.to, 6);
-    else { P = iso(...center(p.from), p.from === 'robot' ? 30 : M[p.from].h); Q = iso(...center(p.to), p.to === 'robot' ? 30 : M[p.to].h); }
-    const x = P[0] + (Q[0] - P[0]) * p.t, y = P[1] + (Q[1] - P[1]) * p.t;
-    ctx.fillStyle = p.kind === 'mat' ? '#ff9f43' : '#38d6ff';
-    ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 10;
-    if (p.kind === 'mat') ctx.fillRect(x - 5, y - 5, 10, 10); else { ctx.beginPath(); ctx.arc(x, y, 4, 0, 7); ctx.fill(); }
-    ctx.shadowBlur = 0;
+    const [x, y] = along(p.path, Math.min(1, p.t));
+    if (p.kind === 'mat') { const s = 6; poly([[x, y - s], [x + s * 1.4, y - s / 2 + 1], [x, y], [x - s * 1.4, y - s / 2 + 1]], '#ffb36b'); poly([[x - s * 1.4, y - s / 2 + 1], [x, y], [x, y + 5], [x - s * 1.4, y - s / 2 + 6]], '#c46d1d'); poly([[x, y], [x + s * 1.4, y - s / 2 + 1], [x + s * 1.4, y - s / 2 + 6], [x, y + 5]], '#9a5414'); }
+    else { ctx.fillStyle = '#3ad8ff'; ctx.shadowColor = '#3ad8ff'; ctx.shadowBlur = 12; ctx.beginPath(); ctx.arc(x, y, 3.6, 0, 7); ctx.fill(); ctx.shadowBlur = 0; }
   }
 }
-const statusColor = m => m.type !== 'cnc' ? '#2ecc71' : m.state === 'running' ? '#2ecc71' : m.state === 'done' ? '#38d6ff' : m.state === 'toolchange' ? '#f1c40f' : m.needTool ? '#ff5c5c' : '#8a96b0';
+const stateInfo = m => {
+  if (m.type === 'robot') return R.task.length ? ['#ffc94d', R.label] : ['#8b97b5', 'wartet'];
+  if (m.type === 'qc') return m.queue ? ['#2ee59d', `prüft (${m.queue} in Queue)`] : ['#8b97b5', 'wartet'];
+  if (m.type === 'it') return ['#3ad8ff', 'online'];
+  if (m.type !== 'cnc') return ['#2ee59d', `Bestand ${m.stock}`];
+  if (m.state === 'running') return ['#2ee59d', 'Bearbeitung'];
+  if (m.state === 'toolchange') return ['#ffc94d', 'Werkzeugwechsel'];
+  if (m.needTool) return ['#ff6b6b', 'Werkzeug verschlissen'];
+  return ['#8b97b5', m.reserved ? 'wartet auf Roboter' : 'Leerlauf'];
+};
+function shadow(x, y, w, d) { poly(quad(x + .12, y + .18, w, d), 'rgba(0,0,0,.28)'); }
 function drawMachine(m) {
-  const sel = selected === m.id;
-  const { top } = box(m.x + .1, m.y + .1, m.w - .2, m.d - .2, m.h, sel ? '#5d7fbf' : m.color);
-  if (m.type === 'cnc') { // spindle housing + status lamp
-    box(m.x + .6, m.y + .6, .7, .7, 18, '#cfd8e3', m.h);
-    const l = iso(m.x + .3, m.y + .3, m.h + 30); ctx.fillStyle = statusColor(m); ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 12;
-    ctx.beginPath(); ctx.arc(l[0], l[1], 5, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
-    // progress bar
-    const bx = top[0] - 26, by = top[1] - 52; ctx.fillStyle = '#0b0f18'; ctx.fillRect(bx, by, 52, 6);
-    ctx.fillStyle = m.state === 'toolchange' ? '#f1c40f' : '#2ecc71'; ctx.fillRect(bx, by, 52 * m.progress, 6);
-    ctx.fillStyle = m.wear > 80 ? '#ff5c5c' : '#8a96b0'; ctx.fillRect(bx, by + 8, 52 * Math.min(1, m.wear / 100), 3);
+  const sel = selected === m.id, [col] = stateInfo(m);
+  shadow(m.x, m.y, m.w, m.d);
+  const base = sel ? '#6f8fe8' : m.color;
+  if (m.type === 'cnc') {
+    box(m.x, m.y, m.w, m.d, 8, '#2a3350');                       // Sockel
+    const { top, T } = box(m.x + .08, m.y + .08, m.w - .16, m.d - .16, m.h - 8, base, 8);
+    // Sichtfenster an Vorderseite (zur Roboter-Gasse, Seite x=m.x)
+    poly(quad(m.x + .08, m.y + .45, 0, 1.0, 18).map((p, i) => p), null);
+    const w0 = iso(m.x + .08, m.y + .5, 16), w1 = iso(m.x + .08, m.y + 1.5, 16), w2 = iso(m.x + .08, m.y + 1.5, 40), w3 = iso(m.x + .08, m.y + .5, 40);
+    poly([w0, w1, w2, w3], 'rgba(150,210,255,.25)', 'rgba(200,230,255,.5)');
+    if (m.state === 'running') { const s = iso(m.x + .08, m.y + 1, 28); ctx.fillStyle = `rgba(255,220,120,${.5 + .5 * Math.sin(simT * 30)})`; ctx.beginPath(); ctx.arc(s[0], s[1], 3, 0, 7); ctx.fill(); }
+    box(m.x + .55, m.y + .55, .8, .8, 16, '#d5dce8', m.h);        // Spindelkopf
+    box(m.x + 1.55, m.y + .2, .3, .5, 22, '#232b45', 8);           // Bedienpanel
+    // Signalsäule
+    const l = iso(m.x + .3, m.y + .3, m.h + 30); ctx.strokeStyle = '#9aa6c4'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(l[0], l[1] + 12); ctx.lineTo(l[0], l[1]); ctx.stroke();
+    ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 14; ctx.beginPath(); ctx.arc(l[0], l[1], 5, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+    return top;
   }
-  if (m.type === 'it') { for (let i = 0; i < 4; i++) { const p = iso(m.x + .5, m.y + 1, 12 + i * 12); ctx.fillStyle = (Math.floor(simT * 3 + i) % 2) ? '#38d6ff' : '#1b6b80'; ctx.fillRect(p[0] - 4, p[1] - 2, 3, 3); } }
-  if (m.type === 'storage' || m.type === 'tools') { const n = Math.min(9, Math.ceil((m.stock || 0) / (m.type === 'tools' ? 2 : 5)));
-    for (let i = 0; i < n; i++) box(m.x + .3 + (i % 3) * .5, m.y + .3 + Math.floor(i / 3) * .5, .35, .35, 8, m.type === 'tools' ? '#a29bfe' : '#ff9f43', m.h); }
-  ctx.fillStyle = '#e6ebf5'; ctx.font = '600 12px system-ui'; ctx.textAlign = 'center';
-  ctx.fillText(m.name.split(' –')[0], top[0], top[1] - (m.type === 'cnc' ? 60 : 22));
+  const { top } = box(m.x + .08, m.y + .08, m.w - .16, m.d - .16, m.h, base);
+  if (m.type === 'it') for (let i = 0; i < 5; i++) { const p = iso(m.x + .2, m.y + 1.1, 10 + i * 10); ctx.fillStyle = (Math.floor(simT * 4 + i * 1.7) % 3) ? '#3ad8ff' : '#16586b'; ctx.fillRect(p[0] - 2, p[1] - 2, 3, 3); ctx.fillStyle = '#2ee59d'; ctx.fillRect(p[0] + 4, p[1], 2, 2); }
+  if (m.type === 'storage' || m.type === 'tools') { const cap = m.type === 'tools' ? 12 : 40, n = Math.round(Math.min(1, m.stock / cap) * 9);
+    for (let i = 0; i < n; i++) box(m.x + .3 + (i % 3) * .5, m.y + .3 + Math.floor(i / 3) * .5, .36, .36, m.type === 'tools' ? 14 : 9, m.type === 'tools' ? '#b3a8ff' : '#ffb36b', m.h); }
+  if (m.type === 'qc') { box(m.x + .7, m.y + .6, .6, .8, 4, '#2a3350', m.h); const c = iso(m.x + 1, m.y + 1, m.h + 30); ctx.strokeStyle = '#d5dce8'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(c[0], c[1] + 26); ctx.lineTo(c[0], c[1]); ctx.lineTo(c[0] + 10, c[1] + 5); ctx.stroke();
+    if (m.queue) { ctx.fillStyle = 'rgba(46,229,157,.35)'; ctx.beginPath(); ctx.moveTo(c[0] + 10, c[1] + 5); ctx.lineTo(c[0] - 4, c[1] + 30); ctx.lineTo(c[0] + 24, c[1] + 30); ctx.fill(); } }
+  return top;
+}
+function drawLabel(m, top) {
+  const lift = m.type === 'cnc' ? 50 : m.type === 'it' ? 14 : 24;
+  pill(top[0], top[1] - lift, m.short, '#e8edf7', selected === m.id ? 'rgba(124,140,255,.9)' : undefined);
+  if (m.type === 'cnc') { const bx = top[0] - 28, by = top[1] - lift + 14; ctx.fillStyle = 'rgba(13,19,38,.85)'; ctx.fillRect(bx, by, 56, 9);
+    ctx.fillStyle = m.state === 'toolchange' ? '#ffc94d' : '#2ee59d'; ctx.fillRect(bx + 1, by + 1, 54 * m.progress, 3);
+    ctx.fillStyle = m.wear > 80 ? '#ff6b6b' : '#7c8cff'; ctx.fillRect(bx + 1, by + 5, 54 * Math.min(1, m.wear / 100), 3); }
 }
 function drawRobot() {
   const sel = selected === 'robot';
-  box(R.x - .35, R.y - .35, .7, .7, 12, sel ? '#ffd166' : '#f39c12');
-  const base = iso(R.x, R.y, 12), sw = Math.sin(simT * 4) * 6;
-  ctx.strokeStyle = '#ecf0f1'; ctx.lineWidth = 4; ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.moveTo(base[0], base[1]); ctx.lineTo(base[0] + sw, base[1] - 22); ctx.lineTo(base[0] + 14 + sw, base[1] - 30); ctx.stroke();
-  if (R.carry) { ctx.fillStyle = R.carry === 'tool' ? '#a29bfe' : R.carry === 'part' ? '#2ecc71' : '#ff9f43'; ctx.fillRect(base[0] + 10 + sw, base[1] - 38, 10, 10); }
-  ctx.fillStyle = '#ffd166'; ctx.font = '600 11px system-ui'; ctx.textAlign = 'center'; ctx.fillText('Roboter: ' + R.label, base[0], base[1] - 46);
+  shadow(R.x - .4, R.y - .4, .8, .8);
+  box(R.x - .4, R.y - .4, .8, .8, 10, sel ? '#ffe08a' : '#f2a531');
+  box(R.x - .15, R.y - .15, .3, .3, 6, '#2a3350', 10);
+  const b = iso(R.x, R.y, 16), sw = Math.sin(simT * 3) * 5, side = R.task[0]?.act && ['load', 'toolChange'].includes(R.task[0].act) ? 1 : -1;
+  ctx.strokeStyle = '#eef2f8'; ctx.lineWidth = 4.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const j1 = [b[0] + sw * .4, b[1] - 22], j2 = [b[0] + side * 18 + sw, b[1] - 26];
+  ctx.beginPath(); ctx.moveTo(...b); ctx.lineTo(...j1); ctx.lineTo(...j2); ctx.stroke();
+  ctx.fillStyle = '#ffc94d'; [b, j1].forEach(j => { ctx.beginPath(); ctx.arc(j[0], j[1], 3.5, 0, 7); ctx.fill(); });
+  if (R.carry) { ctx.fillStyle = R.carry === 'tool' ? '#b3a8ff' : '#ffb36b'; ctx.fillRect(j2[0] - 5, j2[1] - 3, 10, 10); }
+  const t = iso(R.x, R.y, 0); return [t[0], t[1] - 40];
 }
 function draw() {
-  ctx.save(); ctx.clearRect(0, 0, W, H); ctx.fillStyle = '#0f1420'; ctx.fillRect(0, 0, W, H); ctx.scale(scale, scale);
-  drawGround(); drawLinks();
-  const items = Object.values(M).map(m => ({ k: m.x + m.y + m.w + m.d, f: () => drawMachine(m) }));
-  items.push({ k: R.x + R.y + .7, f: drawRobot }); items.sort((a, b) => a.k - b.k).forEach(i => i.f());
-  drawPackets(); ctx.restore();
+  ctx.save(); ctx.clearRect(0, 0, W, H); ctx.scale(scale, scale);
+  drawGround(); drawBelts();
+  const items = Object.values(M).map(m => ({ k: m.x + m.y + (m.w + m.d) / 2, m }));
+  items.push({ k: R.x + R.y, m: R }); items.sort((a, b) => a.k - b.k);
+  const labels = [];
+  for (const it of items) { const top = it.m === R ? drawRobot() : drawMachine(it.m); labels.push([it.m, top]); }
+  drawNetwork(); drawPackets();
+  for (const [m, top] of labels) m === R ? pill(top[0], top[1] - 8, '🤖 ' + R.label, '#1a1300', selected === 'robot' ? '#ffe08a' : '#ffc94d', 'transparent') : drawLabel(m, top);
+  ctx.restore();
 }
 
 // ---------- UI ----------
 let selected = null;
+const order = ['raw', 'tools', 'robot', 'cnc1', 'cnc2', 'cnc3', 'qc', 'out', 'mes'];
+const get = id => id === 'robot' ? R : M[id];
+const mlist = document.getElementById('mlist');
+mlist.innerHTML = order.map(id => `<div class="mi" data-id="${id}"><i class="dot"></i><span>${get(id).name}</span><span class="st"></span></div>`).join('');
+mlist.onclick = e => { const el = e.target.closest('.mi'); if (el) { selected = selected === el.dataset.id ? null : el.dataset.id; renderPanel(); } };
 cv.addEventListener('click', e => {
   const r = cv.getBoundingClientRect(), mx = (e.clientX - r.left) / scale, my = (e.clientY - r.top) / scale;
-  // inverse iso on ground plane, check footprint (tolerant for height)
   let hit = null;
-  const rp = iso(R.x, R.y, 20); if (Math.hypot(mx - rp[0], my - rp[1]) < 26) hit = 'robot';
+  const rp = iso(R.x, R.y, 18); if (Math.hypot(mx - rp[0], my - rp[1]) < 26) hit = 'robot';
   if (!hit) for (const m of Object.values(M)) for (let z = 0; z <= m.h && !hit; z += 6) {
     const X = mx - ox, Y = my - oy + z, gx = (X / (TW / 2) + Y / (TH / 2)) / 2, gy = (Y / (TH / 2) - X / (TW / 2)) / 2;
     if (gx >= m.x && gx <= m.x + m.w && gy >= m.y && gy <= m.y + m.d) hit = m.id;
   }
   selected = hit; renderPanel();
 });
-function rows(o) { return Object.entries(o).map(([k, v]) => `<div class="row"><span>${k}</span><span>${v}</span></div>`).join(''); }
+const rows = o => Object.entries(o).map(([k, v]) => `<div class="row"><span>${k}</span><span>${v}</span></div>`).join('');
 const pct = v => Math.round(v * 100) + '%';
 function renderPanel() {
+  for (const el of mlist.children) { const m = get(el.dataset.id), [c, s] = stateInfo(m);
+    el.classList.toggle('sel', selected === el.dataset.id); el.querySelector('.dot').style.cssText = `background:${c};box-shadow:0 0 8px ${c}`; el.querySelector('.st').textContent = s; }
   const el = document.getElementById('sel'), ti = document.getElementById('selTitle');
-  if (!selected) { ti.textContent = 'Fabrik-Übersicht';
-    el.innerHTML = rows({ 'Maschinen': '3 CNC, 1 Roboter, QC, 2 Lager', 'Verbindungen Material': matLinks.length, 'Verbindungen Info': infoLinks.length,
-      'Rohteile': M.raw.stock, 'QC i.O. / n.i.O.': `${M.qc.ok} / ${M.qc.nok}` }) + '<p style="color:var(--muted);margin:8px 0 0">Klick auf eine Maschine für Live-Daten.</p>'; return; }
-  const m = selected === 'robot' ? R : M[selected];
-  ti.textContent = m.name;
-  let html = '';
-  if (m.type === 'cnc') {
-    const st = { idle: m.needTool ? 'Wartet auf Werkzeug' : (m.reserved ? 'Wartet auf Roboter' : 'Leerlauf'), running: 'Bearbeitung', done: 'Fertig – Entladen', toolchange: 'Werkzeugwechsel' }[m.state];
-    html = rows({ Status: `<b style="color:${statusColor(m)}">${st}</b>`, Werkzeug: m.tool, 'Zykluszeit': m.cycle.toFixed(1) + ' s', 'Gefertigte Teile': m.parts, Auslastung: pct(m.util) })
-      + `<div style="margin-top:6px">Fortschritt<div class="bar"><i style="width:${pct(m.progress)}"></i></div></div>`
-      + `<div style="margin-top:6px">Werkzeugverschleiß ${Math.round(m.wear)}%<div class="bar"><i style="width:${Math.min(100, m.wear)}%;background:${m.wear > 80 ? 'var(--err)' : 'var(--warn)'}"></i></div></div>`;
-  } else if (m.type === 'robot') {
-    html = rows({ Aufgabe: R.label, Trägt: { raw: 'Rohteil', tool: 'Werkzeug', part: 'Fertigteil' }[R.carry] || '–', Position: `(${R.x.toFixed(1)}, ${R.y.toFixed(1)})`, Fahrten: R.moves, Werkzeugwechsel: stats.tool });
-  } else if (m.type === 'qc') {
-    html = rows({ Warteschlange: m.queue, 'i.O.': m.ok, 'n.i.O.': m.nok, 'Qualitätsrate': m.ok + m.nok ? pct(m.ok / (m.ok + m.nok)) : '–' });
-  } else if (m.type === 'it') {
-    html = rows({ 'Nachrichten gesamt': stats.msg, 'Verbundene Geräte': infoLinks.length, Protokolle: 'OPC UA, MQTT, REST' });
-  } else html = rows({ Bestand: m.stock });
-  const mat = matLinks.filter(l => l.includes(m.id)).map(l => l[0] === m.id ? '→ ' + M[l[1]].name : '← ' + M[l[0]].name);
-  if (m.id === 'robot') mat.push('transportiert zwischen allen Stationen');
-  html += `<div style="margin-top:10px">Schnittstellen<br>${m.iface.map(i => `<span class="tag info">${i}</span>`).join('')}</div>`;
-  if (mat.length) html += `<div style="margin-top:6px">Material-Verbindungen<br>${mat.map(i => `<span class="tag mat">${i}</span>`).join('')}</div>`;
+  if (!selected) { ti.textContent = 'Details · Gesamtanlage';
+    el.innerHTML = rows({ 'Material-Verbindungen': matLinks.length, 'Vernetzte Geräte': netDevices.length, 'Rohteile im Lager': M.raw.stock, 'Teile auf Förderband': packets.filter(p => p.kind === 'mat').length, 'QC i.O. / n.i.O.': `${M.qc.ok} / ${M.qc.nok}` })
+      + '<div class="sub">Tipp</div><div style="color:var(--muted);margin-top:4px">Klick auf eine Maschine im Hallenplan oder in der Liste.</div>'; return; }
+  const m = get(selected), [col, st] = stateInfo(m); ti.textContent = 'Details · ' + m.name;
+  let html = rows({ Status: `<b style="color:${col}">${st}</b>` });
+  if (m.type === 'cnc') html += rows({ Werkzeug: m.tool, Zykluszeit: m.cycle.toFixed(1) + ' s', 'Gefertigte Teile': m.parts, Auslastung: pct(m.util) })
+      + `<div class="sub">Fortschritt</div><div class="bar"><i style="width:${pct(m.progress)}"></i></div>`
+      + `<div class="sub">Werkzeugverschleiß · ${Math.round(Math.min(100, m.wear))}%</div><div class="bar"><i style="width:${Math.min(100, m.wear)}%;background:${m.wear > 80 ? 'var(--err)' : 'var(--accent)'}"></i></div>`;
+  else if (m.type === 'robot') html += rows({ Trägt: { raw: 'Rohteil', tool: 'Werkzeug' }[R.carry] || '–', Position: `Gasse · y ${R.y.toFixed(1)}`, Fahrten: R.moves, Werkzeugwechsel: stats.tool });
+  else if (m.type === 'qc') html += rows({ Warteschlange: m.queue, 'i.O.': m.ok, 'n.i.O.': m.nok, Qualitätsrate: m.ok + m.nok ? pct(m.ok / (m.ok + m.nok)) : '–' });
+  else if (m.type === 'it') html += rows({ 'Nachrichten gesamt': stats.msg, 'Vernetzte Geräte': netDevices.length, 'Pakete unterwegs': packets.filter(p => p.kind === 'info').length });
+  else html += rows({ Bestand: m.stock });
+  const mat = matLinks.filter(l => l.includes(m.id)).map(l => l[0] === m.id ? '→ ' + get(l[1]).short : '← ' + get(l[0]).short);
+  html += `<div class="sub">Schnittstellen</div>${m.iface.map(i => `<span class="tag info">${i}</span>`).join('')}`;
+  if (mat.length) html += `<div class="sub">Material-Verbindungen</div>${mat.map(i => `<span class="tag mat">${i}</span>`).join('')}`;
   el.innerHTML = html;
 }
 function updateKpis() {
   document.getElementById('kOut').textContent = stats.out;
   document.getElementById('kOee').textContent = pct((M.cnc1.util + M.cnc2.util + M.cnc3.util) / 3);
+  document.getElementById('kQ').textContent = M.qc.ok + M.qc.nok ? pct(M.qc.ok / (M.qc.ok + M.qc.nok)) : '–';
   document.getElementById('kTool').textContent = stats.tool;
   document.getElementById('kMsg').textContent = stats.msg;
 }
@@ -346,7 +428,7 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 window.addEventListener('resize', resize); resize();
-log('System gestartet – alle Maschinen über OPC UA / MQTT mit MES verbunden', 'var(--info)');
+log('System gestartet – alle Anlagen über OPC UA / MQTT mit dem MES verbunden', 'var(--info)');
 renderPanel(); requestAnimationFrame(loop);
 </script>
 </body>
