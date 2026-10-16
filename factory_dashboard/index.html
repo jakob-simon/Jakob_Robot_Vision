@@ -84,6 +84,32 @@
   .cmp b { display: block; font-size: 18px; }
   .cmp small { color: var(--muted); font-size: 11px; }
   .nodata { color: var(--muted); font-style: italic; }
+  .tabs { position: absolute; top: 14px; right: 14px; display: flex; gap: 4px; padding: 4px; background: rgba(17,24,48,.85);
+    border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(6px); z-index: 3; }
+  .tabs button { border: 0; background: transparent; color: var(--muted); }
+  .tabs button.act { background: var(--accent); color: #fff; }
+  .drawer { position: absolute; top: 62px; bottom: 56px; width: min(380px, calc(100% - 32px)); background: rgba(20,28,51,.97);
+    border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 20px 50px rgba(0,0,0,.5); display: none; flex-direction: column; z-index: 6; overflow: hidden; }
+  .drawer.open { display: flex; }
+  .drawer.left { left: 16px; } .drawer.right { right: 16px; }
+  .dh { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .dh b { font-size: 14px; } .dh .st { color: var(--muted); font-size: 11px; margin-left: auto; }
+  .dh button { padding: 4px 9px; }
+  .dbody { padding: 12px 14px; overflow: auto; flex: 1; font-size: 13px; }
+  .set { margin-bottom: 10px; } .set input { width: 100%; accent-color: var(--accent); }
+  .chk { display: flex; gap: 8px; align-items: center; padding: 5px 0; cursor: pointer; } .chk input { accent-color: var(--accent); }
+  #agMsgs { flex: 1; overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { padding: 9px 12px; border-radius: 12px; font-size: 13px; line-height: 1.45; max-width: 92%; }
+  .msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+  .msg.bot { align-self: flex-start; background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .msg.tool { align-self: flex-start; font-size: 11.5px; color: var(--info); border: 1px dashed rgba(58,216,255,.4); padding: 5px 9px; }
+  .msg.think { color: var(--muted); font-style: italic; }
+  #agChips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 10px; }
+  #agChips button { font-size: 11.5px; padding: 5px 9px; border-radius: 14px; }
+  #agForm { display: flex; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--line); }
+  #agIn { flex: 1; font: inherit; font-size: 13px; background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+  #agIn:focus { outline: none; border-color: var(--accent); }
+  .btn-agent { background: linear-gradient(135deg, var(--accent), #a06bff); border: 0; color: #fff; font-weight: 600; }
   @media (max-width: 900px) {
     main { grid-template-columns: 1fr; grid-template-rows: 58vh auto; }
     aside { border-left: 0; border-top: 1px solid var(--line); }
@@ -102,7 +128,7 @@
       <div class="kpi"><b id="kTool">0</b><span>Werkzeugwechsel</span></div>
       <div class="kpi"><b id="kMsg">0</b><span>Nachrichten</span></div>
     </div>
-    <div class="controls"><button id="btnMode" class="mode on"><i></i><span>Digitalisierung: AN</span></button><button id="btnPause">⏸ Pause</button><button id="btnFast">⏩ 1x</button></div>
+    <div class="controls"><button id="btnMode" class="mode on"><i></i><span>Digitalisierung: AN</span></button><button id="btnPause">⏸ Pause</button><button id="btnFast">⏩ 1x</button><button id="btnSettings">⚙ Einstellungen</button><button id="btnAgent" class="btn-agent">🤖 Agent fragen</button></div>
   </header>
   <main>
     <div id="view">
@@ -114,6 +140,14 @@
       <div class="hint">Klick = Details · Mausrad = Zoom · Ziehen = Verschieben</div>
       <div class="zoomctl"><button id="zIn">＋</button><button id="zOut">－</button><button id="zReset">⟲</button></div>
       <div id="tip"></div>
+      <div class="tabs" id="tabs"><button data-view="iso" class="act">🏭 Hallenplan</button><button data-view="flow">🔀 Flussdiagramm</button><button data-view="ana">📊 Analytics</button></div>
+      <div class="drawer left" id="settings"><div class="dh"><b>⚙ Einstellungen</b><button data-close style="margin-left:auto">✕</button></div><div class="dbody" id="setBody"></div></div>
+      <div class="drawer right" id="agent">
+        <div class="dh"><b>🤖 Factory-Agent</b><span class="st" id="agMode">verbinde…</span><button data-close>✕</button></div>
+        <div id="agMsgs"><div class="msg bot">Hallo! Ich bin der Factory-Agent. Ich kenne den Live-Zustand aller Anlagen und kann die Simulation steuern. Frag mich etwas oder gib mir einen Auftrag.</div></div>
+        <div id="agChips"></div>
+        <form id="agForm"><input id="agIn" placeholder="Frag die Fabrik… z. B. „Wo ist der Engpass?“" autocomplete="off"><button>➤</button></form>
+      </div>
       <div id="banner">⚠ Analoge Fabrik: keine Vernetzung, keine Echtzeit-Daten.<br><span style="font-weight:400">Werker läuft Rundgang mit Papierliste · Werkzeugverschleiß wird erst am Ausschuss bemerkt</span></div>
     </div>
     <aside>
@@ -179,9 +213,18 @@ const matLinks = [['raw', 'robot'], ['tools', 'robot'], ['robot', 'cnc1'], ['rob
 const NETZ = 78, TRAY_Y = -0.3;
 const netDevices = ['raw', 'tools', 'cnc1', 'cnc2', 'cnc3', 'qc', 'out', 'robot'];
 const packets = [];
-const stats = { out: 0, tool: 0, msg: 0 };
-const history = [0]; let sparkT = 0; const ORDER = 60;
-let digital = true;
+const stats = { out: 0, tool: 0, msg: 0, kwh: 0 };
+const history = [0]; let sparkT = 0; let ORDER = 60;
+let digital = true, view = 'iso';
+const cfg = { robotSpeed: 3, scrap: 0.04, layers: { zones: true, mat: true, info: true, labels: true } };
+// Flussdiagramm-Daten
+const FN = { raw: [.1, .38], tools: [.1, .8], robot: [.3, .59], cnc1: [.52, .3], cnc2: [.52, .59], cnc3: [.52, .88], qc: [.74, .59], out: [.92, .59] };
+const FE = [['raw', 'robot'], ['tools', 'robot'], ['robot', 'cnc1'], ['robot', 'cnc2'], ['robot', 'cnc3'], ['cnc1', 'qc'], ['cnc2', 'qc'], ['cnc3', 'qc'], ['qc', 'out']];
+const flowDots = [], edgeCount = {};
+function flowEvent(from, to, kind = 'mat') {
+  if (kind !== 'info') edgeCount[from + '>' + to] = (edgeCount[from + '>' + to] || 0) + 1;
+  flowDots.push({ from, to, kind, t: 0 }); if (flowDots.length > 200) flowDots.shift();
+}
 const modeStats = { true: { t: 0, out: 0, ok: 0, nok: 0 }, false: { t: 0, out: 0, ok: 0, nok: 0 } };
 // Werker-Rundgang (nur analog)
 const WK = { x: 3, y: 0.2, i: 0, path: [[3, 0.2], [5.4, 0.2], [5.4, 3.4], [9.6, 3.4], [9.6, 9.7], [5.4, 9.7], [5.4, 6.8], [3, 6.8], [3, 3.4]] };
@@ -215,7 +258,7 @@ function log(msg, col = '') {
 function send(from, to, label) { // Informationspaket über die Trasse
   if (!digital) return;
   const path = from === 'mes' ? netPath(to).reverse() : netPath(from);
-  packets.push({ kind: 'info', path, t: 0, label }); stats.msg++;
+  packets.push({ kind: 'info', path, t: 0, label }); stats.msg++; flowEvent(from, to, 'info');
 }
 function ship(beltId, onArrive) { const b = belts.find(b => b.id === beltId); packets.push({ kind: 'mat', path: b.pts.map(p => [p[0], p[1], 6]), t: 0, dur: 2.2, onArrive }); }
 
@@ -236,6 +279,10 @@ function planRobot() {
 let lastDt = 0;
 function step(dt) {
   simT += dt; lastDt = dt; modeStats[digital].t += dt;
+  if (R.task.length) R.busyT = (R.busyT || 0) + dt; R.util = (R.busyT || 0) / simT;
+  stats.kwh += totalPower() * dt / 3600 * 60; // Simulation: 1 s ≙ 1 min
+  for (const d of flowDots) d.t += dt / (d.kind === 'info' ? .8 : 1.3);
+  for (let i = flowDots.length - 1; i >= 0; i--) if (flowDots[i].t >= 1) flowDots.splice(i, 1);
   if (!digital) { const [tx, ty] = WK.path[WK.i], dx = tx - WK.x, dy = ty - WK.y, d = Math.hypot(dx, dy), v = 1.3 * dt;
     if (d <= v) { WK.x = tx; WK.y = ty; WK.i = (WK.i + 1) % WK.path.length; } else { WK.x += dx / d * v; WK.y += dy / d * v; } }
   for (const k of ['cnc1', 'cnc2', 'cnc3']) {
@@ -247,7 +294,7 @@ function step(dt) {
         // digital: Verschleiß wird live überwacht → Wechsel bei 100 %. analog: erst bemerkt, wenn's deutlich zu spät ist
         if (c.wear >= (digital ? 100 : 160)) c.needTool = true;
         const worn = c.wear > 115;
-        ship(beltOf[k], () => { M.qc.queue++; if (worn) M.qc.bad++; });
+        ship(beltOf[k], () => { M.qc.queue++; if (worn) M.qc.bad++; }); flowEvent(k, 'qc');
         send(k, 'mes', 'Teil fertig');
         log(`${c.short}: Teil fertig → Förderband zur QC${c.needTool ? ' · Werkzeug verschlissen!' : ''}`, c.needTool ? 'var(--warn)' : 'var(--mat)');
       }
@@ -260,23 +307,23 @@ function step(dt) {
   }
   const q = M.qc;
   if (q.queue > 0) { q.progress += dt / 1.8;
-    if (q.progress >= 1) { q.progress = 0; q.queue--; let pBad = 0.04; if (q.bad > 0) { q.bad--; pBad = 0.6; }
+    if (q.progress >= 1) { q.progress = 0; q.queue--; let pBad = cfg.scrap; if (q.bad > 0) { q.bad--; pBad = 0.6; }
       const ok = Math.random() > pBad; ok ? q.ok++ : q.nok++; const ms = modeStats[digital]; ok ? ms.ok++ : ms.nok++;
       send('qc', 'mes', ok ? 'i.O.' : 'n.i.O.');
-      if (ok) { const md = digital; ship('b4', () => { M.out.stock++; stats.out++; modeStats[md].out++; }); log('QC: Teil i.O. → Versand', 'var(--ok)'); } else log('QC: Teil n.i.O. – Ausschuss', 'var(--err)'); } }
+      if (ok) { flowEvent('qc', 'out'); const md = digital; ship('b4', () => { M.out.stock++; stats.out++; modeStats[md].out++; }); log('QC: Teil i.O. → Versand', 'var(--ok)'); } else log('QC: Teil n.i.O. – Ausschuss', 'var(--err)'); } }
   planRobot();
   const t = R.task[0];
   if (t && t.go) { // erst auf Gasse in y fahren (Gasse ist gerade)
-    const [tx, ty] = dock[t.go], dx = tx - R.x, dy = ty - R.y, dist = Math.hypot(dx, dy), v = 3 * dt;
+    const [tx, ty] = dock[t.go], dx = tx - R.x, dy = ty - R.y, dist = Math.hypot(dx, dy), v = cfg.robotSpeed * dt;
     if (dist <= v) { R.x = tx; R.y = ty; R.task.shift(); R.moves++; } else { R.x += dx / dist * v; R.y += dy / dist * v; }
   } else if (t && t.act) {
     t.wait = (t.wait || 0) + dt;
     if ((t.act === 'toolChange' || t.act === 'load') && M[t.m].state === 'fault') return; // wartet bis Störung quittiert
-    if (t.act === 'toolChange') { const c = M[t.m]; if (c.state !== 'toolchange') { c.state = 'toolchange'; c.progress = 0; R.carry = null; stats.tool++; M.tools.stock = Math.max(0, M.tools.stock - 1); } return; }
+    if (t.act === 'toolChange') { const c = M[t.m]; if (c.state !== 'toolchange') { c.state = 'toolchange'; c.progress = 0; R.carry = null; stats.tool++; flowEvent('robot', t.m, 'tool'); M.tools.stock = Math.max(0, M.tools.stock - 1); } return; }
     if (t.wait < 0.6) return;
-    if (t.act === 'pickRaw') { M.raw.stock--; R.carry = 'raw'; send('raw', 'mes', 'Bestand ' + M.raw.stock); }
-    if (t.act === 'pickTool') R.carry = 'tool';
-    if (t.act === 'load') { const c = M[t.m]; c.state = 'running'; c.progress = 0; c.reserved = false; R.carry = null; send('robot', 'mes', 'geladen'); log(`Roboter legt Rohteil in ${c.short}`, 'var(--mat)'); }
+    if (t.act === 'pickRaw') { M.raw.stock--; R.carry = 'raw'; flowEvent('raw', 'robot'); send('raw', 'mes', 'Bestand ' + M.raw.stock); }
+    if (t.act === 'pickTool') { R.carry = 'tool'; flowEvent('tools', 'robot', 'tool'); }
+    if (t.act === 'load') { const c = M[t.m]; flowEvent('robot', t.m); c.state = 'running'; c.progress = 0; c.reserved = false; R.carry = null; send('robot', 'mes', 'geladen'); log(`Roboter legt Rohteil in ${c.short}`, 'var(--mat)'); }
     R.task.shift();
   }
   for (const p of packets) p.t += dt / (p.dur || 1.1);
@@ -311,6 +358,7 @@ function pill(x, y, text, col = '#e8edf7', bg = 'rgba(13,19,38,.85)', border = '
   ctx.fillStyle = col; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, x, y + .5);
 }
 function zone(x, y, w, d, col, label) {
+  if (!cfg.layers.zones) return;
   poly(quad(x, y, w, d), col.replace('A', '.07'), col.replace('A', '.45'), 1.2);
   const p = iso(x + .15, y + d - .15); ctx.save(); ctx.translate(p[0], p[1]); ctx.transform(1, -.5, 1, .5, 0, 0);
   ctx.font = '700 9px Inter, system-ui'; ctx.fillStyle = col.replace('A', '.75'); ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
@@ -367,6 +415,7 @@ function drawNetwork() {
 }
 function drawPackets() {
   for (const p of packets) {
+    if (p.kind === 'mat' ? !cfg.layers.mat : !cfg.layers.info) continue;
     const [x, y] = along(p.path, Math.min(1, p.t));
     if (p.kind === 'mat') { const s = 6; poly([[x, y - s], [x + s * 1.4, y - s / 2 + 1], [x, y], [x - s * 1.4, y - s / 2 + 1]], '#ffb36b'); poly([[x - s * 1.4, y - s / 2 + 1], [x, y], [x, y + 5], [x - s * 1.4, y - s / 2 + 6]], '#c46d1d'); poly([[x, y], [x + s * 1.4, y - s / 2 + 1], [x + s * 1.4, y - s / 2 + 6], [x, y + 5]], '#9a5414'); }
     else { ctx.fillStyle = '#3ad8ff'; ctx.shadowColor = '#3ad8ff'; ctx.shadowBlur = 12; ctx.beginPath(); ctx.arc(x, y, 3.6, 0, 7); ctx.fill(); ctx.shadowBlur = 0; }
@@ -444,16 +493,17 @@ function drawWorker() {
   ctx.fillStyle = '#f5f5f5'; ctx.fillRect(b[0] + 4, b[1] - 18 - bob, 6, 8);                                            // Klemmbrett
   pill(b[0], b[1] - 44, '👷 Werker · Rundgang', '#1a1300', '#ffc94d', 'transparent');
 }
-function draw() {
+function draw() { if (view === 'flow') drawFlow(); else if (view === 'ana') drawAnalytics(); else drawIso(); }
+function drawIso() {
   ctx.save(); ctx.clearRect(0, 0, W, H); ctx.translate(panX, panY); ctx.scale(scale * zoom, scale * zoom);
-  drawGround(); drawBelts();
+  drawGround(); if (cfg.layers.mat) drawBelts();
   const items = Object.values(M).map(m => ({ k: m.x + m.y + (m.w + m.d) / 2, m }));
   items.push({ k: R.x + R.y, m: R }); items.sort((a, b) => a.k - b.k);
   const labels = [];
   for (const it of items) { const top = it.m === R ? drawRobot() : drawMachine(it.m); labels.push([it.m, top]); }
   if (!digital) drawWorker();
-  if (digital) drawNetwork(); drawPackets();
-  for (const [m, top] of labels) m === R ? pill(top[0], top[1] - 8, '🤖 ' + R.label, '#1a1300', selected === 'robot' ? '#ffe08a' : '#ffc94d', 'transparent') : drawLabel(m, top);
+  if (digital && cfg.layers.info) drawNetwork(); drawPackets();
+  if (cfg.layers.labels) for (const [m, top] of labels) m === R ? pill(top[0], top[1] - 8, '🤖 ' + R.label, '#1a1300', selected === 'robot' ? '#ffe08a' : '#ffc94d', 'transparent') : drawLabel(m, top);
   ctx.restore();
 }
 
@@ -466,6 +516,12 @@ mlist.innerHTML = order.map(id => `<div class="mi" data-id="${id}"><i class="dot
 mlist.onclick = e => { const el = e.target.closest('.mi'); if (el) { selected = selected === el.dataset.id ? null : el.dataset.id; renderPanel(); } };
 let hovered = null, zoom = 1, panX = 0, panY = 0, drag = null;
 function hitAt(e) {
+  if (view !== 'iso') {
+    if (view !== 'flow') return null;
+    const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    for (const id in FN) { const b = nodeRect(id); if (x >= b[0] && x <= b[0] + b[2] && y >= b[1] && y <= b[1] + b[3]) return id; }
+    return y > 66 && y < 104 ? 'mes' : null;
+  }
   const r = cv.getBoundingClientRect(), k = scale * zoom, mx = (e.clientX - r.left - panX) / k, my = (e.clientY - r.top - panY) / k;
   const rp = iso(R.x, R.y, 18); if (Math.hypot(mx - rp[0], my - rp[1]) < 26) return 'robot';
   // von vorne nach hinten prüfen, damit vordere Maschinen gewinnen
@@ -480,7 +536,7 @@ const tip = document.getElementById('tip');
 cv.addEventListener('mousedown', e => { drag = { x: e.clientX, y: e.clientY, px: panX, py: panY, moved: false }; });
 window.addEventListener('mouseup', () => setTimeout(() => drag = null, 0));
 cv.addEventListener('mousemove', e => {
-  if (drag && (e.buttons & 1)) { const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.hypot(dx, dy) > 4) drag.moved = true;
+  if (view === 'iso' && drag && (e.buttons & 1)) { const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.hypot(dx, dy) > 4) drag.moved = true;
     if (drag.moved) { panX = drag.px + dx; panY = drag.py + dy; tip.style.display = 'none'; cv.style.cursor = 'grabbing'; return; } }
   hovered = hitAt(e); cv.style.cursor = hovered ? 'pointer' : 'grab';
   if (hovered) { const m = get(hovered), [c, s] = stateInfo(m), r = cv.getBoundingClientRect();
@@ -491,7 +547,7 @@ cv.addEventListener('mousemove', e => {
 cv.addEventListener('mouseleave', () => { hovered = null; tip.style.display = 'none'; });
 cv.addEventListener('click', e => { if (drag?.moved) return; selected = hitAt(e); renderPanel(); });
 function zoomAt(f, sx, sy) { const nz = Math.max(.6, Math.min(3, zoom * f)); panX = sx - (sx - panX) * nz / zoom; panY = sy - (sy - panY) * nz / zoom; zoom = nz; }
-cv.addEventListener('wheel', e => { e.preventDefault(); const r = cv.getBoundingClientRect(); zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+cv.addEventListener('wheel', e => { if (view !== 'iso') return; e.preventDefault(); const r = cv.getBoundingClientRect(); zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
 document.getElementById('zIn').onclick = () => zoomAt(1.25, W / 2, H / 2);
 document.getElementById('zOut').onclick = () => zoomAt(.8, W / 2, H / 2);
 document.getElementById('zReset').onclick = () => { zoom = 1; panX = panY = 0; };
@@ -541,9 +597,11 @@ function updateKpis() {
   document.getElementById('cDq').textContent = 'Teile/min · Ausschuss ' + (scrap(D) == null ? '–' : pct(scrap(D)));
   if (ra && rd) document.getElementById('cGain').innerHTML = `<b style="color:var(--ok)">+${Math.round((rd / ra - 1) * 100)}% Durchsatz</b> durch Vernetzung, Echtzeit-Aufträge und Verschleißüberwachung.`;
 }
-document.getElementById('btnMode').onclick = e => {
-  digital = !digital; const b = e.currentTarget; b.classList.toggle('on', digital); b.querySelector('span').textContent = 'Digitalisierung: ' + (digital ? 'AN' : 'AUS');
-  document.getElementById('banner').style.display = digital ? 'none' : 'block';
+document.getElementById('btnMode').onclick = () => setDigital(!digital);
+function setDigital(on) {
+  if (on === digital) return;
+  digital = on; const b = document.getElementById('btnMode'); b.classList.toggle('on', digital); b.querySelector('span').textContent = 'Digitalisierung: ' + (digital ? 'AN' : 'AUS');
+  setView(view);
   for (let i = packets.length - 1; i >= 0; i--) if (packets[i].kind === 'info') packets.splice(i, 1);
   log(digital ? '📡 Digitalisierung aktiviert – alle Anlagen online' : '🗒 Analog-Modus – Vernetzung getrennt', digital ? 'var(--ok)' : 'var(--warn)');
   renderPanel();
@@ -562,6 +620,245 @@ function drawSpark() {
 }
 document.getElementById('btnPause').onclick = e => { paused = !paused; e.target.textContent = paused ? '▶ Start' : '⏸ Pause'; };
 document.getElementById('btnFast').onclick = e => { speed = speed === 1 ? 3 : speed === 3 ? 6 : 1; e.target.textContent = '⏩ ' + speed + 'x'; };
+
+// ---------- Energie ----------
+function power(id) {
+  const m = get(id);
+  if (m.type === 'cnc') return { running: 14.5, toolchange: 4, fault: 1.2, idle: 3.2 }[m.state];
+  if (id === 'robot') return R.task.length ? 1.8 : .5;
+  if (id === 'qc') return m.queue ? 1.6 : .6;
+  if (id === 'mes') return .9;
+  return .3;
+}
+const totalPower = () => order.reduce((s, id) => s + power(id), 0);
+
+// ---------- Ansicht: Flussdiagramm ----------
+const ICON = { raw: '📦', tools: '🔧', robot: '🤖', cnc1: '⚙️', cnc2: '⚙️', cnc3: '⚙️', qc: '🔍', out: '🚚', mes: '📡' };
+function nodeRect(id) { const nw = Math.min(170, W * .14), nh = 64, p = FN[id], cx = p[0] * W, cy = 120 + p[1] * (H - 180); return [cx - nw / 2, cy - nh / 2, nw, nh]; }
+function edgeCurve(a, b) { const A = nodeRect(a), B = nodeRect(b), p0 = [A[0] + A[2], A[1] + A[3] / 2], p3 = [B[0], B[1] + B[3] / 2], dx = (p3[0] - p0[0]) * .5; return [p0, [p0[0] + dx, p0[1]], [p3[0] - dx, p3[1]], p3]; }
+function bez(c, t) { const u = 1 - t; return [0, 1].map(i => u * u * u * c[0][i] + 3 * u * u * t * c[1][i] + 3 * u * t * t * c[2][i] + t * t * t * c[3][i]); }
+function rrect(x, y, w, h, r, fill, stroke, lw = 1) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); if (fill) { ctx.fillStyle = fill; ctx.fill(); } if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); } }
+function txt(s, x, y, font, col, align = 'left', base = 'middle') { ctx.font = font; ctx.fillStyle = col; ctx.textAlign = align; ctx.textBaseline = base; ctx.fillText(s, x, y); }
+function drawFlow() {
+  ctx.clearRect(0, 0, W, H);
+  // Spaltenköpfe
+  const hy = nodeRect('cnc1')[1] - 26;
+  [['① Lager', .1], ['② Roboterzelle', .3], ['③ Fertigung', .52], ['④ Prüfung', .74], ['⑤ Versand', .92]].forEach(([l, x]) => {
+    txt(l.toUpperCase(), x * W, hy, '700 10px Inter, system-ui', '#5d6a8c', 'center');
+    ctx.strokeStyle = 'rgba(255,255,255,.04)'; ctx.setLineDash([2, 6]); ctx.beginPath(); ctx.moveTo(x * W, hy + 12); ctx.lineTo(x * W, H - 30); ctx.stroke(); ctx.setLineDash([]);
+  });
+  // MES-Bus
+  const bx = W * .04, bw = W * .92;
+  rrect(bx, 66, bw, 38, 10, digital ? 'rgba(58,216,255,.08)' : 'rgba(255,255,255,.03)', digital ? 'rgba(58,216,255,.5)' : '#26314f', 1.5);
+  txt(digital ? '📡 MES / Edge-Server  ·  MQTT-Broker  ·  OPC UA' : '📡 MES – offline, keine Vernetzung', W / 2, 85, '600 12.5px Inter, system-ui', digital ? '#3ad8ff' : '#5d6a8c', 'center');
+  if (digital) txt(stats.msg + ' Nachrichten', bx + bw - 12, 85, '500 11px JetBrains Mono, monospace', '#8b97b5', 'right');
+  if (selected === 'mes') rrect(bx - 3, 63, bw + 6, 44, 12, null, '#7c8cff', 2);
+  // Info-Leitungen
+  if (digital && cfg.layers.info) { ctx.save(); ctx.strokeStyle = 'rgba(58,216,255,.3)'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 5]); ctx.lineDashOffset = -simT * 15;
+    for (const id in FN) { const r = nodeRect(id); ctx.beginPath(); ctx.moveTo(r[0] + r[2] / 2, r[1]); ctx.lineTo(r[0] + r[2] / 2, 104); ctx.stroke(); } ctx.restore(); }
+  // Material-Kanten
+  if (cfg.layers.mat) for (const [a, b] of FE) {
+    const c = edgeCurve(a, b), n = edgeCount[a + '>' + b] || 0;
+    ctx.strokeStyle = 'rgba(255,159,67,.4)'; ctx.lineWidth = 2 + Math.min(9, n / 2); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(...c[0]); ctx.bezierCurveTo(...c[1], ...c[2], ...c[3]); ctx.stroke();
+    const m = bez(c, .5); rrect(m[0] - 14, m[1] - 9, 28, 18, 9, '#0b1020', 'rgba(255,159,67,.4)'); txt(String(n), m[0], m[1] + .5, '600 10.5px Inter, system-ui', '#ffb36b', 'center');
+  }
+  // Punkte
+  for (const d of flowDots) {
+    if (d.kind === 'info') { if (!digital || !cfg.layers.info) continue; const node = d.from === 'mes' ? d.to : d.from; if (!FN[node]) continue;
+      const r = nodeRect(node), x = r[0] + r[2] / 2, t = d.from === 'mes' ? d.t : 1 - d.t, y = 104 + (r[1] - 104) * t;
+      ctx.fillStyle = '#3ad8ff'; ctx.shadowColor = '#3ad8ff'; ctx.shadowBlur = 10; ctx.beginPath(); ctx.arc(x, y, 3.5, 0, 7); ctx.fill(); ctx.shadowBlur = 0; continue; }
+    if (!cfg.layers.mat || !FE.some(([a, b]) => a === d.from && b === d.to)) continue;
+    const [x, y] = bez(edgeCurve(d.from, d.to), d.t); ctx.fillStyle = d.kind === 'tool' ? '#b3a8ff' : '#ffb36b';
+    ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 10; rrect(x - 5, y - 5, 10, 10, 2, ctx.fillStyle); ctx.shadowBlur = 0;
+  }
+  // Knoten
+  for (const id in FN) {
+    const [x, y, w, h] = nodeRect(id), m = get(id), [col, st] = digital ? stateInfo(m) : ['#4a5575', 'keine Daten'];
+    const sel = selected === id, hov = hovered === id;
+    ctx.shadowColor = 'rgba(0,0,0,.4)'; ctx.shadowBlur = 16; rrect(x, y, w, h, 12, sel ? '#22305a' : hov ? '#1f2a4c' : '#1a2440'); ctx.shadowBlur = 0;
+    rrect(x, y, w, h, 12, null, sel ? '#7c8cff' : col + '88', sel ? 2 : 1.2);
+    rrect(x, y + 10, 3, h - 20, 2, col);
+    txt(ICON[id] + ' ' + m.short, x + 12, y + 18, '600 13px Inter, system-ui', '#e8edf7');
+    txt(st.length > 22 ? st.slice(0, 21) + '…' : st, x + 12, y + 37, '500 11px Inter, system-ui', col);
+    if (m.type === 'cnc' && digital) { rrect(x + 12, y + 50, w - 24, 4, 2, '#0f1630'); rrect(x + 12, y + 50, (w - 24) * m.progress, 4, 2, m.state === 'toolchange' ? '#ffc94d' : '#2ee59d'); }
+  }
+  txt('Klick auf einen Knoten für Details · Linienstärke = Anzahl transportierter Teile', 16, H - 16, '500 11px Inter, system-ui', '#5d6a8c');
+}
+
+// ---------- Ansicht: Analytics ----------
+function panel(x, y, w, h, title) { rrect(x, y, w, h, 14, '#1a2440', '#26314f'); txt(title.toUpperCase(), x + 16, y + 20, '600 10.5px Inter, system-ui', '#8b97b5'); }
+function hbar(x, y, w, label, v, col, right) {
+  txt(label, x, y, '500 12px Inter, system-ui', '#e8edf7'); const bx = x + 74, bw = Math.max(20, w - 74 - 64);
+  rrect(bx, y - 5, bw, 10, 5, '#0f1630'); rrect(bx, y - 5, Math.max(3, bw * Math.max(0, Math.min(1, v))), 10, 5, col);
+  txt(right, x + w, y, '600 12px Inter, system-ui', '#c9d2e8', 'right');
+}
+function drawAnalytics() {
+  ctx.clearRect(0, 0, W, H);
+  const cols = W > 1000 ? 3 : 2, rows = Math.ceil(6 / cols), pad = 14, top = 58;
+  const cw = (W - pad * (cols + 1)) / cols, ch = Math.max(180, (H - top - pad * (rows + 1)) / rows);
+  const P = i => [pad + (i % cols) * (cw + pad), top + pad + Math.floor(i / cols) * (ch + pad)];
+  const cncs = ['cnc1', 'cnc2', 'cnc3'];
+  // 1 Auslastung
+  let [x, y] = P(0); panel(x, y, cw, ch, 'Auslastung'); const s1 = Math.min(34, (ch - 50) / 4);
+  [...cncs, 'robot'].forEach((k, i) => { const m = get(k); hbar(x + 16, y + 52 + i * s1, cw - 32, m.short, m.util || 0, i === 3 ? '#ffc94d' : '#2ee59d', pct(m.util || 0)); });
+  // 2 Verschleiß
+  [x, y] = P(1); panel(x, y, cw, ch, 'Werkzeugverschleiß');
+  cncs.forEach((k, i) => { const m = M[k]; hbar(x + 16, y + 52 + i * s1, cw - 32, m.short, m.wear / 100, m.wear > 80 ? '#ff6b6b' : '#7c8cff', Math.round(Math.min(999, m.wear)) + '% · ' + m.tool); });
+  txt(digital ? '✔ Live-Überwachung: Wechsel automatisch bei 100 %' : '⚠ Analog: Verschleiß wird nicht gemessen', x + 16, y + ch - 20, '500 11px Inter, system-ui', digital ? '#2ee59d' : '#ffc94d');
+  // 3 Durchsatz
+  [x, y] = P(2); panel(x, y, cw, ch, 'Durchsatz-Verlauf');
+  const rate = history.slice(1).map((v, i) => v - history[i]), mx = Math.max(2, ...rate), gx = x + 16, gy = y + 40, gw = cw - 32, gh = ch - 64;
+  ctx.strokeStyle = 'rgba(255,255,255,.05)'; for (let i = 0; i <= 3; i++) { ctx.beginPath(); ctx.moveTo(gx, gy + gh * i / 3); ctx.lineTo(gx + gw, gy + gh * i / 3); ctx.stroke(); }
+  if (rate.length > 1) { const X = i => gx + i / 40 * gw, Y = v => gy + gh - v / mx * gh;
+    const g = ctx.createLinearGradient(0, gy, 0, gy + gh); g.addColorStop(0, 'rgba(58,216,255,.35)'); g.addColorStop(1, 'rgba(58,216,255,0)');
+    ctx.beginPath(); rate.forEach((v, i) => i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v))); ctx.lineTo(X(rate.length - 1), gy + gh); ctx.lineTo(gx, gy + gh); ctx.fillStyle = g; ctx.fill();
+    ctx.beginPath(); rate.forEach((v, i) => i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v))); ctx.strokeStyle = '#3ad8ff'; ctx.lineWidth = 2; ctx.stroke(); }
+  txt(document.getElementById('oRate').textContent + ' Teile/min', x + cw - 16, y + 20, '700 13px Inter, system-ui', '#3ad8ff', 'right');
+  // 4 Qualität
+  [x, y] = P(3); panel(x, y, cw, ch, 'Qualität');
+  const tot = M.qc.ok + M.qc.nok, q = tot ? M.qc.ok / tot : 1, cx = x + cw * .32, cy = y + ch / 2 + 10, rr = Math.min(cw * .2, ch * .3);
+  ctx.lineWidth = 16; ctx.lineCap = 'butt'; ctx.strokeStyle = '#ff6b6b'; ctx.beginPath(); ctx.arc(cx, cy, rr, 0, 7); ctx.stroke();
+  ctx.strokeStyle = '#2ee59d'; ctx.beginPath(); ctx.arc(cx, cy, rr, -Math.PI / 2, -Math.PI / 2 + q * Math.PI * 2); ctx.stroke();
+  txt(tot ? pct(q) : '–', cx, cy, '700 20px Inter, system-ui', '#e8edf7', 'center');
+  txt('● i.O.  ' + M.qc.ok, x + cw * .62, cy - 14, '600 13px Inter, system-ui', '#2ee59d'); txt('● n.i.O. ' + M.qc.nok, x + cw * .62, cy + 12, '600 13px Inter, system-ui', '#ff6b6b');
+  // 5 Energie
+  [x, y] = P(4); panel(x, y, cw, ch, 'Energie (live)');
+  const kw = totalPower(); txt(kw.toFixed(1) + ' kW', x + 16, y + 52, '700 24px Inter, system-ui', '#ffc94d');
+  txt(stats.kwh.toFixed(1) + ' kWh gesamt · ' + (stats.out ? (stats.kwh / stats.out).toFixed(2) : '–') + ' kWh/Teil', x + cw - 16, y + 52, '500 11.5px Inter, system-ui', '#8b97b5', 'right');
+  const s5 = Math.min(26, (ch - 90) / 4); [...cncs, 'robot'].forEach((k, i) => hbar(x + 16, y + 88 + i * s5, cw - 32, get(k).short, power(k) / 15, '#ffc94d', power(k).toFixed(1) + ' kW'));
+  // 6 Vorher/Nachher
+  [x, y] = P(5); panel(x, y, cw, ch, 'Analog vs. Digital · Teile/min');
+  const ra = modeStats.false.t > 5 ? modeStats.false.out / modeStats.false.t * 60 : 0, rd = modeStats.true.t > 5 ? modeStats.true.out / modeStats.true.t * 60 : 0, top6 = Math.max(1, ra, rd);
+  [['🗒 Analog', ra, '#ffc94d'], ['📡 Digital', rd, '#2ee59d']].forEach(([l, v, c], i) => {
+    const bw = cw * .22, bx = x + cw * (.22 + i * .36), bh = (ch - 110) * v / top6, by = y + ch - 34 - bh;
+    rrect(bx, by, bw, Math.max(2, bh), 8, c); txt(v ? v.toFixed(1) : '–', bx + bw / 2, by - 12, '700 14px Inter, system-ui', c, 'center'); txt(l, bx + bw / 2, y + ch - 18, '600 11.5px Inter, system-ui', '#c9d2e8', 'center');
+  });
+  if (!ra) txt('Digitalisierung kurz AUS schalten zum Vergleichen', x + cw / 2, y + 44, '500 11px Inter, system-ui', '#5d6a8c', 'center');
+}
+
+// ---------- Ansichten umschalten ----------
+function setView(v) {
+  view = v; for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('act', b.dataset.view === v);
+  const iso = v === 'iso'; document.querySelector('.legend').style.display = iso ? '' : 'none'; document.querySelector('.zoomctl').style.display = iso ? '' : 'none';
+  document.querySelector('.hint').textContent = iso ? 'Klick = Details · Mausrad = Zoom · Ziehen = Verschieben' : '';
+  document.getElementById('banner').style.display = !digital && iso ? 'block' : 'none';
+}
+document.getElementById('tabs').onclick = e => { const b = e.target.closest('button'); if (b) setView(b.dataset.view); };
+
+// ---------- Einstellungen ----------
+const applyCfg = (key, v) => { if (key.startsWith('cyc_')) M[key.slice(4)].cycle = v; else if (key === 'robot') cfg.robotSpeed = v; else if (key === 'scrap') cfg.scrap = v; else if (key === 'order') ORDER = v; };
+const fmtCfg = (key, v) => key.startsWith('cyc_') ? v.toFixed(1) + ' s' : key === 'robot' ? v.toFixed(1) + ' m/s' : key === 'scrap' ? pct(v) : v + ' Teile';
+const slider = (label, key, min, max, step, val) => `<div class="set"><div class="row" style="border:0"><span>${label}</span><span data-out="${key}">${fmtCfg(key, val)}</span></div><input type="range" min="${min}" max="${max}" step="${step}" value="${val}" data-k="${key}"></div>`;
+function renderSettings() {
+  document.getElementById('setBody').innerHTML = '<div class="sub" style="margin-top:0">Maschinen</div>'
+    + ['cnc1', 'cnc2', 'cnc3'].map(k => slider('Zykluszeit ' + M[k].short, 'cyc_' + k, 3, 15, .5, M[k].cycle)).join('')
+    + '<div class="sub">Prozess</div>' + slider('Roboter-Geschwindigkeit', 'robot', 1, 6, .5, cfg.robotSpeed) + slider('Basis-Ausschussrate', 'scrap', 0, .2, .01, cfg.scrap) + slider('Auftragsgröße', 'order', 20, 200, 10, ORDER)
+    + '<div class="sub">Ebenen im Hallenplan</div>' + Object.entries({ zones: 'Zonen', mat: 'Material-Flow', info: 'Informations-Flow', labels: 'Beschriftungen' }).map(([k, l]) => `<label class="chk"><input type="checkbox" data-layer="${k}" ${cfg.layers[k] ? 'checked' : ''}> ${l}</label>`).join('')
+    + '<button id="btnReset" style="margin-top:14px;width:100%">↺ Simulation neu starten</button>';
+}
+const setBody = document.getElementById('setBody');
+setBody.addEventListener('input', e => { const k = e.target.dataset.k; if (k) { const v = Number(e.target.value); applyCfg(k, v); setBody.querySelector(`[data-out="${k}"]`).textContent = fmtCfg(k, v); }
+  if (e.target.dataset.layer) cfg.layers[e.target.dataset.layer] = e.target.checked; });
+setBody.addEventListener('click', e => { if (e.target.id === 'btnReset') location.reload(); });
+function toggleDrawer(id, force) { const d = document.getElementById(id), open = force ?? !d.classList.contains('open'); d.classList.toggle('open', open); if (open && id === 'settings') renderSettings(); if (open && id === 'agent') document.getElementById('agIn').focus(); }
+document.getElementById('btnSettings').onclick = () => toggleDrawer('settings');
+document.getElementById('btnAgent').onclick = () => toggleDrawer('agent');
+for (const b of document.querySelectorAll('[data-close]')) b.onclick = () => b.closest('.drawer').classList.remove('open');
+function setSpeed(f) { speed = [1, 3, 6].includes(f) ? f : 1; document.getElementById('btnFast').textContent = '⏩ ' + speed + 'x'; }
+
+// ---------- Factory-Agent ----------
+let sampleFn = null, toolsOk = false, agBusy = false;
+const agMode = document.getElementById('agMode');
+(async () => {
+  try { if (window.claude?.use) { sampleFn = await claude.use('sample'); if (sampleFn) { const l = await sampleFn.limits().catch(() => null); toolsOk = !!l?.tools; } } } catch { sampleFn = null; }
+  agMode.textContent = sampleFn ? '● Claude · live' : '● Offline-Modus';
+  agMode.style.color = sampleFn ? 'var(--ok)' : 'var(--warn)';
+})();
+function factoryState() {
+  const ms = s => s.t > 5 ? +(s.out / s.t * 60).toFixed(1) : null;
+  return {
+    sim_zeit_s: Math.round(simT), digitalisierung: digital, tempo: speed + 'x', ansicht: view,
+    auftrag: { nr: 4711, soll: ORDER, fertig: stats.out, durchsatz_teile_min: document.getElementById('oRate').textContent },
+    kpis: { auslastung_cnc: pct((M.cnc1.util + M.cnc2.util + M.cnc3.util) / 3), qualitaetsrate: M.qc.ok + M.qc.nok ? pct(M.qc.ok / (M.qc.ok + M.qc.nok)) : null,
+      werkzeugwechsel: stats.tool, nachrichten: stats.msg, leistung_kW: +totalPower().toFixed(1), energie_kWh: +stats.kwh.toFixed(1) },
+    cnc: ['cnc1', 'cnc2', 'cnc3'].map(k => { const c = M[k]; return { id: k, name: c.name, status: stateInfo(c)[1], werkzeug: c.tool, verschleiss_pct: Math.round(c.wear), zykluszeit_s: c.cycle, teile: c.parts, auslastung: pct(c.util) }; }),
+    roboter: { aufgabe: R.label, auslastung: pct(R.util || 0), geschwindigkeit: cfg.robotSpeed },
+    qc: { warteschlange: M.qc.queue, io: M.qc.ok, nio: M.qc.nok },
+    lager: { rohteile: M.raw.stock, werkzeuge: M.tools.stock, fertigteile: M.out.stock },
+    vergleich_teile_min: { analog: ms(modeStats.false), digital: ms(modeStats.true) },
+    einstellungen: { basis_ausschuss: cfg.scrap },
+  };
+}
+const msgs = document.getElementById('agMsgs');
+function addMsg(kind, html) { const d = document.createElement('div'); d.className = 'msg ' + kind; d.innerHTML = html; msgs.append(d); msgs.scrollTop = msgs.scrollHeight; return d; }
+const esc = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const mdHtml = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^\s*[-*] /gm, '• ').replace(/^#+ /gm, '').replace(/\n/g, '<br>');
+function agentDid(t) { addMsg('tool', '⚙ ' + esc(t)); log('🤖 Agent: ' + t, '#c3a6ff'); }
+const CNC = { type: 'string', enum: ['cnc1', 'cnc2', 'cnc3'], description: 'ID der CNC-Maschine' };
+const needCnc = m => { const id = String(m); if (!M[id] || M[id].type !== 'cnc') throw new Error('Unbekannte Maschine ' + id); return id; };
+const agentTools = [
+  { name: 'get_factory_state', description: 'Liest den aktuellen Live-Zustand der Fabrik (CNCs, Roboter, QC, Lager, KPIs) als JSON.', execute: () => factoryState() },
+  { name: 'trigger_fault', description: 'Löst an einer CNC-Maschine eine simulierte Störung (Alarm) aus.', inputSchema: { type: 'object', properties: { machine: CNC }, required: ['machine'] },
+    execute: ({ machine }) => { const id = needCnc(machine); fault(id, true); agentDid(`Störung an ${M[id].short} ausgelöst`); return 'Störung aktiv an ' + id; } },
+  { name: 'clear_fault', description: 'Quittiert die Störung an einer CNC-Maschine.', inputSchema: { type: 'object', properties: { machine: CNC }, required: ['machine'] },
+    execute: ({ machine }) => { const id = needCnc(machine); fault(id, false); agentDid(`Störung an ${M[id].short} quittiert`); return 'ok'; } },
+  { name: 'set_cycle_time', description: 'Setzt die Zykluszeit einer CNC in Sekunden (3 bis 15).', inputSchema: { type: 'object', properties: { machine: CNC, seconds: { type: 'number' } }, required: ['machine', 'seconds'] },
+    execute: ({ machine, seconds }) => { const id = needCnc(machine), s = Math.max(3, Math.min(15, Number(seconds) || M[id].cycle)); M[id].cycle = s; agentDid(`Zykluszeit ${M[id].short} → ${s.toFixed(1)} s`); return 'Zykluszeit ' + s; } },
+  { name: 'set_robot_speed', description: 'Setzt die Robotergeschwindigkeit (1 bis 6).', inputSchema: { type: 'object', properties: { speed: { type: 'number' } }, required: ['speed'] },
+    execute: ({ speed: s }) => { cfg.robotSpeed = Math.max(1, Math.min(6, Number(s) || 3)); agentDid('Robotergeschwindigkeit → ' + cfg.robotSpeed); return 'ok'; } },
+  { name: 'set_digitalization', description: 'Schaltet die Digitalisierung (Vernetzung, MES, Live-Daten) an oder aus.', inputSchema: { type: 'object', properties: { on: { type: 'boolean' } }, required: ['on'] },
+    execute: ({ on }) => { setDigital(!!on); agentDid('Digitalisierung ' + (on ? 'AN' : 'AUS')); return 'ok'; } },
+  { name: 'set_sim_speed', description: 'Setzt das Simulationstempo: 1, 3 oder 6.', inputSchema: { type: 'object', properties: { factor: { type: 'number', enum: [1, 3, 6] } }, required: ['factor'] },
+    execute: ({ factor }) => { setSpeed(Number(factor)); agentDid('Tempo → ' + speed + 'x'); return 'ok'; } },
+  { name: 'show_view', description: 'Wechselt die Ansicht: iso = 3D-Hallenplan, flow = Flussdiagramm, ana = Analytics-Dashboard.', inputSchema: { type: 'object', properties: { view: { type: 'string', enum: ['iso', 'flow', 'ana'] } }, required: ['view'] },
+    execute: ({ view: v }) => { setView(['iso', 'flow', 'ana'].includes(v) ? v : 'iso'); agentDid('Ansicht → ' + v); return 'ok'; } },
+  { name: 'select_machine', description: 'Wählt eine Anlage aus und zeigt ihre Details in der Seitenleiste.', inputSchema: { type: 'object', properties: { machine: { type: 'string', enum: order } }, required: ['machine'] },
+    execute: ({ machine }) => { if (!order.includes(String(machine))) throw new Error('unbekannt'); selected = String(machine); renderPanel(); agentDid('Auswahl → ' + get(selected).short); return 'ok'; } },
+];
+const RULES = `Du bist "Factory-Agent", der KI-Assistent im Digital-Twin-Dashboard einer Zerspanungsfabrik: 3 CNC-Maschinen (cnc1, cnc2 Fräsen; cnc3 Drehmaschine), ein mobiler Roboter (AMR mit Arm), der Rohteile einlegt und Werkzeuge wechselt, Förderbänder zur Qualitätsprüfung (QC), Rohteil-/Werkzeug-/Fertigteillager und ein MES, das alles über OPC UA/MQTT vernetzt. Die Seite simuliert die Fabrik live.
+Antworte immer auf Deutsch, knapp und konkret (höchstens ~6 Sätze oder kurze Stichpunkte mit "- "), mit Zahlen aus dem Live-Zustand. Nutze **fett** für Kernaussagen, sonst kein Markdown.
+Wenn der Nutzer eine Aktion möchte (Störung auslösen/quittieren, Zykluszeit/Tempo/Robotergeschwindigkeit ändern, Digitalisierung schalten, Ansicht wechseln, Maschine zeigen), führe sie mit den Tools aus und sag kurz, was du getan hast. Für Analysen (Engpass, Optimierung, Wartung, Energie, Qualität) argumentiere aus den Daten.`;
+const turns = [];
+async function ask(q) {
+  if (agBusy || !q.trim()) return; agBusy = true;
+  addMsg('user', esc(q)); const bubble = addMsg('bot think', 'Denke nach…');
+  try {
+    if (!sampleFn) { await new Promise(r => setTimeout(r, 400)); bubble.className = 'msg bot'; bubble.innerHTML = mdHtml(localAgent(q)); return; }
+    turns.push({ role: 'user', content: q });
+    const input = [{ role: 'user', content: RULES }, ...turns.slice(-9, -1), { role: 'user', content: `Live-Zustand der Fabrik (JSON):\n${JSON.stringify(factoryState())}\n\nNutzer: ${q}` }];
+    const opts = { modelTier: 'quick', onText: ({ text }) => { bubble.className = 'msg bot'; bubble.innerHTML = mdHtml(text); msgs.scrollTop = msgs.scrollHeight; } };
+    if (toolsOk) opts.tools = agentTools; else opts.cache = false;
+    const { text } = await sampleFn(input, opts);
+    bubble.className = 'msg bot'; bubble.innerHTML = mdHtml(text); msgs.append(bubble); msgs.scrollTop = msgs.scrollHeight;
+    turns.push({ role: 'assistant', content: text });
+  } catch (e) {
+    turns.pop(); bubble.className = 'msg bot';
+    if (['not_granted', 'sampling_disabled', 'not_declared', 'capability_disabled', 'capability_removed'].includes(e?.code)) {
+      sampleFn = null; agMode.textContent = '● Offline-Modus'; agMode.style.color = 'var(--warn)'; bubble.innerHTML = mdHtml(localAgent(q));
+    } else bubble.innerHTML = mdHtml((e?.text ? e.text + '\n\n' : '') + (e?.code === 'rate_limited' ? '_Gerade zu viele Anfragen – bitte gleich nochmal._' : 'Da ist etwas schiefgelaufen (' + (e?.code || 'Fehler') + '). Bitte nochmal versuchen.'));
+  } finally { agBusy = false; }
+}
+// Offline-Agent: regelbasiert, falls Claude in dieser Ansicht nicht verfügbar ist
+function localAgent(q) {
+  const s = q.toLowerCase(), cm = s.match(/cnc\s*-?\s*([123])/), id = cm ? 'cnc' + cm[1] : null, cn = ['cnc1', 'cnc2', 'cnc3'].map(k => M[k]);
+  if (/quittier|beheb|reset|freigeb/.test(s)) { const t = id ? [M[id]] : cn.filter(c => c.state === 'fault'); if (!t.length) return 'Aktuell gibt es keine aktive Störung.'; t.forEach(c => { fault(c.id, false); agentDid(`Störung an ${c.short} quittiert`); }); return `**Erledigt:** Störung an ${t.map(c => c.short).join(', ')} quittiert, die Anlage läuft wieder.`; }
+  if (/störung|fehler|alarm|kaputt/.test(s) && /auslös|simulier|erzeug|mach|lös/.test(s)) { const k = id || 'cnc2'; fault(k, true); agentDid(`Störung an ${M[k].short} ausgelöst`); selected = k; renderPanel(); return `**Störung an ${M[k].short} ausgelöst** (Alarm 2041 · Spindelüberlast). Das MES hat den Alarm sofort erhalten, der Roboter wartet. Sag „quittieren“, um sie zu beheben.`; }
+  if (/analytics|diagramm|fluss|hallenplan|ansicht|zeig/.test(s) && !id) { const v = /analytic|kpi|chart/.test(s) ? 'ana' : /fluss|diagramm|flow/.test(s) ? 'flow' : 'iso'; setView(v); agentDid('Ansicht → ' + v); return 'Ansicht gewechselt auf **' + { iso: 'Hallenplan', flow: 'Flussdiagramm', ana: 'Analytics' }[v] + '**.'; }
+  if (/schneller|tempo|beschleunig/.test(s)) { setSpeed(6); agentDid('Tempo → 6x'); return 'Simulation läuft jetzt mit **6x** Tempo.'; }
+  if (/engpass|bottleneck|langsam|optimier|verbesser/.test(s)) { const slow = cn.reduce((a, b) => a.cycle > b.cycle ? a : b), worn = cn.filter(c => c.wear > 80);
+    return `**Engpass: ${slow.short}** mit der längsten Zykluszeit (${slow.cycle.toFixed(1)} s, Auslastung ${pct(slow.util)}).\n- Roboter-Auslastung: ${pct(R.util || 0)}${(R.util || 0) > .8 ? ' – der Roboter ist selbst nahe am Limit' : ''}\n- Empfehlung: Zykluszeit von ${slow.short} senken (Einstellungen) oder Teile auf die anderen CNCs verteilen.${worn.length ? `\n- Bald Werkzeugwechsel nötig: ${worn.map(c => c.short).join(', ')}` : ''}`; }
+  if (/werkzeug|verschleiß|verschleiss|wartung|tool/.test(s)) return '**Werkzeugzustand:**\n' + cn.map(c => `- ${c.short}: ${c.tool}, Verschleiß ${Math.round(c.wear)}%${c.wear > 80 ? ' ⚠' : ''}`).join('\n') + `\nBisher ${stats.tool} Wechsel, Magazinbestand ${M.tools.stock}.`;
+  if (/ausschuss|qualit|nio|n\.i\.o/.test(s)) { const t = M.qc.ok + M.qc.nok; return `**Qualitätsrate ${t ? pct(M.qc.ok / t) : '–'}** (${M.qc.ok} i.O., ${M.qc.nok} n.i.O.). Hauptursache für Ausschuss ist verschlissenes Werkzeug – mit Digitalisierung wird es rechtzeitig bei 100 % gewechselt.`; }
+  if (/energie|strom|kw/.test(s)) return `Aktuell **${totalPower().toFixed(1)} kW**, gesamt ${stats.kwh.toFixed(1)} kWh (${stats.out ? (stats.kwh / stats.out).toFixed(2) : '–'} kWh/Teil). Größte Verbraucher sind laufende CNCs (~14,5 kW).`;
+  if (/digital|vorteil|bringt|nutzen|analog/.test(s)) { const st = factoryState().vergleich_teile_min; return `**Digitalisierung bringt:** Echtzeit-Aufträge an den Roboter, Verschleißüberwachung und sofortige Alarme.\n- Analog: ${st.analog ?? '–'} Teile/min\n- Digital: ${st.digital ?? '–'} Teile/min${st.analog && st.digital ? `\n- **+${Math.round((st.digital / st.analog - 1) * 100)}% Durchsatz**` : '\nSchalte die Digitalisierung kurz aus, dann kann ich vergleichen.'}`; }
+  if (id) { const c = M[id]; return `**${c.name}:** ${stateInfo(c)[1]}, Werkzeug ${c.tool} (${Math.round(c.wear)}% Verschleiß), ${c.parts} Teile, Auslastung ${pct(c.util)}.`; }
+  return `**Status Halle 1:** ${stats.out}/${ORDER} Teile für Auftrag #4711, Auslastung CNC ${pct((M.cnc1.util + M.cnc2.util + M.cnc3.util) / 3)}.\n` + cn.map(c => `- ${c.short}: ${stateInfo(c)[1]}`).join('\n') + `\n- Roboter: ${R.label}\nFrag z. B. nach Engpass, Werkzeugen, Qualität oder Energie – oder lass mich eine Störung simulieren.`;
+}
+const CHIPS = ['Wie ist der Status?', 'Wo ist der Engpass?', 'Simuliere eine Störung an CNC 2', 'Quittiere alle Störungen', 'Was bringt die Digitalisierung?', 'Zeig mir die Analytics'];
+document.getElementById('agChips').innerHTML = CHIPS.map(c => `<button type="button">${c}</button>`).join('');
+document.getElementById('agChips').onclick = e => { const b = e.target.closest('button'); if (b) ask(b.textContent); };
+document.getElementById('agForm').onsubmit = e => { e.preventDefault(); const i = document.getElementById('agIn'); const q = i.value; i.value = ''; ask(q); };
 
 let last = performance.now(), uiT = 0;
 function loop(now) {
