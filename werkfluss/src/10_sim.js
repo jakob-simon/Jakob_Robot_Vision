@@ -12,12 +12,11 @@
    Ursache (Text) mitschreibt (setState → Event 'state' {from,to,cause}). Werkzeuge folgen genau
    einer sichtbaren Regel (§3.4, toolCheck()/planTools()). Personen tun nur, was eine Aufgabe (Task) verlangt.
 
-   Öffentliche API (WF.sim):
+   Öffentliche API (WF.sim) – verbindliche Feldliste: werkfluss/ENGINE_API.md
      init(profile) · reset() · advance(simSeconds) → Anzahl Schritte · step()
      state (Getter, Objekt-Identität bleibt über Resets erhalten) · history · t · speedHint
      clock() → "Mo 08:45" · shift() → {id,name,inBreak,endsAt,breakEndsAt}
-     machineView(id) · orderView(id) · forecast() → {machines:{id:[{orderId,seq,op,start,end,setupEnd,active}]},
-       orders:{id:{eta,late,slackSec,bottleneck}}} · kpis() · snapshot()
+     machineView(id) · orderView(id) · forecast() · kpis() · snapshot() · LABELS / label(group, key)
      actions.{triggerFault, repair, ack, resolve, reorder, setPriority, addOrder, moveOp, connectMachine,
        applyOffset, planToolChange, run, reset} → {ok,msg,…}; addOrder → Auftrags-ID (String) bzw. {ok:false,msg}
      runAction({type,…}) führt Benachrichtigungs-Aktionen aus (reorder, setPriority, applyOffset, planToolChange, select …)
@@ -26,22 +25,37 @@
      - Disposition: Eil → Material-Bereitschaft (am Platz/unterwegs vor „kommt bald“) → Termin → Auftragsnummer.
        Rüsten vorab nur, wenn das Material spätestens kurz nach Rüstende eintrifft. Arbeitsplätze ohne
        Rüstaufwand (Waschen, Messraum, Montage) geben einen leer gearbeiteten Arbeitsgang frei.
-     - Werkzeug: Planungsvorlauf = max(planAtParts, Holzeit/Taktzeit) Teile; gewechselt wird trotzdem nur bei
-       remainingParts ≤ planAtParts. Kein Wechsel, wenn die Reststandzeit für den Rest des Arbeitsgangs reicht.
-       Sägeband/Schleifscheibe/Wälzfräser gleichen Typs bleiben beim Rüsten montiert.
+     - Werkzeug (§3.4): Wechselgrenze je Werkzeug = min(planAtParts, ⌊10 % Standzeit / Schnittzeit je Teil⌋) Teile –
+       lange Schnitte (BTA-Kopf, Wälzfräser) werden erst gewechselt, wenn kein Teil mehr geht (≤ 10 % Standzeit ungenutzt).
+       Geplant/angekündigt wird mit Vorlauf max(planAtParts, Holzeit/Taktzeit) Teile; während ein Teil läuft, zählt der
+       Stand „nach diesem Teil“ – jedes getauschte Werkzeug war mindestens ein Teil vorher in der Ansicht „geplant“.
+       Mitwechseln: Wird ohnehin gewechselt, kommen Werkzeuge mit, deren eigener Wechsel in ≤ 30 min käme, die ≤ 35 %
+       Standzeit haben und deren Rest weniger kostet als ein zweiter Stopp. Kein Wechsel, wenn die Reststandzeit für den
+       Rest des Arbeitsgangs reicht. Sägeband/Schleifscheibe/Wälzfräser gleichen Typs bleiben beim Rüsten montiert.
+       Wechseldauer je Werkzeugart; nach Wechsel eines Formwerkzeugs (Wälzfräser, Schleifscheibe) wird das erste Teil an
+       der Maschine kontrolliert. Werkzeugbruch nur während der Bearbeitung (Teil Ausschuss, realer Verschleiß bleibt).
+       Vorbeugender Wechsel (Aktion planToolChange, z. B. aus der Geisterschicht-Meldung) steht als Auftrag an der
+       Maschine (manualTC, optional „nicht vor“) und ist in machineView sichtbar.
      - Messwert = Toleranzmitte + Drift·Verschleiß (+ Korrekturwert) + Rauschen; an Einlege-Arbeitsplätzen
        kompensiert der Bediener 60 % der Drift. Erstteil n.i.O. wegen Nebenmerkmal → Nacharbeit statt Ausschuss.
+       SPC-Korrektur gibt eine Person an der Maschine ein (Aufgabe „Werkzeugkorrektur eingeben“).
      - Ausschuss im 1. Arbeitsgang wird aus Rohmaterial nachgefertigt („Teil 405/407 … inkl. 7 Ersatz für Ausschuss“);
-       Ausschuss in Folgearbeitsgängen fehlt in der Liefermenge (Hinweis in der Fertigmeldung).
-     - Werkzeugwechsel-Logistik: Einrichter:in wird so losgeschickt, dass sie kurz vor der Wechsel-Teilegrenze da ist
-       (Vorlauf inkl. Voreinstellen bei leerer Werkzeugausgabe; unerreichbare Teilegrenzen werden übersprungen).
-       Steht sie trotzdem sinnlos an der Maschine (Störung, Teilegrenze > 10 min entfernt, Maschine steht), legt sie das
-       Werkzeug bereit und übernimmt andere Aufgaben (Event „Werkzeugwechsel zurückgestellt“). Wer nur wartet, wird für
-       dringende Aufgaben (Reparatur, Maschine ohne Werkzeug) abgezogen (Event 'reassign'). Endet das Teil in ≤ 3 min,
-       wird vor der Pause noch gewechselt bzw. eingelegt.
+       Ausschuss in Folgearbeitsgängen fehlt in der Liefermenge (Fehlmengen-Meldung, Fertigmeldung „Teillieferung“).
+     - Werkzeugwechsel-Logistik: Einrichter:in wird so losgeschickt, dass sie kurz vor der Ziel-Teilegrenze da ist
+       (Vorlauf inkl. Voreinstellen bei leerer Werkzeugausgabe); ist niemand im Dienst, nennt die Planung „frühestens
+       06:0x (Frühschicht)“ und den Stopp dazwischen. Steht sie sinnlos an der Maschine (Störung, Teilegrenze > 10 min
+       entfernt, Maschine fertigt nicht), legt sie das Werkzeug bereit und übernimmt andere Aufgaben. Endet das Teil in
+       ≤ 3 min, wird vor der Pause noch gewechselt bzw. eingelegt. Keine Aufgabe überlebt ihren Arbeitsgang.
+     - Personal: lange Arbeiten werden kurz vor Pause/Schichtende nicht mehr begonnen (≤ 10 min Überzug, letzte Schicht
+       ≤ 20 min); bemannte Bearbeitung (Messraum, Montage) wird für Pausen unterbrochen und danach fortgesetzt; wer eine
+       Pause durcharbeiten musste, holt sie nach. Reparaturen: Instandhaltung, sonst Einrichter:in (nicht Schichtleitung).
+     - Fremdbearbeitung: Behälter gehen als Los (transferBatch bzw. Restmenge) zum Partner, spätestens nach 24 h als Teillos.
+       Erster Schritt Fremdbearbeitung (Lohnhärten) = Beistellteile des Kunden aus dem Wareneingang.
      - Prognose: Arbeitsplätze ohne Rüstaufwand sind nur für die Bearbeitungszeit belegt; Rüsten vorab vor Materialeingang;
-       das eingelegte Teil läuft als Maschinenzeit (auch in Pausen); laufende Fremdbearbeitung blockiert die Einplanung
-       bereits zurückgekehrter Teile nicht. „Termin gefährdet“ erst, wenn zwei Prüfungen (10 min) hintereinander spät sind.
+       Materialeingang des Nachfolgers = erster abgabefertiger Behälter; Lose der Fremdbearbeitung; Cache über Plan-Version.
+       Veröffentlichte Liefertermine (eta) werden geglättet: Sprünge > 15 min erst nach Bestätigung (5-min-Takt).
+       „Termin gefährdet“ erst, wenn zwei Prüfungen (10 min) hintereinander spät sind.
+     - Arbeitsgang verlagern (moveOp) prüft Leistungsgrenzen je Maschinentyp (Gewicht, Ø, Stange, 5-Achs).
 */
 (function () {
   'use strict';
@@ -98,7 +112,8 @@
     risk: { ok: 'Im Plan', knapp: 'Knapp', 'spät': 'Verspätet', unbekannt: 'Unbekannt' },
     task: TASK_LABEL,
     taskStatus: { open: 'Offen', assigned: 'Zugeteilt', done: 'Erledigt', cancelled: 'Entfallen' },
-    toolStatus: { ok: 'In Ordnung', planned: 'Wechsel geplant', due: 'Standzeit erschöpft', broken: 'Gebrochen', changing: 'Wird gewechselt', missing: 'Nicht bestückt', idle: 'Nicht im Einsatz' },
+    toolStatus: { ok: 'In Ordnung', planned: 'Wechsel geplant', due: 'Standzeit erschöpft', broken: 'Gebrochen', changing: 'Wird gewechselt', missing: 'Nicht bestückt', idle: 'Nicht im Einsatz',
+      replace: 'Wird beim Rüsten ersetzt', keep: 'Bleibt beim Rüsten montiert', setup: 'Beim Rüsten eingesetzt' },
     toolState: { mounted: 'Eingebaut', 'stock-used': 'Gebraucht in der Werkzeugausgabe', regrind: 'Zum Nachschliff', scrap: 'Verschrottet' },
     toolKind: { insert: 'Wendeschneidplatte', drill: 'Bohrer', mill: 'Fräser', hob: 'Wälzfräser', wheel: 'Schleifscheibe', saw: 'Sägeband' },
     fpiStage: { wait: 'Wartet auf Abholung (QS)', carry: 'Wird in den Messraum gebracht', hold: 'Wartet – Messmaschine gestört', measure: 'Wird gemessen' },
@@ -284,7 +299,7 @@
       barMagazineM: st.barMagazineM || 0, barReorderM: st.barReorderM || 0, barStockM: st.barMagazineM ? 0 : null, barMat: null,
       state: 'idle', since: t0, cause: 'Kein Arbeitsgang eingeplant', waitCode: null,
       op: null, setupDone: false, released: false, needCorr: false, part: null, dressRem: 0, fpi: null,
-      setupRun: null, corrRun: null, toolchange: null, fault: null, toolStaged: null, manualTC: null, missing: null, dressPending: false, rework: false, reworking: false,
+      setupRun: null, corrRun: null, toolchange: null, fault: null, toolStaged: null, manualTC: null, missing: null, rework: false, reworking: false,
       tools: [], tv: 0, tcM: null, tasks: { setup: null, load: null, tc: null, fpi: null, corr: null, repair: null, attend: null, bars: null, offset: null },
       segments: [{ t0, t1: null, state: 'idle' }], kd: newStats(), ks: newStats(), counter: 0,
       nextPickT: 0, starvedSince: null, lastSwitchCheck: 0, idleCause: null, lastPartT: null,
@@ -956,7 +971,7 @@
     m.op = { oid: o.id, idx: i };
     o.ops[i].machine = m.id;
     m.setupDone = false; m.released = false; m.needCorr = false; m.starvedSince = null; m.idleCause = null;
-    m.rework = false; m.reworking = false; m.dressPending = false;
+    m.rework = false; m.reworking = false;
     if (o.status === 'freigegeben') { o.status = 'in Arbeit'; o.startT = S.t; }
     planChanged();
     ev('opSelect', 'info', { kind: 'machine', id: m.id },
@@ -1061,7 +1076,7 @@
     resolveMissing(m, o.ops[i].complete ? 'Arbeitsgang beendet' : null);
     cancelBars(m);
     o.ops[i].machine = null;
-    m.op = null; m.setupDone = false; m.released = false; m.needCorr = false; m.starvedSince = null; m.dressPending = false;
+    m.op = null; m.setupDone = false; m.released = false; m.needCorr = false; m.starvedSince = null;
     planChanged();
   }
   function finishOp(m, o, i) {
@@ -1665,6 +1680,7 @@
     while (S.toolLog.length > CFG.toolsKeep) delete S.tools[S.toolLog.shift()];
     return disp;
   }
+  const keptAtSetup = (tl) => (tl.kind === 'saw' || tl.kind === 'wheel' || tl.kind === 'hob') && !tl.broken;
   /** Rüsten: alle Werkzeuge des Arbeitsgangs neu (vermessen); Sägeband/Schleifscheibe/Wälzfräser gleichen Typs bleiben montiert */
   function mountForOp(m, o, i) {
     const r = o.routing[i];
@@ -2036,6 +2052,9 @@
     const tl = x.tl, cut = x.spec.cutMinPerPart;
     const tk = S.tasks[m.tasks.tc];
     const after = tc.run ? ` Nach dem laufenden Teil: ${nm(Math.min(100, (tl.used + cut) / tl.life * 100), 0)} % Verschleiß, noch ${teile(x.remA)}.` : '';
+    if (!m.setupDone) return m.setupRun ? `Beim Rüsten eingesetzt (${tl.mountedT >= m.setupRun.t0 ? 'neu vermessen' : 'bleibt montiert, ' + nm(wearOf(tl), 0) + ' % Verschleiß'}) – noch ${teile(x.rem)}.`
+      : keptAtSetup(tl) ? `Bleibt beim Rüsten montiert (${LABELS.toolKind[tl.kind]} gleichen Typs, ${nm(wearOf(tl), 0)} % Verschleiß, noch ${teile(x.rem)}).`
+      : 'Wird beim Rüsten durch ein neues, vermessenes Werkzeug ersetzt.';
     if (tl.broken) return 'Werkzeugbruch – Wechsel erforderlich, bevor das nächste Teil startet.';
     if (x.rem < 1) return `Standzeit erschöpft (${nm(tl.life - tl.used, 1)} min Rest < ${nm(cut, 1)} min je Teil) – es wird nicht weitergeschnitten, Wechsel ${tk && tk.assignee ? 'läuft' : 'angefordert'}.`;
     const g = nc && nc.group.find(y => y.tl === tl);
@@ -3287,7 +3306,7 @@
           changeAtParts: x.at, planAtParts: PLAN_AT, planHorizonParts: tc.horizon, planWearPct: planWearPct(tl, cut, x.at), neededParts: tc.plAfter + tc.run,
           plannedChange: pcv, broken: !!tl.broken,
           manualOrder: m.manualTC && m.manualTC.types.includes(spec.type) ? { t: m.manualTC.t, notBefore: m.manualTC.notBefore, reason: m.manualTC.reason, due: !!(pcv && pcv.manual) } : null,
-          status: changing ? 'changing' : tl.broken ? 'broken' : x.rem < 1 ? 'due' : pcv ? 'planned' : 'ok',
+          status: !m.setupDone ? (m.setupRun ? 'setup' : keptAtSetup(tl) ? 'keep' : 'replace') : changing ? 'changing' : tl.broken ? 'broken' : x.rem < 1 ? 'due' : pcv ? 'planned' : 'ok',
           explain: changing ? `Wird gerade gewechselt (${pname(m.toolchange.by)}, noch ca. ${U.fmtDur(Math.max(0, m.toolchange.dur - (S.t - m.toolchange.t0)))}) – ${(m.toolchange.list.find(y => y.toolId === tl.id) || {}).reason || ''}` : toolExplain(m, x, nc, o, i, tc),
           mountedT: tl.mountedT, parts: tl.parts, dressEvery: TT[tl.typeId].dressEvery || null, sinceDress: tl.kind === 'wheel' ? tl.sinceDress : null });
       }
@@ -3371,7 +3390,7 @@
           else if (c.state === 'input' && c.location && c.location.id === 'EXT') waitPick += c.qty;
         }
         const lot = extLot(o, i);
-        if (lot.list.length) pickT = lot.complete ? Math.max(S.t, lot.leave) : fe && fe.shipNext != null ? fe.shipNext : null;
+        pickT = lot.list.length && lot.complete ? Math.max(S.t, lot.leave) : fe && fe.shipNext != null ? fe.shipNext : null;
         if (firstRet == null && fe) firstRet = fe.firstReturn;
         if (fe && fe.lastReturn != null && !op.complete) lastRet = Math.max(lastRet || 0, fe.lastReturn);
         const txt = [];
@@ -3385,7 +3404,7 @@
         waiting, inOutput, passed: op.passed, target, targetIn, replacementQty: i === 0 ? op.scrap : 0, complete: op.complete, state, stateLabel: LABELS.opState[state],
         machineState: active ? m.state : null, cause: active ? m.cause : null,
         setupMin: r.setupMin || 0, cycleMin: r.cycleMin || 0, transferBatch: r.transferBatch || null, firstPiece: !!r.firstPiece, ext,
-        plannedStart: pS != null ? Math.round(pS) : null, plannedEnd: pE != null ? Math.round(pE) : null,
+        plannedStart: pS != null ? Math.round(pS) : null, plannedEnd: pE != null ? Math.round(pE) : null, returnT: ext ? ext.returnT : null,
         plannedBusyStart: fe && fe.busyStart != null ? fe.busyStart : null, plannedBusyEnd: fe && fe.busyEnd != null ? fe.busyEnd : null, firstOutT: fe ? fe.first : null,
         startT: op.startT, endT: op.endT, measKey: id + '/' + r.seq };
     });
@@ -3609,12 +3628,13 @@
   /** Vorbeugender Werkzeugwechsel (z. B. vor der Geisterschicht) – bewusste, sichtbare Entscheidung.
       types: Werkzeugtypen (leer = Auswahl nach Reststandzeit gegenüber den offenen Teilen); notBefore: Wechsel frühestens ab
       dieser Sim-Zeit (Zahl oder {notBefore, reason}) – z. B. letzte Teilegrenze vor Schichtende. */
-  function planToolChange(machineId, types, opt) {
+  function planToolChange(machineId, types, opt, reasonArg) {
     const m = S.machines[machineId]; if (!m) return fail('Maschine unbekannt: ' + machineId);
     if (!m.op || !m.setupDone) return fail(`${m.id} hat keinen eingerichteten Arbeitsgang`);
     if (m.toolchange) return fail(`${m.id}: Werkzeugwechsel läuft bereits`);
     const c = curOf(m);
-    const o2 = opt && typeof opt === 'object' ? opt : { notBefore: opt };
+    const o2 = opt && typeof opt === 'object' ? Object.assign({}, opt) : { notBefore: opt };
+    if (!o2.reason && reasonArg) o2.reason = reasonArg; // App ruft Aktionen positionsweise auf (machineId, types, notBefore, reason)
     const nb = Number(o2.notBefore);
     const tc = toolCheck(m, c.o, c.i);
     if (tc.plAfter <= 0) return fail(`${m.id}: ${tc.run ? 'das letzte Teil von ' + c.o.id + ' AG ' + c.r.seq + ' läuft' : 'alle Teile von ' + c.o.id + ' AG ' + c.r.seq + ' sind gestartet'} – kein Werkzeugwechsel mehr nötig`);
@@ -3774,7 +3794,12 @@
     containerWhere: (id) => (S.containers[id] ? whereText(S.containers[id]) : null),
     containerView: (id) => (S.containers[id] ? contView(S.containers[id]) : null),
     LABELS,
-    label: (group, key) => { const g = LABELS[group] || (group === 'machineState' ? null : null); if (group === 'machineState') return WF.STATE[key] ? WF.STATE[key].label : key; if (group === 'sev') return WF.SEV[key] ? WF.SEV[key].label : key; return g && g[key] != null ? g[key] : key; },
+    /** deutsche Bezeichnung: label('person', 'walking') → 'Unterwegs'; Gruppen: Schlüssel von LABELS + 'machineState', 'sev' */
+    label: (group, key) => {
+      if (group === 'machineState') return WF.STATE[key] ? WF.STATE[key].label : key;
+      if (group === 'sev') return WF.SEV[key] ? WF.SEV[key].label : key;
+      const g = LABELS[group]; return g && g[key] != null ? g[key] : key;
+    },
     config: CFG,
   };
 })();
