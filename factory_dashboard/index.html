@@ -72,6 +72,18 @@
   .order b { font-size: 14px; }
   #spark { width: 100%; height: 56px; display: block; margin-top: 8px; }
   .alarm { color: var(--err); font-weight: 600; }
+  .mode { display: inline-flex; align-items: center; gap: 8px; }
+  .mode i { width: 30px; height: 16px; border-radius: 8px; background: #3a4566; position: relative; transition: .2s; }
+  .mode i::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: .2s; }
+  .mode.on { border-color: rgba(46,229,157,.5); }
+  .mode.on i { background: var(--ok); } .mode.on i::after { left: 16px; }
+  #banner { position: absolute; left: 50%; bottom: 52px; transform: translateX(-50%); display: none; background: rgba(60,40,10,.9); color: var(--warn);
+    border: 1px solid rgba(255,201,77,.5); border-radius: 10px; padding: 8px 14px; font-size: 12.5px; font-weight: 600; text-align: center; }
+  .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+  .cmp div { background: #121a33; border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+  .cmp b { display: block; font-size: 18px; }
+  .cmp small { color: var(--muted); font-size: 11px; }
+  .nodata { color: var(--muted); font-style: italic; }
   @media (max-width: 900px) {
     main { grid-template-columns: 1fr; grid-template-rows: 58vh auto; }
     aside { border-left: 0; border-top: 1px solid var(--line); }
@@ -90,7 +102,7 @@
       <div class="kpi"><b id="kTool">0</b><span>Werkzeugwechsel</span></div>
       <div class="kpi"><b id="kMsg">0</b><span>Nachrichten</span></div>
     </div>
-    <div class="controls"><button id="btnPause">⏸ Pause</button><button id="btnFast">⏩ 1x</button></div>
+    <div class="controls"><button id="btnMode" class="mode on"><i></i><span>Digitalisierung: AN</span></button><button id="btnPause">⏸ Pause</button><button id="btnFast">⏩ 1x</button></div>
   </header>
   <main>
     <div id="view">
@@ -102,6 +114,7 @@
       <div class="hint">Klick = Details · Mausrad = Zoom · Ziehen = Verschieben</div>
       <div class="zoomctl"><button id="zIn">＋</button><button id="zOut">－</button><button id="zReset">⟲</button></div>
       <div id="tip"></div>
+      <div id="banner">⚠ Analoge Fabrik: keine Vernetzung, keine Echtzeit-Daten.<br><span style="font-weight:400">Werker läuft Rundgang mit Papierliste · Werkzeugverschleiß wird erst am Ausschuss bemerkt</span></div>
     </div>
     <aside>
       <div><h2>Fertigungsauftrag</h2><div class="card">
@@ -110,6 +123,13 @@
         <div class="row" style="margin-top:6px"><span>Fertig / Soll</span><span id="oCnt">0 / 60</span></div>
         <div class="row"><span>Durchsatz (Teile/min)</span><span id="oRate">–</span></div>
         <canvas id="spark"></canvas>
+      </div></div>
+      <div><h2>Vorher / Nachher</h2><div class="card">
+        <div class="cmp">
+          <div><small>🗒 Analog</small><b id="cA">–</b><small id="cAq">Teile/min</small></div>
+          <div style="border-color:rgba(46,229,157,.4)"><small>📡 Digital</small><b id="cD" style="color:var(--ok)">–</b><small id="cDq">Teile/min</small></div>
+        </div>
+        <div id="cGain" style="margin-top:8px;color:var(--muted);font-size:12px">Schalte oben „Digitalisierung“ um, um beide Zustände zu vergleichen.</div>
       </div></div>
       <div><h2>Anlagen</h2><div class="mlist" id="mlist"></div></div>
       <div><h2 id="selTitle">Details</h2><div class="card" id="sel"></div></div>
@@ -137,7 +157,7 @@ for (const k in M) Object.assign(M[k], { id: k, util: 0, busyT: 0 });
 ['cnc1', 'cnc2', 'cnc3'].forEach((k, i) => Object.assign(M[k], {
   state: 'idle', progress: 0, cycle: 7 + i * 1.5, wear: 45 + i * 20, tool: 'T0' + (i + 1), parts: 0, needTool: false, reserved: false,
 }));
-Object.assign(M.qc, { queue: 0, progress: 0, ok: 0, nok: 0 });
+Object.assign(M.qc, { queue: 0, bad: 0, progress: 0, ok: 0, nok: 0 });
 const R = { name: 'Roboter (AMR + Arm)', short: 'Roboter', type: 'robot', id: 'robot', x: 4.2, y: 5, carry: null, task: [], label: 'wartet', iface: ['ROS 2', 'MQTT'], moves: 0, h: 30 };
 
 // Roboter-Gasse: x=4.2, Andockpunkte vor den Stationen
@@ -161,6 +181,10 @@ const netDevices = ['raw', 'tools', 'cnc1', 'cnc2', 'cnc3', 'qc', 'out', 'robot'
 const packets = [];
 const stats = { out: 0, tool: 0, msg: 0 };
 const history = [0]; let sparkT = 0; const ORDER = 60;
+let digital = true;
+const modeStats = { true: { t: 0, out: 0, ok: 0, nok: 0 }, false: { t: 0, out: 0, ok: 0, nok: 0 } };
+// Werker-Rundgang (nur analog)
+const WK = { x: 3, y: 0.2, i: 0, path: [[3, 0.2], [5.4, 0.2], [5.4, 3.4], [9.6, 3.4], [9.6, 9.7], [5.4, 9.7], [5.4, 6.8], [3, 6.8], [3, 3.4]] };
 function fault(id, on) {
   const c = M[id];
   if (on && c.state !== 'fault') { c.prev = c.state; c.state = 'fault'; send(id, 'mes', 'ALARM'); log(`⚠ ${c.short}: STÖRUNG – Spindelüberlast (Alarm 2041)`, 'var(--err)'); }
@@ -189,6 +213,7 @@ function log(msg, col = '') {
   logEl.prepend(d); while (logEl.children.length > 80) logEl.lastChild.remove();
 }
 function send(from, to, label) { // Informationspaket über die Trasse
+  if (!digital) return;
   const path = from === 'mes' ? netPath(to).reverse() : netPath(from);
   packets.push({ kind: 'info', path, t: 0, label }); stats.msg++;
 }
@@ -197,23 +222,32 @@ function ship(beltId, onArrive) { const b = belts.find(b => b.id === beltId); pa
 // ---------- Simulation ----------
 function planRobot() {
   if (R.task.length) return;
+  // analog: Roboter bekommt Aufträge erst, wenn der Werker vorbeikommt und ihn manuell startet
+  if (!digital) { R.idleT = (R.idleT || 0) + lastDt; if (R.idleT < 4) { R.label = 'wartet auf Werker'; return; } }
+  R.idleT = 0;
   const cncs = ['cnc1', 'cnc2', 'cnc3'].map(k => M[k]);
   const worn = cncs.find(c => c.state === 'idle' && c.needTool && !c.reserved);
   const empty = cncs.find(c => c.state === 'idle' && !c.needTool && !c.reserved);
   if (worn) { worn.reserved = true; R.task = [{ go: 'tools' }, { act: 'pickTool' }, { go: worn.id }, { act: 'toolChange', m: worn.id }]; R.label = `Werkzeugwechsel ${worn.short}`; }
   else if (empty && M.raw.stock > 0) { empty.reserved = true; R.task = [{ go: 'raw' }, { act: 'pickRaw' }, { go: empty.id }, { act: 'load', m: empty.id }]; R.label = `belädt ${empty.short}`; }
   else { R.label = 'wartet'; return; }
-  send('mes', 'robot', R.label); log(`MES → Roboter: ${R.label}`, 'var(--info)');
+  send('mes', 'robot', R.label); log(digital ? `MES → Roboter: ${R.label}` : `Werker startet Roboter manuell: ${R.label}`, digital ? 'var(--info)' : 'var(--warn)');
 }
+let lastDt = 0;
 function step(dt) {
-  simT += dt;
+  simT += dt; lastDt = dt; modeStats[digital].t += dt;
+  if (!digital) { const [tx, ty] = WK.path[WK.i], dx = tx - WK.x, dy = ty - WK.y, d = Math.hypot(dx, dy), v = 1.3 * dt;
+    if (d <= v) { WK.x = tx; WK.y = ty; WK.i = (WK.i + 1) % WK.path.length; } else { WK.x += dx / d * v; WK.y += dy / d * v; } }
   for (const k of ['cnc1', 'cnc2', 'cnc3']) {
     const c = M[k];
     if (c.state === 'running') {
       c.busyT += dt; c.progress += dt / c.cycle; c.wear += dt * 2.4;
       if (c.progress >= 1) {
-        c.parts++; c.state = 'idle'; c.progress = 0; if (c.wear >= 100) c.needTool = true;
-        ship(beltOf[k], () => { M.qc.queue++; });
+        c.parts++; c.state = 'idle'; c.progress = 0;
+        // digital: Verschleiß wird live überwacht → Wechsel bei 100 %. analog: erst bemerkt, wenn's deutlich zu spät ist
+        if (c.wear >= (digital ? 100 : 160)) c.needTool = true;
+        const worn = c.wear > 115;
+        ship(beltOf[k], () => { M.qc.queue++; if (worn) M.qc.bad++; });
         send(k, 'mes', 'Teil fertig');
         log(`${c.short}: Teil fertig → Förderband zur QC${c.needTool ? ' · Werkzeug verschlissen!' : ''}`, c.needTool ? 'var(--warn)' : 'var(--mat)');
       }
@@ -226,9 +260,10 @@ function step(dt) {
   }
   const q = M.qc;
   if (q.queue > 0) { q.progress += dt / 1.8;
-    if (q.progress >= 1) { q.progress = 0; q.queue--; const ok = Math.random() > 0.08; ok ? q.ok++ : q.nok++;
+    if (q.progress >= 1) { q.progress = 0; q.queue--; let pBad = 0.04; if (q.bad > 0) { q.bad--; pBad = 0.6; }
+      const ok = Math.random() > pBad; ok ? q.ok++ : q.nok++; const ms = modeStats[digital]; ok ? ms.ok++ : ms.nok++;
       send('qc', 'mes', ok ? 'i.O.' : 'n.i.O.');
-      if (ok) { ship('b4', () => { M.out.stock++; stats.out++; }); log('QC: Teil i.O. → Versand', 'var(--ok)'); } else log('QC: Teil n.i.O. – Ausschuss', 'var(--err)'); } }
+      if (ok) { const md = digital; ship('b4', () => { M.out.stock++; stats.out++; modeStats[md].out++; }); log('QC: Teil i.O. → Versand', 'var(--ok)'); } else log('QC: Teil n.i.O. – Ausschuss', 'var(--err)'); } }
   planRobot();
   const t = R.task[0];
   if (t && t.go) { // erst auf Gasse in y fahren (Gasse ist gerade)
@@ -400,6 +435,15 @@ function drawRobot() {
   if (R.carry) { ctx.fillStyle = R.carry === 'tool' ? '#b3a8ff' : '#ffb36b'; ctx.fillRect(j2[0] - 5, j2[1] - 3, 10, 10); }
   const t = iso(R.x, R.y, 0); return [t[0], t[1] - 40];
 }
+function drawWorker() {
+  const b = iso(WK.x, WK.y, 0), bob = Math.abs(Math.sin(simT * 8)) * 2;
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(b[0], b[1], 8, 4, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#2f6fd6'; ctx.beginPath(); ctx.roundRect(b[0] - 5, b[1] - 22 - bob, 10, 16, 4); ctx.fill();         // Blaumann
+  ctx.fillStyle = '#ffd9b3'; ctx.beginPath(); ctx.arc(b[0], b[1] - 27 - bob, 4.5, 0, 7); ctx.fill();                    // Kopf
+  ctx.fillStyle = '#ffc94d'; ctx.beginPath(); ctx.arc(b[0], b[1] - 29 - bob, 5, Math.PI, 0); ctx.fill();               // Helm
+  ctx.fillStyle = '#f5f5f5'; ctx.fillRect(b[0] + 4, b[1] - 18 - bob, 6, 8);                                            // Klemmbrett
+  pill(b[0], b[1] - 44, '👷 Werker · Rundgang', '#1a1300', '#ffc94d', 'transparent');
+}
 function draw() {
   ctx.save(); ctx.clearRect(0, 0, W, H); ctx.translate(panX, panY); ctx.scale(scale * zoom, scale * zoom);
   drawGround(); drawBelts();
@@ -407,7 +451,8 @@ function draw() {
   items.push({ k: R.x + R.y, m: R }); items.sort((a, b) => a.k - b.k);
   const labels = [];
   for (const it of items) { const top = it.m === R ? drawRobot() : drawMachine(it.m); labels.push([it.m, top]); }
-  drawNetwork(); drawPackets();
+  if (!digital) drawWorker();
+  if (digital) drawNetwork(); drawPackets();
   for (const [m, top] of labels) m === R ? pill(top[0], top[1] - 8, '🤖 ' + R.label, '#1a1300', selected === 'robot' ? '#ffe08a' : '#ffc94d', 'transparent') : drawLabel(m, top);
   ctx.restore();
 }
@@ -454,13 +499,14 @@ document.getElementById('sel').addEventListener('click', e => { const b = e.targ
 const rows = o => Object.entries(o).map(([k, v]) => `<div class="row"><span>${k}</span><span>${v}</span></div>`).join('');
 const pct = v => Math.round(v * 100) + '%';
 function renderPanel() {
-  for (const el of mlist.children) { const m = get(el.dataset.id), [c, s] = stateInfo(m);
+  for (const el of mlist.children) { const m = get(el.dataset.id); let [c, s] = stateInfo(m); if (!digital) { c = '#4a5575'; s = 'keine Daten'; }
     el.classList.toggle('sel', selected === el.dataset.id); el.querySelector('.dot').style.cssText = `background:${c};box-shadow:0 0 8px ${c}`; el.querySelector('.st').textContent = s; }
   const el = document.getElementById('sel'), ti = document.getElementById('selTitle');
   if (!selected) { ti.textContent = 'Details · Gesamtanlage';
     el.innerHTML = rows({ 'Material-Verbindungen': matLinks.length, 'Vernetzte Geräte': netDevices.length, 'Rohteile im Lager': M.raw.stock, 'Teile auf Förderband': packets.filter(p => p.kind === 'mat').length, 'QC i.O. / n.i.O.': `${M.qc.ok} / ${M.qc.nok}` })
       + '<div class="sub">Tipp</div><div style="color:var(--muted);margin-top:4px">Klick auf eine Maschine im Hallenplan oder in der Liste.</div>'; return; }
   const m = get(selected), [col, st] = stateInfo(m); ti.textContent = 'Details · ' + m.name;
+  if (!digital) { el.innerHTML = `<div class="nodata">Keine Live-Daten – Maschine ist nicht vernetzt.</div><div style="color:var(--muted);margin-top:6px">Status nur vor Ort am Bedienpanel ablesbar. Letzte Papier-Notiz: „läuft“ (vor ~2 h).</div>`; return; }
   let html = rows({ Status: `<b style="color:${col}">${st}</b>` });
   if (m.type === 'cnc') html += rows({ Werkzeug: m.tool, Zykluszeit: m.cycle.toFixed(1) + ' s', 'Gefertigte Teile': m.parts, Auslastung: pct(m.util) })
       + `<div class="sub">Fortschritt</div><div class="bar"><i style="width:${pct(m.progress)}"></i></div>`
@@ -487,7 +533,21 @@ function updateKpis() {
   document.getElementById('oCnt').textContent = `${Math.min(stats.out, ORDER)} / ${ORDER}`;
   const n = Math.min(10, history.length - 1); if (n > 0) document.getElementById('oRate').textContent = ((history.at(-1) - history.at(-1 - n)) / (n * 3) * 60).toFixed(1);
   drawSpark();
+  const rate = s => s.t > 5 ? s.out / s.t * 60 : null, scrap = s => s.ok + s.nok ? s.nok / (s.ok + s.nok) : null;
+  const A = modeStats.false, D = modeStats.true, ra = rate(A), rd = rate(D);
+  document.getElementById('cA').textContent = ra == null ? '–' : ra.toFixed(1);
+  document.getElementById('cD').textContent = rd == null ? '–' : rd.toFixed(1);
+  document.getElementById('cAq').textContent = 'Teile/min · Ausschuss ' + (scrap(A) == null ? '–' : pct(scrap(A)));
+  document.getElementById('cDq').textContent = 'Teile/min · Ausschuss ' + (scrap(D) == null ? '–' : pct(scrap(D)));
+  if (ra && rd) document.getElementById('cGain').innerHTML = `<b style="color:var(--ok)">+${Math.round((rd / ra - 1) * 100)}% Durchsatz</b> durch Vernetzung, Echtzeit-Aufträge und Verschleißüberwachung.`;
 }
+document.getElementById('btnMode').onclick = e => {
+  digital = !digital; const b = e.currentTarget; b.classList.toggle('on', digital); b.querySelector('span').textContent = 'Digitalisierung: ' + (digital ? 'AN' : 'AUS');
+  document.getElementById('banner').style.display = digital ? 'none' : 'block';
+  for (let i = packets.length - 1; i >= 0; i--) if (packets[i].kind === 'info') packets.splice(i, 1);
+  log(digital ? '📡 Digitalisierung aktiviert – alle Anlagen online' : '🗒 Analog-Modus – Vernetzung getrennt', digital ? 'var(--ok)' : 'var(--warn)');
+  renderPanel();
+};
 function drawSpark() {
   const c = document.getElementById('spark'), d = window.devicePixelRatio || 1, w = c.clientWidth, h = c.clientHeight; if (!w) return;
   c.width = w * d; c.height = h * d; const g = c.getContext('2d'); g.scale(d, d);
@@ -498,7 +558,7 @@ function drawSpark() {
   const grad = g.createLinearGradient(0, 0, 0, h); grad.addColorStop(0, 'rgba(58,216,255,.35)'); grad.addColorStop(1, 'rgba(58,216,255,0)');
   g.beginPath(); rate.forEach((v, i) => i ? g.lineTo(X(i), Y(v)) : g.moveTo(X(i), Y(v))); g.lineTo(X(rate.length - 1), h); g.lineTo(0, h); g.fillStyle = grad; g.fill();
   g.beginPath(); rate.forEach((v, i) => i ? g.lineTo(X(i), Y(v)) : g.moveTo(X(i), Y(v))); g.strokeStyle = '#3ad8ff'; g.lineWidth = 1.8; g.stroke();
-  g.fillStyle = '#8b97b5'; g.font = '10px Inter, system-ui'; g.fillText('Teile je 3 s', 2, 10);
+  g.fillStyle = '#8b97b5'; g.font = '10px Inter, system-ui'; g.textAlign = 'right'; g.fillText('Teile je 3 s', w - 2, 10);
 }
 document.getElementById('btnPause').onclick = e => { paused = !paused; e.target.textContent = paused ? '▶ Start' : '⏸ Pause'; };
 document.getElementById('btnFast').onclick = e => { speed = speed === 1 ? 3 : speed === 3 ? 6 : 1; e.target.textContent = '⏩ ' + speed + 'x'; };
