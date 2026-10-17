@@ -1287,6 +1287,11 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-st b .sm{display:none}
   @media (max-width:560px){.ka-st b{font-size:11px}.ka-st b .lg{display:none}.ka-st b .sm{display:inline}.ka-st small{display:none}.ka-st .d{width:28px;height:28px}.ka-st::before{top:13px;right:calc(50% + 18px);left:calc(-50% + 18px)}}
   .ka-sec{overflow:hidden}
+  .ka-sum{display:flex;align-items:flex-start;gap:9px;margin:12px 4px 0;padding:10px 12px 0;border-top:1px solid var(--line);font-size:12.8px;color:var(--text2);line-height:1.5}
+  .ka-sum>.ico{flex:none;margin-top:3px;color:var(--accent)}
+  .ka-sum b{color:var(--text);font-weight:600}
+  .ka-sum b.ok{color:var(--st-run)}.ka-sum b.bad{color:var(--st-fault)}.ka-sum b.warn{color:var(--st-wait)}
+  .ka-sum i{font-style:normal;color:var(--faint);margin:0 7px}
   .ka-wait{padding:16px}
   .ka-wait .hd{display:flex;align-items:flex-start;gap:12px}
   .ka-wait .hd>div{flex:1;min-width:0}
@@ -1507,6 +1512,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-qt{width:100%;min-height:330px;font-family:var(--f-mono);font-size:12px;line-height:1.5;resize:vertical}
   .ka-zm{background:var(--bg2);border-radius:8px;overflow:hidden;position:relative}
   .ka-zm svg{display:block;width:100%;height:auto}
+  .ka-zm .ka-mk{animation:none}
   @keyframes kaIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
   @keyframes kaScan{0%{transform:translateY(-100%)}100%{transform:translateY(390%)}}
   @keyframes kaPop{0%{opacity:0;transform:scale(.2)}70%{opacity:1;transform:scale(1.18)}100%{opacity:1;transform:scale(1)}}
@@ -1553,7 +1559,10 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     const k = node.dataset.r;
     if (!on) { node.hidden = true; shown[k] = false; return; }
     node.hidden = false;
-    if (!shown[k] && anim && !reduceMotion()) { node.classList.remove('ka-in'); void node.offsetWidth; node.classList.add('ka-in'); }
+    if (!shown[k] && anim && !reduceMotion()) {
+      node.classList.remove('ka-in'); void node.offsetWidth; node.classList.add('ka-in');
+      node.addEventListener('animationend', function done(e) { if (e.target === node) { node.classList.remove('ka-in'); node.removeEventListener('animationend', done); } });
+    }
     shown[k] = true;
   }
 
@@ -1990,12 +1999,22 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     if (i === 4) return 'frühestens ' + fDay(c.sch.eta);
     return '';
   }
+  function summaryHtml() {
+    if (!run.done || !quote || !calc) return '';
+    const c = calc, w = c.wunsch, now = S().t;
+    const ws = !w || w <= now ? '' : w >= c.sch.eta ? `Wunschtermin ${fDay(w)} <b class="ok">erreichbar</b>` : `Wunschtermin ${fDay(w)} <b class="bad">nicht erreichbar</b>`;
+    const open = c.hints.filter(h => h.sev === 'crit' || h.sev === 'warn').length;
+    const parts = [`<b>${esc(quote.part.name)}</b> · ${nf(c.qty)} Stk`, `<b>${eur(c.pr.unit)}</b> je Stk (${eur(c.pr.total, 0)})`, `frühestens <b>${esc(fDay(c.sch.eta))}</b>`];
+    if (ws) parts.push(ws);
+    parts.push(open ? `<b class="warn">${open} ${open === 1 ? 'Punkt' : 'Punkte'} zu klären</b>` : '<b class="ok">nichts Kritisches</b>');
+    return `<div class="ka-sum">${icon('sparkles', 14)}<span>${parts.join('<i>·</i>')}</span></div>`;
+  }
   function flowHtml() {
     const st = run.stage;
     return `<div class="ka-steps">${STEPS.map((s, i) => {
       const cls = run.error && i === st ? 'err' : (run.done || i < st) ? 'done' : i === st ? 'act' : '';
       return `<div class="ka-st ${cls}"><span class="d">${cls === 'done' ? icon('check', 16) : cls === 'err' ? icon('x', 16) : icon(s.ic, 16)}</span><b><span class="lg">${s.t}</span><span class="sm">${s.s}</span></b><small>${esc(stepSub(i))}</small></div>`;
-    }).join('')}</div>`;
+    }).join('')}</div>${summaryHtml()}`;
   }
   function waitHtml() {
     const sec = Math.floor((performance.now() - run.t0) / 1000);
@@ -2061,7 +2080,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
       stock = `<div class="ka-stock" title="Lagerbestand ${qtyU(onH, mt)} · reserviert ${qtyU(m.res.total, mt)} · Mindestbestand ${qtyU(mt.min, mt)}">
         <div class="bw"><div class="trk"><i style="width:${resW.toFixed(1)}%;background:var(--line2)"></i><i style="width:${mine.toFixed(1)}%;background:var(--mat)"></i><i style="width:${short.toFixed(1)}%;background:var(--st-fault)"></i><i style="width:${rest.toFixed(1)}%;background:color-mix(in srgb,var(--st-run) 45%,transparent)"></i><i style="width:${ord.toFixed(1)}%;background:repeating-linear-gradient(45deg,color-mix(in srgb,var(--info) 45%,transparent) 0 3px,transparent 3px 6px)"></i>
 </div><span class="mn" style="left:${(mt.min / scale * 100).toFixed(1)}%"></span></div>
-        <div class="lg"><span><i style="background:var(--line2)"></i>reserviert ${qtyU(m.res.total, mt)}${m.res.list.length ? ' (' + m.res.list.map(x => x.id).join(', ') + ')' : ''}</span><span><i style="background:var(--mat)"></i>dieser Auftrag ${qtyU(m.need, mt)}</span>${short > 0 ? `<span><i style="background:var(--st-fault)"></i>fehlt ${qtyU(m.need - Math.max(0, onH - m.res.total), mt)}</span>` : ''}${mt.onOrder ? `<span><i style="background:color-mix(in srgb,var(--info) 55%,transparent)"></i>bestellt ${qtyU(mt.onOrder, mt)}</span>` : ''}<span><i style="background:var(--st-wait);width:2px;border-radius:1px"></i>Mindestbestand ${qtyU(mt.min, mt)}</span></div></div>`;
+        <div class="lg">${m.res.total > 1e-6 ? `<span><i style="background:var(--line2)"></i>reserviert ${qtyU(m.res.total, mt)} (${m.res.list.map(x => x.id).join(', ')})</span>` : ''}<span><i style="background:var(--mat)"></i>dieser Auftrag ${qtyU(m.need, mt)}</span>${short > 0 ? `<span><i style="background:var(--st-fault)"></i>fehlt ${qtyU(m.need - Math.max(0, onH - m.res.total), mt)}</span>` : ''}${mt.onOrder ? `<span><i style="background:color-mix(in srgb,var(--info) 55%,transparent)"></i>bestellt ${qtyU(mt.onOrder, mt)}</span>` : ''}<span><i style="background:var(--st-wait);width:2px;border-radius:1px"></i>Mindestbestand ${qtyU(mt.min, mt)}</span></div></div>`;
     }
     const matTxt = m && !m.none ? `${qtyU(m.need, m.mt)}` : '–';
     const matSub = m && !m.none ? `${nf(c.qty)} × ${qtyU(q.raw.perPart, m.mt)} · Bestand ${qtyU(m.mt.onHand, m.mt)} · ${m.mt.location === 'RAW' ? 'Kragarmregal' : esc(m.mt.location)}` : 'kein Lagermaterial – beigestellt bzw. separat beschafft';
@@ -2462,7 +2481,9 @@ Erstellt mit werkfluss KI-Auftrag · ${WF.sim.clock()}`;
     else return;
     const box = el('div', { class: 'ka-zm', html: inner + `<div class="ka-ov">${markerHtml()}</div>` });
     const title = ui.src.kind === 'example' ? exById(ui.src.id).result.part.drawing + ' · ' + exById(ui.src.id).title : ui.upload.name;
-    WF.app.modal({ title, body: box, width: 1180 });
+    const ar = ui.src.kind === 'example' ? 297 / 210 : (ui.upload.w && ui.upload.h ? ui.upload.w / ui.upload.h : 1.414);
+    const w = Math.round(Math.max(320, Math.min(1180, (window.innerHeight - 130) * ar + 34)));
+    WF.app.modal({ title, body: box, width: w });
   }
 
   // ------------------------------------------------------------------ Ereignisse

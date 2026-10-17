@@ -65,7 +65,8 @@
   .cn-stat .s b{color:var(--text2);font-weight:600}
   .cn-stat .link{font-size:12px;margin-top:6px;display:inline-flex;align-items:center;gap:4px;text-decoration:none}
   @media (max-width:1180px){.cn-hero{grid-template-columns:repeat(3,minmax(0,1fr))}.cn-hero>div:first-child{grid-column:1/-1;border-bottom:1px solid var(--line)}.cn-hero>div:nth-child(2){border-left:0}}
-  @media (max-width:640px){.cn-hero>div{padding:12px 12px 11px}.cn-stat .v{font-size:22px}.cn-stat .s{font-size:11.5px}.cn-big b{font-size:34px}}
+  @media (max-width:640px){.cn-hero{grid-template-columns:repeat(2,minmax(0,1fr))}.cn-hero>div{padding:12px 12px 11px}.cn-hero>div:nth-child(4){grid-column:1/-1;border-left:0;border-top:1px solid var(--line)}
+    .cn-stat .v{font-size:24px}.cn-stat .s{font-size:11.5px}.cn-big b{font-size:34px}}
 
   /* ---------- Datenfluss + Stufen */
   .cn-rowA{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:14px;margin-top:14px;align-items:stretch}
@@ -441,13 +442,14 @@
   .cn-det-m.ok{color:var(--st-run);background:color-mix(in srgb,var(--st-run) 10%,transparent);border:1px solid color-mix(in srgb,var(--st-run) 30%,transparent)}
   .cn-det-m.bad{color:var(--st-fault);background:color-mix(in srgb,var(--st-fault) 10%,transparent);border:1px solid color-mix(in srgb,var(--st-fault) 30%,transparent)}
   .cn-det-m.pend{color:var(--muted);background:var(--card);border:1px solid var(--line)}
-  .cn-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:8px}
+  .cn-tiles{display:flex;flex-wrap:wrap;gap:8px}
+  .cn-tiles>.cn-tile{flex:1 1 118px}
   .cn-tile{border:1px solid var(--line);border-radius:10px;background:var(--bg2);padding:9px 11px;min-width:0}
   .cn-tile .l{font:600 10px/1.2 var(--f-ui);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
   .cn-tile .v{font:600 21px/1.15 var(--f-cond);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
   .cn-tile .v small{font:500 12px var(--f-ui);color:var(--muted);margin-left:3px}
   .cn-tile .v.s{font:500 12.5px/1.35 var(--f-mono);white-space:normal;overflow-wrap:anywhere;margin-top:6px}
-  .cn-tile.wide{grid-column:1/-1}
+  .cn-tiles>.cn-tile.wide{flex-basis:100%}
   .cn-s3-r{display:flex;flex-direction:column;gap:8px;min-width:0}
   .cn-chart{border:1px solid var(--line);border-radius:10px;background:var(--bg2);padding:9px 11px 6px;flex:1;display:flex;flex-direction:column;justify-content:space-between}
   .cn-chart-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
