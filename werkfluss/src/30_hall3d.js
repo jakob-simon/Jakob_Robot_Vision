@@ -2868,7 +2868,9 @@
   }
   function writeContainers(t) {
     const C = R.C; if (!C) return;
-    const n = { klt: 0, gb: 0, rack: 0, wrap: 0 }, sh = { n: 0 }, rings = { n: 0 }, boxes = { n: 0 };
+    // Zähler wiederverwenden (keine Allokation im Bild-Takt)
+    const n = C.cnt || (C.cnt = { klt: 0, gb: 0, rack: 0, wrap: 0 }), sh = C.cSh || (C.cSh = { n: 0 }), rings = C.cRg || (C.cRg = { n: 0 }), boxes = C.cBx || (C.cBx = { n: 0 });
+    n.klt = n.gb = n.rack = n.wrap = 0; sh.n = rings.n = boxes.n = 0;
     let nb = 0;
     const BLOB = BLOB_SZ;
     const hl = R.route && R.route.id, sel = R.selTarget && R.selTarget.kind === 'container' ? R.selTarget.id : null;
@@ -2909,7 +2911,8 @@
     }
     C.blob.count = nb; C.blob.instanceMatrix.needsUpdate = true;
     C.klt.count = C.kltFill.count = n.klt; C.gb.count = C.gbBase.count = C.gbFill.count = n.gb; C.rack.count = n.rack; C.shaft.count = sh.n; C.wrap.count = C.pal.count = n.wrap; C.box.count = boxes.n; C.ring.count = rings.n;
-    for (const m of [C.klt, C.kltFill, C.gb, C.gbBase, C.gbFill, C.rack, C.shaft, C.wrap, C.pal, C.box, C.ring]) m.instanceMatrix.needsUpdate = true;
+    const all = C.all || (C.all = [C.klt, C.kltFill, C.gb, C.gbBase, C.gbFill, C.rack, C.shaft, C.wrap, C.pal, C.box, C.ring]);
+    for (let i = 0; i < all.length; i++) all[i].instanceMatrix.needsUpdate = true;
     if (C.klt.instanceColor) C.klt.instanceColor.needsUpdate = true;
     C.kltFill.instanceColor.needsUpdate = true; C.gbFill.instanceColor.needsUpdate = true;
     for (const k in n) C.byInst[k].length = n[k];
@@ -4613,7 +4616,7 @@
       pe.x0 = pe.x; pe.z0 = pe.z; pe.x1 = tx; pe.z1 = tz;
       const mv = Math.hypot(pe.x1 - pe.x0, pe.z1 - pe.z0);
       pe.moving = mv > 0.02 && (p.state === 'walking' || !!p.route || catchUp || !!brk);
-      pe.seated = !!brk && pe.seat < 8 && !pe.moving && Math.hypot(brk.x - pe.x1, brk.z - pe.z1) < 0.06;
+      pe.bx = brk && pe.seat < 8 ? brk.x : null; pe.bz = brk ? brk.z : null;   // Stuhlplatz – Hinsetzen prüft frame() nach der Ankunft
       if (pe.moving) pe.th = Math.atan2(pe.x1 - pe.x0, pe.z1 - pe.z0);
       else if (p.state === 'working' && p.task) { const tgt = faceTarget(p); if (tgt) pe.th = Math.atan2(tgt.x - pe.x1, tgt.z - pe.z1); }
       else if (p.state === 'break') pe.th = Math.atan2(59.5 - pe.x1, 5.5 - pe.z1);
@@ -4740,8 +4743,10 @@
       pe.h += angD(pe.h, pe.th) * (1 - Math.exp(-dt * 10));
       if (!show) continue;
       pe.g.position.set(pe.x, 0, pe.z); pe.g.rotation.y = pe.h;
-      if (pe.seated !== pe.sitOn) { pe.sitOn = pe.seated; pe.sit.visible = pe.seated; pe.body.visible = pe.legL.visible = pe.legR.visible = pe.armL.visible = pe.armR.visible = !pe.seated; }
-      if (pe.seated) continue;
+      // am Stuhl angekommen → sitzend (auch bei angehaltener Simulation), Blick zum Tisch
+      const seated = pe.bx != null && Math.abs(pe.x - pe.bx) < 0.05 && Math.abs(pe.z - pe.bz) < 0.05;
+      if (seated !== pe.sitOn) { pe.sitOn = seated; pe.seated = seated; pe.sit.visible = seated; pe.body.visible = pe.legL.visible = pe.legR.visible = pe.armL.visible = pe.armR.visible = !seated; if (seated) pe.th = Math.atan2(59.5 - pe.bx, 5.5 - pe.bz); }
+      if (seated) { pe.g.position.y = 0; continue; }
       const walking = pe.moving && running;
       pe.walk = damp(pe.walk, walking ? 1 : 0, 8, dt);
       pe.work = damp(pe.work, pe.working && !walking ? 1 : 0, 5, dt);

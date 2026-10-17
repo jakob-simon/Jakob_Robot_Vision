@@ -1,0 +1,496 @@
+[
+ {
+  "summary": "Prospect walkthrough of werkfluss (build /tmp/rv-prospect.html, screenshots in /tmp/rv-prospect/). I ran the README demo script, the 11-step tour, sim jumps to 09:10, 13:55, 16:00, 21:00, 22:30 and Tue 07:00, a fault on M07, a rush order on FA-24119, the KI-Auftrag example placed as FA-24142, and the M10 Anbindung wizard through to activation.\n\nWhat works well: the visual quality is already high. Leitstand tiles, the Aufträge route cards, the Copilot cards, the KI-Auftrag result and the wizard look professional. Most cross-view numbers agree: part counters, tool rest parts and change times, buffer of FA-24118, ETA of FA-24142.\n\nFive things would embarrass the product in front of a skeptical production manager:\n1. Transports labelled \"Ziel voll\" wait up to 19 h. The 3D hall shows them as orange labels and the Material view as a red KPI.\n2. After a fault, the delivery forecast stays on the old value for several sim-minutes, while the route steps already move. The Copilot answer contradicts itself (buffer 1 h 04 min vs. 53 min; shipping before final inspection ends).\n3. The Messraum is shown as \"Wartet auf Bediener\", with a cost warning, while the same inspector is measuring a first piece on that CMM.\n4. The L0/L1 machines show second-accurate data that the Anbindung matrix says they cannot have. After connecting M10, the success screen shows \"Laufzeit heute 2 h 40 min\" from a sensor installed 6 minutes earlier.\n5. On Tuesday 07:00 the headline is OEE 24 % and 2.242 € loss, both caused by ghost-shift accounting.\n\nStory weaknesses:\n- The plant is above its OEE target and shows no pain.\n- The late order FA-24119 has no lever: a rush order gains 0 min on every at-risk order.\n- The tour's fault step ends with \"Termin hält\".\n- The strongest wow, the Geisterschicht-Check with its \"vor Schichtende wechseln\" action, only appears at 21:00 and is not in the tour.\n\nFurther medium issues:\n- The output forecast in Analyse is about 20–26 % too low.\n- \"Gutteile heute\" means two different numbers in different views.\n- Energy shows 532 kWh in the Leitstand vs. 498 kWh in Analyse.\n- The Wendeplatten-index is described four different ways.\n- The 3D hall opens as an orange tangle of flow lines.",
+  "findings": [
+   {
+    "severity": "high",
+    "file": "src/10_sim.js",
+    "title": "Transport orders wait up to 19 h with \"Ziel voll\" – shown as orange labels in Halle 3D and a red KPI in Material",
+    "evidence": "The material flow logic creates transport orders hours before the destination machine has room. Example: TR-0059 M01→M02 for FA-24122 was created at 08:44, but its AG 20 at INDEX G220 only starts around 20:35.\nWhat the prospect sees:\n• Halle 3D labels: \"Ziel voll · seit 53 min\" at 08:40, \"seit 5 h 11 min\" at 13:55, \"seit 7 h 16 min\" at 16:00, \"seit 10 h 59 min\" at 22:30, \"seit 19 h 29 min\" Tue 07:00.\n• Material KPI \"Offene Transporte 10 – längste Wartezeit 19 h 28 min\" in red (crit) on Tue 07:00.\n• Every waiting row has a red \"Offen\" pill, while both AGVs sit at the charging station with 21 % utilisation.\nScreenshots: /tmp/rv-prospect/04-1355-halle.png, 04-1600-halle.png, 04-2230-halle.png, 04-di0700-halle.png, 04-di0700-material.png, 02-full-material.png.\nAny logistics person reads this as \"the AGV system is broken\", and it is the most visible thing on the 3D showpiece.",
+    "fix": "Engine (10_sim.js, around lines 3088–3215):\n• Do not open a transport order (or do not start its wait clock) while the destination input buffer is full.\n• Keep the container as \"Bereitgestellt am Ausgang / im Pufferlager – Abruf, sobald <Ziel> Platz hat (Start ca. hh:mm)\".\n• If the source output would overflow, move the container to PUF.\n• Reserve one input slot of each machine for the op that is currently running. Today M02 briefly starves (\"Wartet auf Material – Behälter (30 Stk) ist unterwegs\", 09:02 in the tour) while 2 of its 3 slots hold FA-24119 material for later.\n45_material.js: count only due transports (phase ≠ 'geplant') in \"Offene Transporte\", the red KPI and the längste Wartezeit. Show planned ones as a neutral \"n vorgemerkt\" line.\n30_hall3d.js: drop the \"Ziel voll\" stop labels for planned items. Show at most one neutral chip per destination, e.g. \"Eingang M02 voll · 2 Behälter vorgemerkt\" in --mat at 60 % opacity."
+   },
+   {
+    "severity": "high",
+    "file": "src/10_sim.js",
+    "title": "After a fault the delivery ETA does not react, and the Copilot answer contradicts itself (demo script step 4)",
+    "evidence": "Steps: fault on M07 Tiefbohren via drawer → \"Störung simulieren\" → \"Störung auslösen\" (ALM 2104), then ask the Copilot \"Was bedeutet das für FA-24118?\".\nWhat the engine returns:\n• forecast().orders['FA-24118'].etaRaw jumps to Di 15:13.\n• The published eta stays Di 14:55 with etaPending = null until about 08:48 (q4.js trace).\n• At 30× that is 10–20 s of real time, exactly when the presenter is talking.\nAufträge card (/tmp/rv-prospect/06-fault-auftraege.png): Studer \"ab 16:42\", Messraum \"ab 19:36\" (both shifted), but Prognose still \"morgen 14:55, Puffer 1 h 04 min\". There is no \"neu … wird geprüft\" hint.\nCopilot (/tmp/rv-prospect/06-fault-copilot.png), all in one card:\n• header \"Puffer 1 h 04 min\"\n• text \"morgen 14:55 → morgen 15:07 (+11 min; Puffer 53 min)\"\n• AG 60 Messraum \"fertig ca. Di 14:57\" but AG 70 Versand \"ca. Di 14:55\", so shipping happens before final inspection\n• Empfehlung \"nur mit Puffer 1 h 04 min\"",
+    "fix": "10_sim.js forecast stabilisation (etaStable / etaPending):\n• Bypass the hysteresis on structural events (fault start/end, repair, setPriority, moveOp, addOrder, planRemake) and publish etaRaw immediately.\n• Otherwise set etaPending at once, so 41_orders.js shows \"neu 15:07 – wird geprüft\".\n• Never let the Versand step end before the last op's plannedEnd.\n60_ai.js order card: take header, KPI tiles, prose, step list and Empfehlung from one source. Either all from the post-fault whatIf/etaRaw, labelled \"neu gerechnet\", or all from the published eta. Show \"vorher 14:55 → jetzt 15:07\" once, in the header."
+   },
+   {
+    "severity": "high",
+    "file": "src/10_sim.js",
+    "title": "Messraum shows \"Wartet auf Bediener\" with a cost warning while the CMM is busy with a first-piece measurement",
+    "evidence": "At Mo 16:00:\n• WF.sim.machineView('QS').state = 'waitOperator', cause \"Prüfung FA-24125 AG 40 – qualifizierte Personen beschäftigt (N. Leitner: Erstteilprüfung M04 …)\".\n• At the same time Nina Leitner's activity is \"Erstteilprüfung M04 für FA-24129 am KMG\" (M04 fpi.stage = 'measure').\n• Leitstand \"Jetzt wichtig\": WARNUNG \"QS Messraum: Wartet auf Bediener seit 15:47 … Stillstand ca. 90 €/h\". The recommendation \"Bediener einer ruhigen Maschine … einsetzen\" makes no sense, because the single ZEISS CONTURA is occupied.\n• Halle label: \"QS Messraum Wartet 0/119\".\n• These seconds are booked as loss. Analyse names the Messraum the largest \"Wartet auf Bediener\" item.\nScreenshots: /tmp/rv-prospect/05-1600-qs-drawer.png, 04-1600-leitstand.png.\nA QS-savvy prospect spots this immediately.",
+    "fix": "While an FPI is in stage 'carry'/'measure' at the CMM, QS should be state firstPiece/busy with cause \"Erstteilprüfung M04 · FA-24129 (N. Leitner)\". It should not be waitOperator.\n• Book that time as productive inspection time, not as loss.\n• Suppress the \"Wartet auf Bediener\" notification for QS while the CMM is in use.\nThe queued lot FA-24125 AG 40 should show as \"wartet – KMG belegt durch Erstteil bis ca. 16:12\"."
+   },
+   {
+    "severity": "high",
+    "file": "src/50_connect.js",
+    "title": "L0/L1 machines show data they cannot have; after connecting M10, the success screen shows data from before the sensor existed",
+    "evidence": "The Anbindung matrix says:\n• Stückzahl is \"manuell\" at L0 and L1.\n• \"Werkzeug in der Spindel\" and \"Standzeit aus der Steuerung\" need L3.\n• Okamoto ACC (L0) is \"manuell – keine Live-Daten\".\nBut before connecting:\n• The M10 tile and drawer show \"Teil 24 von 24\", \"Schleifscheibe 37 % · noch 126 Teile\" and a state band to the second (\"Wartet auf Bediener 4 min · Bereit 1 s\") (/tmp/rv-prospect/09-m10-drawer-before.png).\n• Same pattern for M01 Säge (L1), M07 (L1) and M13 (L0).\nAfter \"Anbindung aktivieren\" at 08:52:\n• The success page shows \"Laufzeit heute 2 h 40 min\" as \"Erste Live-Werte\" (/tmp/rv-prospect/09-wizard-activated-tall.png).\n• At 08:58 the drawer shows a 30-minute power/current history with steps before 08:52 (/tmp/rv-prospect/09-halle-m10-after.png).\n• The Leitstand tile looks the same before and after, apart from the L0→L1 badge (/tmp/rv-prospect/09-m10-tile-before.png vs 09-m10-tile-after.png).\nSo the \"1996 machine goes digital\" step has no visible payoff, and a skeptic will ask how the tool life of the L0 grinder is known.",
+    "fix": "50_connect.js success page:\n• Show \"Laufzeit seit Anschluss 6 min\" (from conn.connectedT).\n• Start the sparklines at connectedT, with a marker \"angebunden 08:52\".\n• Add a before/after strip: today's state band hatched \"Tablet-Rückmeldung (geschätzt)\" up to 08:52 and solid \"gemessen\" after.\n42_machine.js / 40_leitstand.js, for conn.level < 2:\n• Prefix counters and tool life with \"≈\" or \"laut Plan/Tablet\".\n• Render the state band before connectedT hatched.\n• Show seconds only for measured segments.\nThis makes the payoff of connecting visible (\"ab jetzt gemessen\") instead of contradicting the matrix."
+   },
+   {
+    "severity": "medium",
+    "file": "src/40_leitstand.js",
+    "title": "Tuesday 07:00 headline: OEE 24 % and 2.242 € loss, both caused by ghost-shift accounting",
+    "evidence": "/tmp/rv-prospect/04-di0700-leitstand.png at Di 07:00:\n• OEE HEUTE 24,0 % in yellow, \"Ziel 75 % · −51,0 Pkt.\", V 26,6 %.\n• STILLSTANDSKOSTEN 2.242 €, after one hour of shift.\nCause: per ENGINE_API §11, autonomous machines that stopped in the night (M03 waiting for a tool from 22:18, M02, M05) count 00:00–06:00 as planned loss at full machine rate.\nA presenter who lets the sim run overnight (600×) opens the next morning on what looks like a collapsed plant. Production managers do not count unmanned idle hours at machine-hour rate as \"Stillstandskosten\"; that is lost opportunity (TEEP).",
+    "fix": "OEE tile: lead with \"OEE Schicht\" (73 %) and show \"heute inkl. Geisterschicht 24 %\" as the secondary value, or exclude ghost-window time from the day OEE.\nAdd a dedicated card/row, e.g. \"Geisterschicht: 3 von 4 Maschinen standen ab 22:18 – 7 h 40 min ungenutzt (≈ 2.180 € Kapazität)\" with a link to the Geisterschicht-Check.\nRename the night share in Stillstandskosten to \"ungenutzte Kapazität\" and keep it out of the red headline."
+   },
+   {
+    "severity": "medium",
+    "file": "src/46_tools.js",
+    "title": "The Wendeplatten-index on M04 at 08:45 is described four contradictory ways",
+    "evidence": "Engine: machineView('M04').tools[DNMG].plannedChange has action 'index', by null, stage 'Werkzeug liegt bereit'. The stage comes from 10_sim.js line 2312 and is wrong for an index.\nThe UI tells four stories:\n1. Werkzeuge table: \"Schneide wenden 1 → 2/4 · Werkzeug liegt bereit\", and the header card \"… Schneide wenden · Werkzeug liegt bereit\".\n2. Wechselaufträge: stepper \"Angefordert → Unterwegs → An der Maschine → Wenden\", \"Meldung an Einrichter:innen 06:55\", \"Wird ca. 08:41 vergeben\".\n3. KI-Schichtbriefing: \"08:45 M04 WSP DNMG 150608 (noch niemand zugeteilt)\". The Schichtverlauf two cards below already says \"L. Wagner\".\n4. The rule card and the tour: \"Die Bediener:in wendet an der Maschine … kein Gang zur Werkzeugausgabe\".\nScreenshots: /tmp/rv-prospect/02-full-werkzeuge.png, 02-full-leitstand.png.\nThis undermines the README's \"eine nachvollziehbare Regel\".",
+    "fix": "10_sim.js around line 2312: for action 'index', never use 'Werkzeug liegt bereit'. Use 'Bediener:in wendet nach Teil 7' and set by/byId to the machine's operator (L. Wagner).\n46_tools.js Wechselaufträge, for index: use a 2-step stepper (\"Angekündigt → Wenden an der Maschine\") with text \"L. Wagner wendet nach Teil 7 · ca. 1–2 min\". Remove \"Meldung an Einrichter:innen\" and \"Unterwegs\".\n40_leitstand.js briefing: name the operator for index changes instead of \"noch niemand zugeteilt\", or recompute when the assignment changes."
+   },
+   {
+    "severity": "medium",
+    "file": "src/43_analyse.js",
+    "title": "\"Ausstoß heute\" forecast is about 20–26 % too low, and the plan baseline equals actual at page load",
+    "evidence": "Forecast \"Prognose bis 22:00\" vs. actual kpis().good:\n• 08:40: ≈ 2.120\n• 12:00: 2.151\n• 16:00: 2.308\n• actual at 22:00: 2.675\nIn /tmp/rv-prospect/10-analyse-ausstoss-1600.png the forecast hourly bars after 17:00 drop to about 40/h, while every actual hour of the day was 100–250/h. A shop manager stops trusting the chart after one afternoon.\nAlso \"Plan bis jetzt · Stand 08:40\" is 524 vs Ist 525 at page open (/tmp/rv-prospect/02-full-analyse.png). The baseline is simply the moment the app was opened, so the comparison means nothing.",
+    "fix": "Include the expected order intake in the hourly forecast. The engine releases 1–2 orders per shift plus refills below openMin 9; use profile.sim.intake to add an \"erwartete Neuaufträge\" layer. Otherwise label the series honestly: \"nur bekannte Aufträge – ohne Neuaufträge\".\nFreeze the plan baseline at shift start (06:00 / 14:00), not at app start, and label it \"Plan (Stand 06:00)\"."
+   },
+   {
+    "severity": "medium",
+    "file": "src/43_analyse.js",
+    "title": "The same label shows different numbers across views (Gutteile, energy, Härterei hours)",
+    "evidence": "At Mo 08:40:\n• Gutteile: Leitstand \"Fertige Teile heute 104 Stk\". Analyse \"Ausstoß heute · Ist bis jetzt 525 Gutteile\". Werkzeuge \"0,17 € je Gutteil · 525 Gutteile heute\". Qualität \"525 gut\". 525 is op passes, 104 is finished parts; only the Leitstand explains that.\n• Energy: Leitstand \"heute 532 kWh\" (kpis().energyKwh, includes base load and AGVs). Analyse \"Energie je Fertigteil 4,78 kWh · 498 kWh\" (sum of machines only). Both under the label \"heute\".\n• Härterei: the FA-24118 \"Warum knapp\" box says \"Induktionshärten … bei Härterei Wolf (7 h)\" directly above \"Induktionshärten … 6 h 30 min\" (/tmp/rv-prospect/03-tour-04-order.png).\nUI_GUIDE rule 2 (\"Eine Wahrheit\") is violated where a prospect compares tiles.",
+    "fix": "Reserve \"Gutteile\" or \"Fertigteile\" for finished parts everywhere.\n• Rename the op-based counts to \"Arbeitsgänge gut\" in Analyse \"Ausstoß\", Werkzeuge (\"0,17 € je Arbeitsgang\", or divide by goodFinished for € je Fertigteil) and Qualität FPY sub-line.\n• Or switch the Ausstoß chart to finished parts.\nEnergy: use kpis().energyKwh for Energie je Fertigteil (5,1 kWh) and show \"davon Maschinen 498 kWh · Grundlast/AGV 34 kWh\" in the energy card.\nOrder drawer: one Härterei duration (lead time or delay), labelled."
+   },
+   {
+    "severity": "medium",
+    "file": "src/10_sim.js",
+    "title": "The late order FA-24119 has no lever in the app; a rush order gains 0 min on every at-risk order",
+    "evidence": "whatIfPriority over all 25 open orders: gain is 0 min for FA-24119 (late), FA-24118 (knapp) and FA-24126 (knapp). Gains of 12–48 h appear only for orders with 2–8 days of slack (q5.js).\nThe rush modal for FA-24119 says \"±0 – die Reihenfolge … ist hier nicht der begrenzende Faktor\" (/tmp/rv-prospect/07-rush-modal.png).\nYet the order drawer lists \"Warten an M02 INDEX G220 hinter FA-24138 3 h 22 min\" and \"Warten an M08 hinter FA-24138 2 h 41 min\" (/tmp/rv-prospect/07-order-drawer-24119.png). FA-24138 has about 6,7 days of slack.\nA real planner would split FA-24138's lot. The only lever werkfluss offers is \"Expressdurchlauf bei Härterei Wolf anfragen\", a phone call with no quantified effect. For a jury this reads as \"it explains the problem but can't solve it\".",
+    "fix": "Add a what-if and action \"Los teilen / unterbrechen\" in orderAdvice/whatIf. Example: \"FA-24138 an M08 nach 60 Stk unterbrechen, FA-24119 dazwischen → −2 h 41 min, FA-24138 bleibt 6 T im Termin\". Offer it in the order drawer and in Jetzt wichtig (41_orders.js).\nAlso add a Härterei-Express what-if, e.g. \"Express −6 h → Prognose Mi 13:12 statt Do 07:12\", with an action that drafts the request (e-mail text to Härterei Wolf), so the advice ends in a concrete click."
+   },
+   {
+    "severity": "medium",
+    "file": "src/05_profile.js",
+    "title": "The demo plant shows no pain: OEE 80,5 % above the 75 % target, 12 of 13 machines producing",
+    "evidence": "Opening view (/tmp/rv-prospect/01-leitstand.png): OEE 80,5 % \"+5,5 Pkt.\" over target, \"12 Produktion · 0 Wartet · 0 Störung\", briefing headline \"OEE 80,5 % über Ziel 75 %\".\nFor a 40-person CNC job shop with frequent changeovers, 55–65 % is typical, so 80 % reads as fantasy to the production manager. The jury sees a plant that is fine without the product.\nThe value slide then promises \"+195 T€ Kapazität pro Jahr bei +5 OEE-Punkten\" (/tmp/rv-prospect/03-tour-10-value.png) for a plant already above target, and never contrasts that with the price (13.884 €/Jahr).",
+    "fix": "Tune the profile so the morning shows a visible gap:\n• either a realistic OEE around 65–70 % (longer setups, one Wartet-auf-Bediener cluster),\n• or raise the target to 85 % (world-class), so the tile reads \"−4,5 Pkt. unter Ziel\" with Rüsten 51 % as the named cause.\nValue slide (70_tour.js): add a ROI tile \"Amortisation < 1 Monat (13.884 €/Jahr vs. 195 T€)\" and label the 195 T€ \"zusätzliche Kapazität (Umsatzpotenzial)\"."
+   },
+   {
+    "severity": "medium",
+    "file": "src/70_tour.js",
+    "title": "Tour fault step ends with \"Termin hält\" – the main reaction moment shows nothing moving",
+    "evidence": "Tour step 7 triggers ALM 1021 on WFL M80 (M04). The result card reads \"Termin hält – fertig morgen 14:55 · Puffer 1 h 04 min\" (/tmp/rv-prospect/03-tour-06-fault.png).\nM04 is not the limiting step (Härterei is), so the delivery date does not move. Even a fault on M07 only moves FA-24118 by +11 min.\nThe README promises \"Prognose und Termine reagieren\", but the audience sees no change.",
+    "fix": "In pickFaultMachine, use whatIf to pick the machine/fault whose outage flips an order's status (knapp → verspätet, or moves a due date by > 1 h). Use a longer catalog fault there (e.g. a 2–3 h spindle/hydraulic fault on M07 or M09).\nShow the result as \"FA-24118: Puffer 1 h 04 min → 52 min zu spät\" with the Copilot's recovery plan in the next step.\nIf no flip is possible, phrase the card as the insight: \"Störung kostet 19 min an AG 20 – Liefertermin hält, weil die Härterei begrenzt (kein Handlungsbedarf)\"."
+   },
+   {
+    "severity": "medium",
+    "file": "src/70_tour.js",
+    "title": "The strongest wow, the Geisterschicht-Check, never appears in the tour or README demo",
+    "evidence": "At 21:00 the Leitstand shows \"Geisterschicht-Check: 3 von 5 autonomen Maschinen stoppen in der Nacht – M02 ca. 22:00 (Erstteil nicht freigegeben) · M03 ca. 22:21 (Abstechplatte) · M05 ca. 23:34\", with a one-click action \"M03: vor Schichtende wechseln (+52 min Laufzeit)\" (/tmp/rv-prospect/13-ghost-2101.png).\nThis is exactly the money-in-the-night insight Austrian job shops care about. It only appears at 21:00, and the 6-minute demo starts at 08:40, so no prospect ever sees it.",
+    "fix": "Add a tour step and README step \"Heute Nacht\" that calls the ghost check as a preview at any time (\"Wenn um 22:00 alle gehen …\"). Show which autonomous machines will stop and when, the € of lost night capacity, and the 1-click preventive tool change.\nOptionally add a small permanent Leitstand card \"Geisterschicht-Prognose\" from 18:00 on, or on demand."
+   },
+   {
+    "severity": "medium",
+    "file": "src/30_hall3d.js",
+    "title": "Halle 3D first impression: all overlays on, an orange tangle across the hall, and labels that are only IDs",
+    "evidence": "On first open (/tmp/rv-prospect/01-halle.png, tour step 4 /tmp/rv-prospect/03-tour-03-hall.png):\n• Materialfluss, Datenfluss, Personen and Beschriftung are all active.\n• About 40 thick orange arcs criss-cross the floor and hide the machines.\n• The model sits small in the frame with large empty margins.\n• Machine labels show only \"M01\"…\"M13\", which means nothing to a visitor.\nWith Materialfluss off the hall is calm and readable (/tmp/rv-prospect/12-halle-nomat.png). Later camera states show richer labels (\"M02 INDEX G220 26/60\", /tmp/rv-prospect/04-1600-halle.png), so the default framing and the labels are inconsistent.",
+    "fix": "Default overlays: state + people + data flow.\n• Material arcs only for active and next-due transports, plus the selected order's route. Make \"Materialfluss heute\" an explicit toggle, at about 40 % arc width and opacity.\n• Frame the Übersicht camera so the hall fills about 85 % of the canvas width.\n• Use the rich label (\"M02 INDEX G220 · 26/60\") in Übersicht for all machines, collapsing to the ID only when labels collide."
+   },
+   {
+    "severity": "low",
+    "file": "src/41_orders.js",
+    "title": "Plantafel shows attended machines working through the unmanned night",
+    "evidence": "In the Plantafel 24 h view (/tmp/rv-prospect/12-plantafel-crop.png):\n• M07 \"FA-24118 · AG 30\" runs as one continuous orange-outlined bar from 08:40 through the \"UNBESETZT – NUR AUTONOME MASCHINEN\" band to 06:00.\n• M04's FA-24129 bar also continues into the night.\nThe engine and the order drawer say \"Außerhalb der Schicht an M07 Tiefbohren 8 h\". Breaks are drawn as dark gaps; the night pause of attended machines is not.",
+    "fix": "For stations with loading ≠ 'auto' (or op not released for the ghost shift), render the 22:00–06:00 part of the bar as the same dark \"Pause/Nacht\" gap used for breaks. Add the legend item \"ohne Bediener (Pause/Nacht)\" that the KI-Auftrag Gantt already uses."
+   },
+   {
+    "severity": "low",
+    "file": "src/10_sim.js",
+    "title": "Shift-end rule idles WFL M80 for 35 min, and werkfluss does not flag it",
+    "evidence": "At 13:55, M04 has shown \"Wartet auf Bediener seit 29 min – Rüsten für FA-24129 AG 20 – Rüsten (ca. 55 min) passt nicht mehr vor Schichtende 14:00\" since 13:26 (/tmp/rv-prospect/04-1355-leitstand.png). Personal says \"Spätschicht übernimmt ab 14:00\".\nA production manager's instinct is \"start the setup and hand it over\". Letting a 2012 Millturn stand 35 min, without werkfluss calling it out, looks like a planning weakness.",
+    "fix": "Either allow an overlapping setup with handover (\"T. Bauer beginnt, Spätschicht übernimmt\"), or keep the rule and turn it into an insight. Example in Jetzt wichtig or Analyse: \"M04 steht 34 min vor Schichtende (≈ 68 €) – Rüsten überschichtig beginnen?\", with an action."
+   },
+   {
+    "severity": "low",
+    "file": "src/48_quality.js",
+    "title": "SPC chart y-axis labels are rounded to 3 decimals on a 9 µm tolerance, so tick steps look uneven",
+    "evidence": "SPC Ø 8 h6 (Soll 8,0000 −0,0090/0,0000): the axis reads 8,000 / 7,998 / 7,995 / 7,993 / 7,990. Real ticks are every 2,5 µm, so the labels step 2-3-2-3 µm. The header shows 4 decimals (\"8,0000\") and Mittelwert \"7,9940\" (/tmp/rv-prospect/01-qualitaet.png).",
+    "fix": "Format axis ticks with the same decimals as the nominal (4 for µm tolerances: 7,9975 / 7,9950 …). Alternatively, label the axis as deviation in µm (0 / −2,5 / −5 / −7,5 / −10 µm) with \"Soll 8,0000\" in the header."
+   },
+   {
+    "severity": "low",
+    "file": "src/30_hall3d.js",
+    "title": "Wording a prospect stumbles over: \"Ziel voll\", \"(Beispiel)\", \"Ausschuss nach AG 10 (zuletzt AG 20)\", \"Wechselgrenze ≤ 0 Teile\"",
+    "evidence": "• \"Ziel voll · seit 53 min\" (Halle, Material) reads as \"target reached\".\n• Supplier names with \"(Beispiel)\" leak into UI text: Leitstand Gerade passiert \"an Härterei Wolf GmbH (Beispiel)…\"; KI-Auftrag \"Härterei Wolf GmbH (Beispiel)\" and \"Stahlhandel Ost (Beispiel)\".\n• Remake warning: \"1 Stk Ausschuss nach AG 10 (zuletzt AG 20, Maß)\".\n• Machine drawer: \"Wechselgrenze ≤ 0 Teile Reststandzeit\".\n• KPI \"Offene Meldungen … 1 Schichtleitung\".\n• \"neu 10:02 – wird geprüft\".\nScreenshots: /tmp/rv-prospect/04-1355-leitstand.png, 02-full-leitstand.png, 03-tour-02-machine.png, 08-ki-crop0.png.",
+    "fix": "Use these replacements:\n• \"Ziel voll\" → \"Eingang M02 voll\"\n• Run every partner/supplier name through the existing short-name helper (10_sim.js line 196) in all UI strings, not just some.\n• \"1 Stk Ausschuss in AG 20 (Maß) – Ersatzteil ab AG 10 neu fertigen\"\n• \"Wechsel, sobald die Reststandzeit kein ganzes Teil mehr reicht\"\n• \"1 an Schichtleitung\"\n• \"neue Prognose 10:02 – wird bestätigt\""
+   },
+   {
+    "severity": "low",
+    "file": "src/70_tour.js",
+    "title": "Tour step 3 opens with the machine type description instead of the machine name",
+    "evidence": "The card reads \"5-Achs-Bearbeitungszentrum mit Palettenwechsler: Zustand mit Ursache, Auftrag, Teilefortschritt und Live-Signale …\" (/tmp/rv-prospect/03-tour-02-machine.png). The body uses mv.name, which holds the long type text, while the drawer title says \"DMU 65\".",
+    "fix": "Use `${mv.short} (${mv.id})`, e.g. \"DMU 65 (M05):\", and optionally append the type in a second sentence."
+   },
+   {
+    "severity": "low",
+    "file": "src/61_ki_auftrag.js",
+    "title": "After \"Auftrag einlasten\" nothing visibly happens, while the toast claims \"läuft jetzt durch die Fertigung\"",
+    "evidence": "After placing the Flanschwelle, the app opens Aufträge with the FA-24142 drawer and the toast \"… Der Auftrag läuft jetzt durch die Fertigung\" (/tmp/rv-prospect/08-ki-placed.png).\nThe first op (Säge) only starts at 12:40, 4 h later. The new order is not visible or highlighted in the list (sorted by risk), and the README promises \"läuft sofort durch die simulierte Fabrik\".",
+    "fix": "Toast: \"FA-24142 eingelastet – Start an der Säge ca. 12:40, Prognose Do 10:16 (Termin Fr 14:00)\".\nAfter placing, switch to the Plantafel with FA-24142 pinned/highlighted (G.pin), so the audience sees the new bars slot in. Briefly flash the 4 shifted orders listed in \"Auswirkung auf bestehende Aufträge\"."
+   },
+   {
+    "severity": "low",
+    "file": "src/40_leitstand.js",
+    "title": "Stillstandskosten KPI sub-line is truncated and hides the number that matters",
+    "evidence": "The KPI reads \"heute · größter Posten M07 1…\" (/tmp/rv-prospect/01-leitstand.png). The value \"119 €\" is cut off at 1440 px, and TV mode shows \"größter Posten M07…\".",
+    "fix": "Shorten to \"größter: M07 · 119 €\" on line 1 and move \"Rüsten, Warten, Störung\" to line 2. Or show the top cause instead (\"Rüsten 160 € · 51 %\", as in Analyse), so it fits in 2 lines (UI_GUIDE rule 14)."
+   },
+   {
+    "severity": "low",
+    "file": "src/46_tools.js",
+    "title": "\"17 Werkzeuge im Einsatz in 10 Maschinen\" is not believable for a CNC shop",
+    "evidence": "The Werkzeuge KPI says \"Werkzeuge im Einsatz 17 · in 10 Maschinen\", and the table says \"17 im Arbeitsgang · 0 weitere montiert\" (/tmp/rv-prospect/02-full-werkzeuge.png). A DMU 65 or INDEX G220 alone carries 30–60 tools, so a production manager will challenge the number right away. The model tracks only the life-critical tools per op.",
+    "fix": "Rename the KPI to \"Standzeit-überwachte Werkzeuge 17\" with sub-line \"die standzeitkritischen Werkzeuge der laufenden Arbeitsgänge\". Rename the table header to \"überwachte Werkzeuge\"."
+   }
+  ],
+  "lens": "?"
+ },
+ {
+  "summary": "I checked data consistency, robustness and performance programmatically. At 6 sim times (Mo 08:40, 10:00, 14:05, 18:30, 23:40, Di 08:40) I extracted DOM values from every view and from all 13 machine, 25 order, people and material drawers, and compared them with WF.sim (machineView, orderView, kpis, materials, people, transports). Data: /tmp/rv-consistency/consist.json. Scripts: /tmp/rv-consistency/scripts/.\n\n**What matches everywhere:** machine state, part x/y, op ETA, tool remaining parts and wear, per-machine OEE, order ETA, risk and due, stock levels, people on duty, plant OEE, loss €, FPY, scrap and on-time %. These agree exactly across Leitstand, Halle, Aufträge, Analyse, Werkzeuge, Material, Personal, Qualität and the drawers. KI-Auftrag quotes (ETA and step times) equal the engine forecast right after placing the order. The fault scenario stays consistent across Leitstand, Halle, Aufträge, the order drawer and the Copilot.\n\n**Where the problems are:**\n- The Copilot computes its own figures. Loss by cause and people availability contradict Analyse and Personal.\n- Material labels planned moves (\"Ziel voll\") as waiting transports and shows them in red, against the ENGINE_API phase rules. There is also the typo \"läuften\".\n- At night the Leitstand pill says \"Keine Schicht\" while Halle and the drawer say \"Bereit\".\n- After renaming the company, the Halle panel and the live Copilot data still use the old name.\n- Engine logic: input buffers show 4/3. Saw cut-ahead containers wait up to 21 h. The quantity risk does not show in the risk pill. The evening shift never carries out the Geisterschicht-Check's own advice, so every morning reads OEE 39 %.\n\n**Robustness:** no console errors or warnings in any run:\n- 24 sim-h at 600× (144 s real, every non-hall view)\n- WF.sim.reset() after 30 h with interventions (views match a fresh load)\n- company/site rename\n- full tour\n- Halle at 600×\n- invalid ids for every drawer kind\n- 200 rapid view switches\n- a 4-day run\n\nMemory levels off: heap 12.9 → about 19 MB after 24 h, 32 MB after about 4 days. Engine state stays bounded (events 3000, notifications 400). DOM stays at about 13–14k nodes with all views mounted. update() costs 1–4 ms per call at 30×. At 600×, Leitstand (mean 20 ms, p95 37 ms) and Material (about 19 ms) go over the frame budget.\n\n**Not measurable here:** the Halle WebGL frame cost and real frame rates. In SwiftShader the GPU-process swap dominates; JS frame() is 6 ms p50, but shadow-map passes take seconds.\n\n**Keyboard:** 1–9, 0, P and Esc all work (Esc closes the drawer, the notification panel, the modal, the Copilot and the tour). The focus ring is visible (2 px accent). Focus is not managed for the drawer or modal, and about 90 clickable rows cannot be reached by keyboard.",
+  "findings": [
+   {
+    "severity": "high",
+    "file": "src/60_ai.js",
+    "title": "Copilot loss-by-cause gives wrong € and minutes (contradicts Analyse after a ghost-shift night)",
+    "evidence": "Di 08:40, after one night: Analyse/engine lossByState shows 'Wartet auf Werkzeug 2.057 € in 18 h 09 min (77 %)' and 'Werkzeugwechsel 68 € in 38 min'. Copilot 'Was kostet uns der Stillstand heute?' answers 'Werkzeugwechsel 1.661 € – 38 min an 4 Arbeitsplätzen · 62 %' and 'Warten auf Werkzeug 463 € – 9 min'. That is about 2.600 €/h for a tool change. Per machine it says 'M05 847 € · Werkzeugwechsel 13 min, Warten auf Werkzeug 4 min · 135 €/h'. During the day the € values are also off by 1–2 € (Copilot Rüsten 159 / Bediener 55 / WZW 40 / Störung 15 vs Analyse 160 / 57 / 39 / 16 at Mo 08:40). Cause: lossByCause() (lines ~587–608) spreads mv.lossEurToday over segments × workBetween(), which drops the ghost-shift seconds. Screenshot: /tmp/rv-consistency/ai_cost_di0840.png (Analyse and Copilot side by side).",
+    "fix": "Replace the apportioning in lossByCause() with the engine values that Analyse uses (ENGINE_API §2): € per cause = Σ mv.lossByState[state]; duration = Σ mv.plannedStateTimes[state]; machines = count of mv with lossByState[state] > 0.005. Include starved/blocked/waitTool. Use the same per-machine data for the 'Nach Arbeitsplatz' list. Add a self-check: Σ causes equals kpis().lossEur within ±1 €."
+   },
+   {
+    "severity": "high",
+    "file": "src/60_ai.js",
+    "title": "Copilot 'Wer ist im Dienst' reports far more 'verfügbar' people than the Personal view",
+    "evidence": "Same paused instant, Mo 08:40. Personal KPI: 'Im Einsatz 9/10 · 5 mit Aufgabe · 3 betreuen Maschinen · Schichtleitung · 1 verfügbar'. Copilot: '10 Personen im Dienst – 5 arbeiten, 5 verfügbar' and lists A. Yilmaz as 'bereit für die nächste Aufgabe / verfügbar', while Personal shows him as 'Betreut M02 · M03'. At Mo 09:40: Copilot '3 arbeiten, 7 verfügbar' vs Personal '8/10 im Einsatz · 2 verfügbar'. The Copilot maps raw engine state 'idle' to 'verfügbar' (lines ~1660–1690, also 871, 2188, 2356). Screenshot: /tmp/rv-consistency/ai_people_vs_personal.png.",
+    "fix": "Classify people with WF.people.displayState(p), already exported by 47_people.js: 'tending' → 'betreut M02 · M03' (counts as im Einsatz), 'lead' → 'Schichtleitung', only 'idle' → 'verfügbar'. Build the headline from the same buckets as the Personal KPI: '10 im Dienst – 5 mit Aufgabe, 3 betreuen Maschinen, 1 verfügbar'. Apply the same rule to 'Gerade verfügbar' and the handover lists. Fall back to the raw state only when WF.people is missing."
+   },
+   {
+    "severity": "high",
+    "file": "src/45_material.js",
+    "title": "Grammar error in the live-transport chip: '2 Transporte läuften'",
+    "evidence": "Material & Logistik, header of the 'Materialfluss heute' card. The chip reads '2 Transporte läuften' whenever more than one transport is running (Mo 10:00 and Mo 18:30). Line 1801: `läuft${live.length > 1 ? 'en' : ''}`. Crop: /tmp/rv-consistency/crop_laeuften.png (from c_1_3333333333333333h_material.png).",
+    "fix": "Line 1801: `${n} Transport${n > 1 ? 'e' : ''} ${n > 1 ? 'laufen' : 'läuft'}`. For one transport the text is '1 Transport läuft'."
+   },
+   {
+    "severity": "high",
+    "file": "src/45_material.js",
+    "title": "'Offene Transporte' KPI counts planned 'Ziel voll' moves as waiting and alarms with red 'längste Wartezeit 21 h 09 min'",
+    "evidence": "Di 08:40: the engine has 8 open transports, all phase 'geplant' with waitCode 'destFull'. Material KPI shows '8 (crit stripe) · 8 wartend · 0 in Fahrt · längste Wartezeit 21 h 09 min'. Halle at the same moment shows '8 · 8 Ziel voll'. Mo 23:40: engine 9 geplant + 1 wartend; Halle '1 wartend · 9 Ziel voll'; Material '10 wartend'. updateKpis() (lines ~1729–1743) treats every status 'open' as waiting and sets crit from createdT. ENGINE_API §7.5 says 'geplant' must be shown as planned, not as a waiting transport. Screenshot: /tmp/rv-consistency/c_24h_material.png.",
+    "fix": "In updateKpis(), split the transports by t.phase: sub-line '3 geplant (Ziel voll) · 1 wartet auf Fahrzeug · 1 in Fahrt'. Compute 'längste Wartezeit' and the warn/crit stripe only over phase === 'wartend'. Show the destFull age neutrally (e.g. 'Ziel voll seit 21 h' in --text2). In the transport table, label these rows 'Geplant · Ziel voll seit …' instead of 'Offen · wartet …'."
+   },
+   {
+    "severity": "medium",
+    "file": "src/40_leitstand.js",
+    "title": "At night the Leitstand pill says 'Keine Schicht' while Halle, drawer and its own summary chips say 'Bereit'",
+    "evidence": "Mo 23:40: tiles M04/M06/M07/M08/M09/QS/M13 show the pill 'Keine Schicht'. The engine stateLabel, the Halle labels/HUD ('0/13 · 3 wartend · 10 bereit') and the machine drawer pill all say 'Bereit'. The Leitstand summary chip above the same tiles reads '10 Bereit'. Code: line 743 `restHold ? WF.ui.pill('idle','Keine Schicht') : …`. Screenshots: /tmp/rv-consistency/c_15h_leitstand.png and /tmp/rv-consistency/halle_night_2340.png.",
+    "fix": "Use one label. Preferred: keep WF.ui.pill(mv.state) ('Bereit') and put 'Keine Schicht – weiter Di 06:00 mit Einlegen …' in the cause line, as Halle and the drawer already do. If 'Keine Schicht' should stay as a pill, move it into a shared helper (e.g. WF.ui.machineStatePill(mv)) used by 30_hall3d, 42_machine and the summary chips, and add a chip 'Keine Schicht 7' so the counts match the tiles."
+   },
+   {
+    "severity": "medium",
+    "file": "src/30_hall3d.js",
+    "title": "Halle status panel keeps the old site name after renaming in Einstellungen",
+    "evidence": "In Einstellungen, set company 'Muster Metallbau GmbH' and site 'Werk Linz · Industriezeile 5, 4020 Linz' and save. The top bar updates. The Halle HUD still shows 'Werk Donaustadt' before and after revisiting all views. It is the only stale UI text found in a DOM scan of every view. Line 3639 uses `P.company.site` and does not listen to the 'settings' bus event. Screenshot: /tmp/rv-consistency/after_rename_halle.png.",
+    "fix": "Render the title from WF.app.company().site (short form before the first ' · '). Subscribe with WF.bus.on('settings', …) and update the [data-k=\"ttl\"] text."
+   },
+   {
+    "severity": "medium",
+    "file": "src/60_ai.js",
+    "title": "Live Copilot prompt contains two different company names after a rename",
+    "evidence": "After the rename above, the system prompt says 'bei Muster Metallbau GmbH (…)', but the attached 'Lageübersicht (JSON)' is JSON.stringify(WF.sim.snapshot()) with 'company':'Donau Präzisionstechnik GmbH' (snapshot().company is read from the profile in 10_sim.js line ~4671). On claude.ai, Claude may greet a prospect with the old name. The engine 'reset' event also still says 'Simulation gestartet – Donau Präzisionstechnik GmbH'.",
+    "fix": "In the prompt builder (~line 3062), after `const snap = WF.sim.snapshot();` set `snap.company = co.name; snap.site = co.site;`. Do the same in the overview tool (~line 2993) if it ever adds the company. Alternatively let snapshot() in 10_sim.js take its name from WF.app.company() when present."
+   },
+   {
+    "severity": "medium",
+    "file": "src/41_orders.js",
+    "title": "Quantity shortfall not reflected in the risk pill: 'Im Plan · Puffer 1 Tag' turns into a late order at completion",
+    "evidence": "FA-24125 shows 'Im Plan · Puffer 1 Tag 3 h' from Mo 14:05 to 23:40, next to the message 'Menge gefährdet nur 119/120 – Nachfertigung ab INDEX G220 einplanen'. It finishes 119/120 at Di 07:57 and becomes risk 'spät' with onTime false. Termintreue drops from 92 % to 89 % ('25 von 28'). The same pattern is building for FA-24122 at Di 08:40 ('Im Plan · Puffer 5 h 25 min' + 'nur 79/80 Stk lieferbar'). The 'Gefährdet' filter and the Verspätet/Knapp KPIs ignore these orders.",
+    "fix": "When orderView.qtyRisk.missing > 0, render the card and drawer pill as warn 'Menge 119/120' instead of the green 'Im Plan', and count the order in the 'Gefährdet' chip and the Leitstand risk counts. Cleaner: in 10_sim.js orderView, raise risk to at least 'knapp' (riskLabel 'Menge gefährdet') while missing > 0, so every view and the Copilot follow automatically."
+   },
+   {
+    "severity": "medium",
+    "file": "src/10_sim.js",
+    "title": "Input buffers show over capacity ('Eingang 4/3') in Leitstand, Halle and drawer",
+    "evidence": "Scanned 36 h every sim minute: M02 input was 4/3 for 335 minutes (first Mo 10:17), M06 4/3 for 139 min, M07 3/2 for 131 min, M09 4/3 for 100 min. The Leitstand tile draws 3 filled slots with the text '4/3'. The Halle label reads 'Eingang 4/3'. The drawer shows 'PUFFER · EINGANG 4/3'. Cause: destHasRoom() (lines ~3076–3087) intentionally lets one extra container through for the active op. Screenshot: /tmp/rv-consistency/tile_M02_overfull.png.",
+    "fix": "Model the extra container explicitly. Either give each machine one 'am Arbeitsplatz' slot for the active op outside inCap (machineView returns inputActive + input, so N ≤ inCap always holds), or have the views render '3/3 +1' with the priority container outlined and the tooltip '1 Behälter für den laufenden Arbeitsgang vorgezogen'. Do not show a ratio above 100 %."
+   },
+   {
+    "severity": "medium",
+    "file": "src/10_sim.js",
+    "title": "Saw cut-ahead piles up containers waiting up to 21 h for full machines (orange 'Ziel voll · seit 12 h 09 min' pins)",
+    "evidence": "TR-0130 (FA-24136, M01 → M06) has been 'bereit seit Mo 11:31' and is still waiting at Di 08:40: 21 h 09 min. Halle shows big orange pins 'Ziel voll · seit 6 h 32 min' (Mo 15:16) and 'seit 12 h 09 min' (Mo 23:40) with 'Transporte 10 · 9 Ziel voll'. WIP grows from 536 to 609 parts by Mo 23:40. M01 cause text: 'Zuschnitt auf Vorrat – 6 Behälter warten auf Haas VF-4, INDEX G220'. In a demo the hall's most prominent message is a logistics jam. Screenshots: /tmp/rv-consistency/halle_600x.png and /tmp/rv-consistency/halle_night_2340.png.",
+    "fix": "Limit cut-ahead per destination, e.g. at most 2 containers, or only as much as the destination's work content for the next ~8 h. Keep further containers as not-yet-cut work. Alternatively create the transport only when the destination will have a free slot within the horizon. Re-run test 15 (AGV share ≥ 35 %) afterwards."
+   },
+   {
+    "severity": "medium",
+    "file": "src/10_sim.js",
+    "title": "Evening shift never acts on the Geisterschicht-Check's own advice, so every night 3 of 4 autonomous machines stop",
+    "evidence": "The ghost check at Mo 21:00 predicts stops at M03 22:18, M02 23:05 and M05 23:34 (tool wear) and recommends 'künftig vor Schichtende vorbeugend wenden/wechseln'. Yet between 21:00 and 21:50, setter E. Demir is idle 21:00–21:30 and M. Hofer idle 21:10–21:30 (probe /tmp/rv-consistency/scripts/p18.js). The machines stand all night. Di 08:40: 'Werk-OEE heute 38,9 %', 'Wartet auf Werkzeug 2.057 € (77 %)', 'Wartezeit auf Werkzeug 18 h 09 min'. The default demo opens every morning in red. Screenshot: /tmp/rv-consistency/ai_cost_di0840.png.",
+    "fix": "In the last staffed hour, when ghostCheck predicts a tool stop on an autonomous machine and a qualified person is idle, let the engine run the same preventive change/index as actions.planToolChange at the next part boundary. Log an event 'vorbeugend gewechselt vor Schichtende (Geisterschicht abgesichert)'. Keep the honest 'stoppt' card for cases with no free person."
+   },
+   {
+    "severity": "medium",
+    "file": "src/20_app.js",
+    "title": "Drawer and settings modal do not take focus; number keys switch views behind an open modal",
+    "evidence": "Enter on a focused Leitstand tile opens the drawer, but focus stays on the tile and the next Tab goes to the next tile; the drawer content is unreachable by keyboard. After Esc, focus is not restored. Opening Einstellungen leaves focus on #t-settings (outside the modal). Pressing '3' with the modal open navigates to Aufträge behind it. #drawer has no role or focus target (shell.html line 25). Probe: /tmp/rv-consistency/scripts/keys.js and keys3.js.",
+    "fix": "openDetail(): store document.activeElement as opener, give the drawer role=\"dialog\" (aria-modal false) and focus the title (tabindex -1) or the close button. closeDrawer(): restore focus to the opener if it is still connected. app.modal(): focus the first input or the primary button, trap Tab inside .modal, restore focus on close. In the global keydown handler, ignore 0–9 and P while '#overlay .modal-back' exists."
+   },
+   {
+    "severity": "medium",
+    "file": "src/48_quality.js",
+    "title": "About 90 clickable rows and cards cannot be reached by keyboard",
+    "evidence": "Elements with click handlers ([data-sel]/[data-nav]/[data-go]/[data-ent]/[data-row]) without tabindex or role, at Mo 08:40:\n- Qualität: tr.click ×41, .qa-cr ×7, .qa-ct ×3, .qa-up-r ×3, .qa-sp ×1\n- Personal: .pe-qi ×3, .pe-qa ×5\n- Werkzeuge: .kpi[data-go] ×4, .tl-hx ×7, SVG plan markers ×27\n- Leitstand: .kpi[data-nav] ×2, .ls-x-row ×5\n- Material: tr.click ×11\nThe focus ring itself is good (2 px --accent outline) wherever focus is possible. Probe: /tmp/rv-consistency/scripts/p19.js.",
+    "fix": "Add tabindex=\"0\" and role=\"button\", plus Enter/Space activation, as already done for .ls-tile, .or-card, .pe-card and .tl-tr. Simplest: one delegated keydown listener in 20_app.js on #views that calls el.click() for [data-sel],[data-nav],[data-go],[data-ent],[data-row] on Enter/Space; each module only adds tabindex. Same fix applies to 47_people.js, 46_tools.js, 40_leitstand.js and 45_material.js."
+   },
+   {
+    "severity": "low",
+    "file": "src/43_analyse.js",
+    "title": "Analyse energy total differs from the Leitstand energy total with no visible explanation",
+    "evidence": "Mo 08:40: Leitstand 'heute 533 kWh', Analyse 'Energie je Fertigteil … 498 kWh · 108 Fertigteile heute'. Mo 14:05: 1.464 vs 1.362 kWh. Di 08:40: 786 vs 679 kWh. Analyse uses machine energy without hall base load; this is explained only in the tile's title tooltip (line 401).",
+    "fix": "Line 404: write 'Maschinen 498 kWh (ohne Grundlast)', or base 'je Fertigteil' on kpis().energyKwh so the visible kWh equals the Leitstand. Keep the machine-only number in the energy table below."
+   },
+   {
+    "severity": "low",
+    "file": "src/40_leitstand.js",
+    "title": "OEE tile shows the same value twice with different rounding ('80,5 %' and 'Schicht 81 %')",
+    "evidence": "Mo 08:40: kpis().oee = kpis().oeeShift = 0.80537. The tile shows '80,5 %' and below it 'Ziel 75 % · +5,5 Pkt. · Schicht 81 %'. Mo 09:40: 82,3 % vs 'Schicht 82 %'. Copilot shows 'Schicht 80,5 %'. Line 1191 uses U.fmtPct(k.oeeShift, 0).",
+    "fix": "Use U.fmtPct(k.oeeShift, 1). Hide '· Schicht …' when |oee − oeeShift| < 0.0005 (Monday morning, single shift)."
+   },
+   {
+    "severity": "low",
+    "file": "src/42_machine.js",
+    "title": "Weekday and relative dates mixed for the same day inside one panel",
+    "evidence": "M05 drawer at Mo 18:30: 'Arbeitsgang fertig ca. Di 15:43' and 'Prognose fertig morgen 16:58' for the same Tuesday. Leitstand tile M04 at Mo 14:05: 'fertig ca. Di 08:34' while Aufträge says 'morgen'. Copilot order card: stat 'Prognose Di 14:55' above the text 'Prognose morgen 14:55'. Mo 23:40: Material 'zurück ab ca. Di 06:30' vs Aufträge 'zurück ab morgen 06:30'.",
+    "fix": "Use one formatter for future times: U.fmtDue(t, now) ('heute/morgen/Mi 14:00') in the drawer's 'Arbeitsgang fertig ca.', the Leitstand tile progR (tclock), Material 'zurück ab' and Copilot stat tiles. Alternatively always use the weekday, but not both in one panel."
+   },
+   {
+    "severity": "low",
+    "file": "src/41_orders.js",
+    "title": "Non-standard abbreviation 'nä. Mo 12:00' on order cards",
+    "evidence": "Aufträge cards for FA-24135…FA-24141 read 'nä. Mo 12:00', 'nä. Fr 12:00'. The drawer and Copilot say 'nächste Woche Mo 12:00'. 'nä.' is not a common German abbreviation. Line 68 (compactDue).",
+    "fix": "Use a real date such as 'Mo 26.10. 12:00' (what MES users expect for next week), or 'nächsten Mo 12:00' if there is space. Keep the format identical in the card and the drawer."
+   },
+   {
+    "severity": "low",
+    "file": "src/46_tools.js",
+    "title": "'Geplant · nächste 2 h: 0 – kein Wechsel absehbar' while three machines wait for announced changes",
+    "evidence": "Mo 23:40: the 'Nächster Wechsel · angekündigt' card shows 'Di 06:02 INDEX G220 · Maschine wartet'. The KPI 'Wartezeit auf Werkzeug' says 'jetzt: M02, M03, M05 wartet'. The plan rows show 'Wechsel Di 06:02/06:05'. Yet KPI 3 reads '0 Werkzeuge · kein Wechsel absehbar' (line 1250). The table rows say 'Standzeit erschöpft · Wechsel angefordert' without the engine's time (plannedChange.etaT = Di 06:02). The grammar 'M05 wartet' should be 'warten'. Screenshot: /tmp/rv-consistency/c_15h_werkzeuge.png.",
+    "fix": "Line 1250: when nothing falls within 2 h but announced or waiting changes exist, show '0 in 2 h · nächster Di 06:02 an M02 (3 Maschinen warten)'. Table rows: append 'ca. Di 06:02' from plannedChange.etaT. Use 'warten' for plural."
+   },
+   {
+    "severity": "low",
+    "file": "src/10_sim.js",
+    "title": "Delay cause sentence rounds to whole hours next to the exact breakdown",
+    "evidence": "Order drawer FA-24118 at Mo 08:40: 'Ursache: Induktionshärten … bei Härterei Wolf (7 h)'. Directly below: 'Induktionshärten … 6 h 30 min'. Mo 10:00: '(15 h)' vs '14 h 32 min'. The same rounded text appears on the Leitstand card, the notification and in the Copilot. contribText()/durShort (line ~4136).",
+    "fix": "In contribText use the same duration format as the breakdown (U.fmtDur → '6 h 30 min'), or at least one decimal ('6,5 h'). The sentence then matches the list."
+   },
+   {
+    "severity": "low",
+    "file": "src/40_leitstand.js",
+    "title": "Leitstand update() forces synchronous layout every tick (clipX); at 600× it exceeds the frame budget",
+    "evidence": "200 update() calls with the sim advanced 150 s between calls: mean 20 ms, p95 37 ms, max 127 ms. CPU profile: 35 % of samples in getBoundingClientRect, called from clipX() (lines 1045–1051). clipX runs after every 'Als Nächstes' rebuild and first resets visibility, then reads rects. At 30× the cost is 1–4 ms.",
+    "fix": "Avoid the read-after-write: give .ls-x-list a fixed row height with overflow hidden, so the row count can be computed from the height cached by the existing ResizeObserver. Or defer clipX to requestAnimationFrame, and run it only on resize or when the row count changes."
+   },
+   {
+    "severity": "low",
+    "file": "src/45_material.js",
+    "title": "Material flow SVG is rebuilt via innerHTML on every tick at high speed",
+    "evidence": "At 600×, update() averages 18.6 ms (profile over 150 updates). setHTML takes 727 ms and buildEdges 418 ms of 2.8 s; querySelectorAll 239 ms. p95 is 26 ms, so every 250 ms tick drops a frame of the animated flow dots. At 30× the cost is about 2 ms.",
+    "fix": "Rebuild edges only when the edge set changes. Otherwise patch stroke widths and count labels in place. Throttle flow updates to at most 1 per second real time when app.speed ≥ 120."
+   },
+   {
+    "severity": "low",
+    "file": "src/20_app.js",
+    "title": "UI refresh rate collapses when the frame rate drops, because the tick accumulator uses the clamped frame dt",
+    "evidence": "In loop(): `dt = Math.min(0.1, (now-last)/1000); acc += dt; if (acc >= 0.25) tick()`. At 2 fps the UI (views, drawer, notification panel) refreshes only every 1.5 s, while sim time follows real time. With software GL (Material 1–4 fps) an open order drawer did not refresh for several seconds while the sim moved on.",
+    "fix": "Accumulate real elapsed time for the tick (`acc += Math.min(1, (now - lastTickT)/1000)`), or drive tick() from setInterval(250) independent of rAF. Keep the 0.1 s clamp only for frame(dt) animations."
+   },
+   {
+    "severity": "low",
+    "file": "src/30_hall3d.js",
+    "title": "Planned 'Ziel voll' moves shown as orange warning pins with an escalating timer",
+    "evidence": "Halle shows orange stop-icon pins 'Ziel voll · seit 21 h 09 min' for transports in phase 'geplant' (target buffer full, container parked as planned). ENGINE_API §7.5 asks to show these as planned, not as waiting. At night they are the dominant visual next to an empty hall. Screenshot: /tmp/rv-consistency/halle_night_2340.png.",
+    "fix": "Render phase 'geplant' as a neutral chip ('geplant · Ziel voll', --text2 or --mat outline, no running timer). Keep the orange pin and the 'seit …' timer only for phase 'wartend' (vehicle or driver missing). Raise severity only after a threshold during staffed time."
+   }
+  ],
+  "lens": "?"
+ },
+ {
+  "summary": "I reviewed the AI features using a build at /tmp/rv-ai.html, with screenshots in /tmp/rv-ai/. I asked the offline Copilot 85 German questions and checked the answers against WF.sim.machineView, orderView, forecast, kpis, whatIfPriority, notifications and the Werkzeuge and Qualität views. I tested the Claude mode against the sample.d.ts contract with a mocked window.claude: 16 tools, every error code, retry buttons, action confirmation and the tour. In KI-Auftrag I tested the three examples, placing an order (FA-24142 ran all 7 steps and was shipped Thursday 06:34, its quote said Thursday 10:16 at the earliest), offline upload and live JSON. I also reviewed the Leitstand briefing.\n\n**What works:** The Copilot answer cards look premium: KPI tiles, the what-if timeline, route and delay bars. Most numbers check out (what-if costs, late and tight orders, rush-order judgement, fault repair times, connection levels). Claude mode follows the contract in the main points. Tool calls send no cache, plain calls send cache:false, turns start and end on a user turn, each send gets a new AbortController, nothing retries in a loop, and permission errors fall back to offline. The three example drawings are convincing (correct scale, symbols, hardening zones, section views). Routings, machine-hour rates and quote prices are plausible.\n\n**What must be fixed before a demo:**\n- **Rankings are inverted.** \"Welche Maschine verbraucht am meisten Strom?\" names the machine with the least energy.\n- **The scripted fault step contradicts itself.** After a fault on M07, the FA-24118 answer shows two different forecasts in one card.\n- **Open notifications get no answer.** Asking for open Meldungen returns the fallback \"keine Daten\", while the Leitstand shows 1 open notification and the sim has 4 unacknowledged.\n- **Wrong owner for one change.** The first screen's briefing tells the user to staff an insert flip at M04 that the operator does at the machine.\n\nThere are also routing and recognition gaps that drop common questions to the fallback, numbers that differ from other views, a tour step that calls live Claude for 30–90 s, a tool that closes the Copilot panel mid-answer, and smaller visual and wording issues.",
+  "findings": [
+   {
+    "severity": "high",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "Rankings return the opposite of what is asked for energy, downtime cost and scrap (ansRanking)",
+    "evidence": "'Welche Maschine verbraucht am meisten Strom?' → head 'Höchste Energie: QS Messraum mit 4 kWh'. The bar list shows the 6 LOWEST machines, and M04 (103 kWh, machineView.energyKwhToday) is missing (/tmp/rv-ai/cpc-01.png). 'Welche Maschine hat die höchsten Stillstandskosten?' → 'M13 Montage mit 0 €' (truth: M07 119 €). 'Welche Maschine hat den meisten Ausschuss?' → 'Höchste Ausschuss: M01 Säge mit 0 Stk' (truth: M03 2 Stk). Cause: best = /meist|hoechst/ is true and higherIsBad is true, so (best !== higherIsBad) is false and the sort is ascending.",
+    "fix": "For metrics other than OEE, sort descending unless the question asks for the low end (/wenigst|geringst|niedrigst/); for OEE keep the best/worst logic. Fix the head adjective by noun: 'Höchster Energieverbrauch', 'Höchste Stillstandskosten', 'Meister Ausschuss'. Add a regression test for the three questions above."
+   },
+   {
+    "severity": "high",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "Fault answer (README demo step 4) shows two different forecasts in one card: smoothed eta vs etaRaw",
+    "evidence": "Steps: WF.sim.actions.triggerFault('M07'), advance 60 s, ask 'Was bedeutet das für FA-24118?'. Head 'FA-24118 hält knapp – Puffer 1 h 04 min', KPI tile 'Prognose Di 14:55', delay bar 'Restlaufzeit bis zur Prognose Di 14:55', recommendation 'Termin hält, aber nur mit Puffer 1 h 04 min'. In the same card the body says 'Liefertermin morgen 14:55 → morgen 15:12 (+16 min; Puffer 48 min)'. 'Wie lange dauert die Reparatur an M07?' shows 'Lieferung 24118: Di 15:12' (/tmp/rv-ai/fault-fa24118.png). ansOrder uses orderView.eta (smoothed), while faultImpact uses forecast().orders[id].etaRaw.",
+    "fix": "Use one forecast source in every card. When etaRaw differs from eta by 60 s or more (etaPending, or a fault on a station of the order), drive head, KPI tiles, slack, delay-bar caption and recommendation from etaRaw. Label the changed value 'neu gerechnet (Störung)' and show the smoothed value only as 'bisher 14:55'. Apply the same rule in ansOverview, ansRisk and ansHandover, and drop the internal text 'Eine Neuberechnung (heute 10:02) wird gerade bestätigt'."
+   },
+   {
+    "severity": "high",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "Questions about open notifications fall back to 'Dazu habe ich keine Daten aus der Fertigung'",
+    "evidence": "'Gibt es offene Meldungen?', 'Welche Meldungen sind offen?' and 'Zeig mir die Benachrichtigungen' all get the fallback answer (/tmp/rv-ai/cpc-02.png). Meanwhile the Leitstand KPI shows 'OFFENE MELDUNGEN 1 offen · 1 Warnung' and S().notifications has 4 open (NT-0014, NT-0013, NT-0008, NT-0006). 'Quittiere alle Meldungen' does list those 4, so the data path exists and only a read intent is missing.",
+    "fix": "Add a classify rule /meldung|benachrichtigung|alarm|warnung/ and an ansNotifications answer. List open notifications by severity with WF.ui.notifTime, role and the first line of the suggestion. Offer actions 'Analysieren' (explainNotification) and 'Alle quittieren' (ackMany, secondary). In the fallback, never say 'keine Daten' for words from the domain vocabulary; suggest the nearest intents instead."
+   },
+   {
+    "severity": "high",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "Insert flips ('Schneide wenden', done by the operator) are reported as changes that need a setter",
+    "evidence": "M04 DNMG plannedChange = {action:'index', by:null, stage:'Werkzeug liegt bereit'}. The first-screen KI-Schichtbriefing says 'Jetzt tun: … Werkzeugwechsel M04 08:45 besetzen' and '(noch niemand zugeteilt)'. The Lage recommendation says 'Danach: Werkzeugwechsel M04 08:45 besetzen'. The todo list says 'M04: Einrichter:in für den Werkzeugwechsel ca. 08:45 einplanen'. The M04 answer recommends 'Werkzeug … vermessen bereitlegen'. The Werkzeuge view says 'Schneide wenden statt Werkzeug holen: Die Bediener:in wendet an der Maschine' (/tmp/rv-ai/brief-card.png, /tmp/rv-ai/tools-view.png). Affected lines: 964, 1116, 1133, 1551, 2178, 2871.",
+    "fix": "Branch on plannedChange.action. For 'index': 'Schneide wenden durch Bediener:in (L. Wagner) ca. 08:45, 1–2 min', never 'Einrichter:in … zuteilen', and leave it out of todo, briefing and handover. Respect stage ('Werkzeug liegt bereit' means no 'bereitlegen' advice). Add action and stage fields to the get_tools and get_machine tool output so Claude does not repeat the error."
+   },
+   {
+    "severity": "medium",
+    "file": "werkfluss/src/70_tour.js",
+    "title": "In Claude mode the tour's Copilot step starts a slow live call (default tier, 16 tools) that the 14 s auto-advance outruns",
+    "evidence": "Mocked window.claude, tour run to step 8: sample() was called with tier 'default' and 16 tools. Per the contract that takes 30–90 s plus the consent dialog. AUTO_MS = 14000, and the next step ('connect') emits ai:close, so the answer lands in a hidden panel. The README promises the tour runs without waiting.",
+    "fix": "Pass context {tour:true} in the step's ai:ask, and in 60_ai UI.ask/send answer with askOffline when context.tour is set, the same way KI-Auftrag uses analyze({demo:true}). Alternatively use modelTier 'quick' with no tools, and do not call ai:close while conv.busy."
+   },
+   {
+    "severity": "medium",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "Claude tool select_entity closes the Copilot mid-answer and accepts unknown IDs",
+    "evidence": "Mock run with select_entity {kind:'order', id:'FA-99999'}: it returned {ok:true} and opened an empty drawer 'FA-99999 order – Keine Detailansicht verfügbar'. UI.openEntity calls UI.close() below 1680 px, so the streaming answer disappears (/tmp/rv-ai/live-1.png).",
+    "fix": "In run(), check that the entity exists (S().orders, machines, people, materials, agvs) and throw 'Unbekannt: …' if not. While conv.busy, do not close the panel: either open the drawer in 'cover' layout and keep the panel, or add an 'FA-24118 öffnen' entity chip to the answer and skip the auto-open."
+   },
+   {
+    "severity": "medium",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "'Bestelle 42CrMo4 Ø65 nach' proposes the wrong material first and a reorder that is not needed",
+    "evidence": "The answer is '2 Bestellvorschläge'. The primary cyan 'Ausführen' is '42CrMo4+QT Ø110 nachbestellen', which was not asked for; Ø65 comes second. For Ø65 it proposes another 36 m although BE-0002 (36 m, 12:10) already covers the need: 15.4 + 36 − 27.0 = 24.4 m ≥ minimum 18 m (/tmp/rv-ai/cpb-05.png).",
+    "fix": "In entities(), use Ø/dimension tokens (Ø65, 65) to pick a single material. If on hand + on order − need ≥ min, answer 'Bereits bestellt (BE-0002, 36 m, Lieferung 12:10) – deckt Bedarf und Mindestbestand' and offer 'Trotzdem nachbestellen' as a quiet secondary action."
+   },
+   {
+    "severity": "medium",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "Machine questions are routed to the wrong focus: 'warum … OEE', 'wie steht es um', 'wann frei'",
+    "evidence": "'Warum hat M07 nur 58 % OEE?' → 'M07 Tiefbohren wartet nicht – sie produziert'. 'Wie steht es um M10?' → 'M10 Okamoto ACC wartet nicht – sie produziert'. 'Wann ist M05 frei?' → 'FA-24120 AG 10 fertig ca. 17:48', while the capacity answer and the KI-Auftrag live board say 'M05 frei ab Mi 08:04' (/tmp/rv-ai/cpc-03.png). Cause: machineFocus maps /warum|steht/ to 'why'.",
+    "fix": "In machineFocus: check /oee|verlust|stillstand|verfuegbar|kost/ first and route to ansLossMachine (loss breakdown by cause for that machine). Treat 'wie steht es (um|mit)' as status. Map /frei|verfuegbar ab/ to the end of the forecast().machines queue, the same value ansCapacity uses."
+   },
+   {
+    "severity": "medium",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "Simple machine references are not recognised and drop to the fallback",
+    "evidence": "'Was macht Maschine 7?', 'Was macht die Fräse?', 'Was macht die Schleifmaschine?' and 'wie gehts der dmu65' all → 'Dazu habe ich keine Daten aus der Fertigung'. 'Wie läuft die Index?' works.",
+    "fix": "In entities(): map 'maschine 7' / 'm 7' / 'nr 7' → M07, split letter-digit runs ('dmu65' → 'dmu 65'), and add type words (Fräse → M05+M06, Schleifmaschine/Schleifer → M09+M10, Drehmaschine → M02/M03/M04, Waschmaschine → M11). When several machines match, answer with a short comparison list of both (status pill, order, OEE) instead of the fallback."
+   },
+   {
+    "severity": "medium",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "Several common questions get a generic answer that does not respond to them",
+    "evidence": "These three return the generic Lage card ('12 von 13 Arbeitsplätzen produzieren – 1 Termin verspätet'): 'Wie viele Teile haben wir heute gefertigt?', 'Was wird bis Schichtende noch fertig?', 'Welche Aufträge werden heute ausgeliefert?'. 'Brauchen wir Überstunden?' and 'Welcher Kunde hat die meisten Aufträge?' get the fallback. 'Was bringt ein Eilauftrag für FA-24119?' answers with the question 'FA-24119 als Eilauftrag kennzeichnen?'. 'Vergleich M02 und M03' shows only M02. 'Was kostet uns der Verzug von FA-24119?' gives the plant-wide downtime cost. 'Was macht der Logistiker?' answers about AGVs and never names M. Kaya.",
+    "fix": "Add routes. Teile/gefertigt → ansCounts with head 'Heute 105 fertige Teile · 526 Arbeitsgänge gut · 49 versandt'. 'bis Schichtende' → ansDue with window shift().endsAt (data already in the handover: FA-24127 10:20, FA-24126 11:39, FA-24128 12:58). 'ausgeliefert/versandt' → shipped today plus due today. Überstunden → for late orders, say whether the limit is internal (overtime helps) or external (FA-24119: Härterei, so overtime does not help). Eilauftrag questions → head from whatIfPriority ('bringt nichts – Prognose bleibt Do 07:12'). Compare intent for two or more IDs. Role words → the person answer."
+   },
+   {
+    "severity": "medium",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "Tool-change list is incomplete, and the Copilot's projected changes disagree with the Werkzeuge view",
+    "evidence": "Copilot: '2 Werkzeugwechsel in den nächsten 2 Stunden' (08:45 M04, 09:21 M05). The Werkzeuge view KPI shows '2 · 3 voraussichtlich', and its timeline has M03 VCGT ~08:52, M02 CNMG 10:34, M06 PF Ø80 10:38, M08 WF m1,5 10:41. Copilot machine answers give M02 at 10:31 (view 10:34), M08 at 10:37 (view 10:41), and M03's second change as 'Abstechplatte 1,5 mm ca. 10:31' (view: 'VCGT +1 ca. 10:09') (/tmp/rv-ai/cpb-03.png, /tmp/rv-ai/tools-view.png).",
+    "fix": "Use one projection for both. Export the 46_tools projection (e.g. WF.toolsPlan.projected(machineId, horizonSec)), or better have the engine provide it, and use it in ansTools, ansMachine, the briefing and the handover. The tools answer then lists planned plus 'voraussichtlich' rows (dashed and labelled), with the same count as the Werkzeuge KPI."
+   },
+   {
+    "severity": "medium",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "Quality answers miss the capability problems and misread Cp",
+    "evidence": "'Wie ist die Qualität heute?' says 'SPC M03 … derzeit unauffällig' and never mentions that only 5 of 9 features are capable. The Qualität view shows 'Prozessfähigkeit je Merkmal: 5 von 9 fähig' with M03 Ø8 h6 Cpk 0,73, M08 Zahnweite 0,79, M09 1,04, M01 1,28 (/tmp/rv-ai/quality-view.png). 'Wie ist der Cpk an M03?' says 'Cp deutlich über Cpk: Die Streuung passt', but Cp is 1,09 < 1,33; the view says 'Streuung knapp und Mittelwert 33 % aus der Toleranzmitte'.",
+    "fix": "Add a stat tile 'Fähig 5/9 (Cpk ≥ 1,33)' and a bullet listing the incapable features with Cpk values. In ansCapability: if Cp < 1,33, say 'Streuung zu groß und Prozess außermittig – Zentrieren hebt Cpk höchstens auf 1,09; zusätzlich Streuung senken (Werkzeug, Spannung)'. Use the same wording as 48_quality."
+   },
+   {
+    "severity": "medium",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "Shift handover contains items from the current shift and a misleading parts count",
+    "evidence": "Asked at 08:40 for the 14:00 handover. Under '### Werkzeugwechsel Spätschicht (14:00–22:00)' the first bullet is 'Noch in dieser Schicht: 08:45 M04 …; 09:21 M05 …; 11:27 M07 …'. Then 'Voraussichtlich 3 Wechsel insgesamt' with no times. 'Offen für die Spätschicht: 2. M04: Einrichter:in für den Werkzeugwechsel ca. 08:45 einplanen'. The stat tile 'Gutteile Schicht 525' is the per-operation count, while the Leitstand headline says 'Fertige Teile 106' (/tmp/rv-ai/mob-cp-handover.png, /tmp/rv-ai/cpc-04.png).",
+    "fix": "Filter every handover section to t ≥ shift().endsAt. List late-shift changes with projected times and machine. Rename the tile to 'Arbeitsgänge gut 525' with sub-line 'fertige Teile 104 · 49 versandt', or show finished parts as the main value, to match the Leitstand."
+   },
+   {
+    "severity": "medium",
+    "file": "werkfluss/src/40_leitstand.js",
+    "title": "KI-Schichtbriefing is a wall of text and repeats the 'Jetzt wichtig' card directly above it",
+    "evidence": "Six bullets. The first has about 55 words (Termin + Ursache + list of tight orders). The FA-24119 cause text is the same as the 'Jetzt wichtig' card above. The material bullet ends with '(auch Rohguss Lagerdeckel EN-GJL-250)'. At 400 px the card fills more than one screen (/tmp/rv-ai/brief-card.png, /tmp/rv-ai/mob-brief.png). Text comes from WF.ai.briefing() in 60_ai.js, layout from 40_leitstand.",
+    "fix": "In 60_ai briefing(): cap at 4–5 bullets of at most 18 words each, in the form '**FA-24119 21 h spät** – Härterei; Express anfragen'. Put cause and detail in a muted second line (--fs-xs). Drop the 'Jetzt tun' bullet when the 'Jetzt wichtig' card shows the same item. Write materials as '2 unter Mindestbestand (42CrMo4 Ø65, Rohguss LD) – beide bestellt'. In 40_leitstand: give each bullet a small category label (Termine/Werkzeug/Qualität/Engpass/Material) instead of only a coloured dot."
+   },
+   {
+    "severity": "medium",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "Yellow 'Offline-Modus' badge and an 'OFFLINE' tag on every answer make a local demo look broken",
+    "evidence": "The panel header has a yellow warning pill 'Offline-Modus', and every message carries an 'OFFLINE' chip, including in the tour's 'Der Copilot kennt jede Zahl' step (/tmp/rv-ai/tour-copilot.png, /tmp/rv-ai/cp-01.png). Warning colours are meant for states (UI_GUIDE rule 15).",
+    "fix": "Use a neutral or --info pill 'Regelbasiert · Live-Daten', with a tooltip explaining that on claude.ai Claude answers. Replace the per-message chip with muted text 'regelbasiert', or remove it. Keep warning styling for real failures only (connection lost, not_granted)."
+   },
+   {
+    "severity": "medium",
+    "file": "werkfluss/src/61_ki_auftrag.js",
+    "title": "Material-need bar shows a red 'fehlt' while the hint below says the material is free",
+    "evidence": "Flanschwelle: the bar legend shows 'fehlt 4,92 m' in red, while the hint says 'Material aus dem Lager – 4,92 m … frei verfügbar – danach 19,5 m'. Lagerbuchse: 'fehlt 10,0 m', while the hint says 'Material kommt rechtzeitig'. The orange 'dieser Auftrag' segment is not visible (/tmp/rv-ai/ka-flanschwelle-matbar.png, /tmp/rv-ai/ka-flanschwelle-s5.png, /tmp/rv-ai/kalive-1.png).",
+    "fix": "Split this order's need into 'aus Bestand' (--mat) and 'aus Bestellung BE-0002, heute 12:10' (--info, hatched). Use red 'fehlt' only if on hand + on order − reserved < need. Retitle the hint 'Gedeckt durch Bestellung BE-0002 (heute 12:10)'."
+   },
+   {
+    "severity": "medium",
+    "file": "werkfluss/src/61_ki_auftrag.js",
+    "title": "Offline upload leads to a dead end and the landing claims Claude does the reading",
+    "evidence": "Offline mode: the user can upload a PNG and the primary cyan 'Analysieren' stays enabled. Clicking it shows the 'Eigene Zeichnungen liest Claude' notice, and about 75 % of the result pane stays empty (/tmp/rv-ai/ka-upload-2.png). The landing step badges say 'CLAUDE' and the intro says 'Claude liest die Zeichnung', while the status pill says 'Ohne Claude · vorberechnete Beispiele' (/tmp/rv-ai/ka-00.png).",
+    "fix": "When ai.state === 'off': show a small 'nur mit Claude' tag on the 'Eigene Zeichnung' tile. After upload, replace the CTA with a disabled 'Analyse nur mit Claude (auf claude.ai)' plus a secondary 'Mit Beispiel weiterrechnen'. Badges should read 'VORBERECHNET' offline. Fill the notice pane with the five steps that would run."
+   },
+   {
+    "severity": "medium",
+    "file": "werkfluss/src/05_profile.js",
+    "title": "Raw-material prices make the KI-Auftrag quote look wrong to buyers",
+    "evidence": "The Kalkulation shows '20 × 0,246 m × 21,00 €/m' for 42CrMo4+QT Ø65, about 0,81 €/kg at 26 kg/m. Ø110 is 62 €/m (0,83 €/kg) and 16MnCr5 Ø90 is 38 €/m (0,76 €/kg); the market for these bars is about 1,8–3 €/kg. AlMgSi1 block 160×120×80 is 9,80 € (2,4 €/kg; sawn 6082 is about 6–9 €/kg). 1.4404 Ø12 h9 is 18 €/m (about 20 €/kg, too high).",
+    "fix": "Use about: Ø65 60 €/m, Ø110 170 €/m, 16MnCr5 Ø90 110 €/m, AlMgSi1 block 30 €, 1.4404 Ø12 h9 7 €/m. Then re-check the BE-xxxx order values and the Flanschwelle unit price, which will rise from 84,30 € to about 95 €."
+   },
+   {
+    "severity": "low",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "Formatting and wording slips in offline answers",
+    "evidence": "Fault action card starts with the fragment '(Produktion, FA-24120 AG 10): Ein Alarm …' and has no eyebrow (/tmp/rv-ai/cp-04.png). 'Wann ist M05 frei?' → '13/30 Teile, produktion seit …' (lowercase). Capacity answer leaks type keys '(saw)', '(hobber)'. 'Höchste Ausschuss'. 'Thomas Bauer: Arbeitet, an M08'. '1 von 13 Arbeitsplätzen produzieren gerade nicht'. Härterei answer repeats 'bei Härterei Wolf GmbH (Beispiel)' twice per line and says 'bis ca. Mo 15:44' while the head says 'heute 15:44'. Stat sub-label 'Fertige Teile 105 · 526 je Arbeitsgang'. Tour stat label 'Lieferung 24118' drops 'FA-'.",
+    "fix": "Fault card: eyebrow 'Aktion · Demo-Störung', body 'M05 DMU 65 produziert gerade FA-24120 AG 10. Ausgelöst wird …'. Capitalise state labels at sentence start. Map type keys to German (Säge, Verzahnen). Write '{Vorname Nachname} arbeitet an M08' and '1 von 13 Arbeitsplätzen produziert nicht'. Use dueTxt everywhere and show the partner once without '(Beispiel)' in running text. Label '526 Arbeitsgänge gut'. Use full IDs in stat labels."
+   },
+   {
+    "severity": "low",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "Material demand breakdown does not add up (magazine stock subtracted silently)",
+    "evidence": "'Reicht das Titan …' → 'Bedarf offener Aufträge … ca. 16,9 m – FA-24117: 181 × 0,050 m, FA-24137: 300 × 0,036 m'. That sums to 19,85 m; materialNeeds() silently subtracts the 3,0 m in the M03 bar magazine.",
+    "fix": "Add the subtraction to the line: '… = 19,9 m, abzüglich 3,0 m im Stangenmagazin M03 → 16,9 m'."
+   },
+   {
+    "severity": "low",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "'Wer ist gerade verfügbar?' lists the busy people first",
+    "evidence": "Head is '10 Personen im Dienst – 5 arbeiten, 5 verfügbar'. The crew slot lists the 5 working people first; Huber, Yilmaz, Wagner, Kaya and Moser are below the fold (/tmp/rv-ai/cp-05.png).",
+    "fix": "When the question contains verfügbar/frei/wer hat Zeit, sort available people first and put the names in the head: '5 verfügbar: S. Huber, A. Yilmaz, L. Wagner, M. Kaya, F. Moser'."
+   },
+   {
+    "severity": "low",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "Engpass bars convert hours to days with the staffed-day length even for machines that run unmanned",
+    "evidence": "'M03 Citizen L20 41 h · ≈ 2,8 Tage · läuft auch unbemannt'. At 24 h a day that is about 1,7 days (/tmp/rv-ai/cp-03.png).",
+    "fix": "In daysTxt, use 24 h for machines that run autonomously or in the ghost shift (automation flag) and staffedPerDay() only for attended machines; or show hours only."
+   },
+   {
+    "severity": "low",
+    "file": "werkfluss/src/60_ai.js",
+    "title": "Smaller deviations from the Claude runtime contract",
+    "evidence": "(a) KI-Auftrag sample.json uses the default 5-minute cache, so 'Erneut analysieren' with the same quantity replays the stored answer; the contract says Regenerate should use cache:false. (b) Offline rule-based answers are pushed into conv.history and sent to Claude as assistant turns; the contract says not to script words into Claude's mouth. (c) PERMANENT includes transform_error and queue_overflow, which are page bugs, and switches the session offline for good. (d) KI-Auftrag keeps its own ai.sampler state, so a not_granted in the Copilot is not reflected there. (e) instructions() names only 'Härterei Wolf' as an external partner, although Hartchrom Linz and Eloxalwerk Simmering exist.",
+    "fix": "(a) Pass cache:false when re-analysing the same source. (b) Push only live Claude replies into history, or prefix offline ones as user-side context ('Regelbasierte Auswertung: …'). (c) Treat transform_error and queue_overflow like invalid_request: message only, no permanent offline. (d) Subscribe KI-Auftrag to 'ai:status' and hide live mode on offline. (e) List the external partners from the profile."
+   },
+   {
+    "severity": "low",
+    "file": "werkfluss/src/61_ki_auftrag.js",
+    "title": "Example drawings are convincing but have small drafting gaps; external lead times are unrealistically short",
+    "evidence": "Halteplatte description says 'Ecken R8', but the plan view has no R8 dimension. Flanschwelle '2× Freistich DIN 509' has only one leader. No title block has a date field (/tmp/rv-ai/dwg-flanschwelle.png, dwg-lagerbuchse.png, dwg-halteplatte.png). The quote says 'Induktionshärten … Durchlauf ca. 6 h' and the prompt says 'Härterei 6–8 h'; external hardening is usually 2–5 working days (express 24–48 h).",
+    "fix": "Add an 'R8' callout at one corner, a second leader to the A-side undercut, and a 'DATUM 2026-10-12' cell next to GEZ./GEPR. Label the external step 'Expressdurchlauf (Rahmenvertrag)', or raise ext leadMin to at least 1 working day in the examples and prompt."
+   }
+  ],
+  "lens": "?"
+ }
+]

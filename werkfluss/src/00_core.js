@@ -229,6 +229,15 @@
       if (opt.text) return t0 + (up ? ' · aktualisiert ' + up : '');
       return ui.esc(t0) + (up ? ` <span class="n-upd" style="color:var(--faint)">· aktualisiert ${ui.esc(up)}</span>` : '');
     },
+    /** Zustandsbezeichnung einer Maschine – überall gleich (UI_GUIDE Regel 2): geplanter Stillstand ohne Schicht
+        heißt „Keine Schicht“, sonst das Label aus WF.STATE. mv = WF.sim.machineView(id) (oder {state, cause}). */
+    machineStateLabel(mv) {
+      if (!mv) return '';
+      if (mv.state === 'idle' && (mv.offShift || /^Keine Schicht\s*[–-]/.test(mv.cause || ''))) return 'Keine Schicht';
+      return (WF.STATE[mv.state] || { label: mv.state }).label;
+    },
+    /** Pill passend zu machineStateLabel. */
+    machinePill(mv) { return ui.pill(mv ? mv.state : 'idle', ui.machineStateLabel(mv)); },
     sevPill(sev, text) {
       const s = WF.SEV[sev] || WF.SEV.info;
       return `<span class="pill" style="--c:${s.color}"><i></i>${ui.esc(text || s.label)}</span>`;

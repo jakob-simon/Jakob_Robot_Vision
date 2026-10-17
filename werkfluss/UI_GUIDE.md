@@ -53,3 +53,5 @@ bei echten Interessenten gezeigt werden können: sie muss **glaubwürdig, konsis
     Eingabefelder 16 px (sonst zoomt iOS). Hinweise für Maus („Rechtsklick“, „Mausrad“) auf Touch durch Gesten ersetzen.
 18. **„Engpass“** bezeichnet nur den Werks-Engpass aus `WF.sim.bottleneck()`. Der begrenzende Schritt eines Auftrags heißt
     „begrenzt durch …“ bzw. „kritisch“.
+19. **Maschinenzustand benennen** immer über `WF.ui.machineStateLabel(mv)` / `WF.ui.machinePill(mv)`: geplanter Stillstand
+    ohne Schicht heißt überall „Keine Schicht“ (grau), nie „Bereit“ in der einen und „Keine Schicht“ in der anderen Ansicht.
