@@ -3,7 +3,7 @@
    Zwei Betriebsarten, gleiche Oberfläche:
      „Claude · live“  – veröffentlicht auf claude.ai über die Artifact-Capability `sample`
                         (window.claude.use('sample')). Leitender user-Turn mit Produkt, Fabrik, Regeln und
-                        kompakter Lageübersicht (WF.sim.snapshot); Details liest Claude über Werkzeuge
+                        kompakter Lageübersicht (WF.sim.snapshot); Details liest Claude über Datenabfragen
                         (get_machine, get_order …), Aktionen (trigger_fault, set_priority …) laufen nur nach
                         Bestätigung im Panel. Aufruf nur auf ausdrückliche Nutzeraktion (Senden, Vorschlag).
      „Offline-Modus“  – lokal geöffnet, ohne Freigabe oder bei Fehlern: regelbasierter Agent, der die häufigen
@@ -222,7 +222,9 @@
       const fe = f.ops[i];
       if (op.complete || op.station === 'VERSAND' || !fe) return;
       if (op.station === 'EXT') {
-        const from = Math.max(now, fe.start), to = fe.lastReturn != null ? fe.lastReturn : fe.end;
+        // Beitrag der Fremdbearbeitung: Rücklauf des letzten Loses nach dem Ende des Vorgängers (Lieferfenster + Durchlauf)
+        const pf = i > 0 && !o.ops[i - 1].complete ? f.ops[i - 1] : null;
+        const from = Math.max(now, fe.start, pf && pf.end != null ? pf.end : 0), to = fe.lastReturn != null ? fe.lastReturn : fe.end;
         segs.push({ kind: 'ext', i, op, from, to, sec: workBetween(from, to), partner: (op.ext && op.ext.partner) || 'dem Fremdbearbeiter', process: (op.ext && op.ext.process) || op.op });
         return;
       }
@@ -231,11 +233,16 @@
       const auto = st.loading === 'auto', span = (a, b) => (b <= a ? 0 : auto ? b - a : workBetween(a, b));
       const r = (raw && raw.routing[i]) || {};
       const load = st.loading === 'perPart' ? ((r.loadMin != null ? r.loadMin : st.loadMin) || 1) : 0;
-      const left = Math.max(0, WF.sim.partsLeft(o.id, op.seq) || 0);
-      const own = left * ((op.cycleMin || 0) + load) * 60 + (op.state === 'active' || op.good + op.scrap > 0 ? 0 : (op.setupMin || 0) * 60);
+      const left = Math.max(0, WF.sim.partsLeft(o.id, op.seq) || 0) + (op.inProc || 0);
+      const cyc = ((op.cycleMin || 0) + load) * 60;
+      const own = left * cyc + (op.state === 'active' || op.good + op.scrap > 0 ? 0 : (op.setupMin || 0) * 60);
       const from = Math.max(now, fe.start);
       const seg = { kind: 'run', i, op, station: op.station, auto, left, own, runSpan: span(from, fe.end), start: fe.start, end: fe.end, wait: 0, blockers: [] };
-      seg.tail = seg.runSpan > own + 1800; // Ende bestimmt der Nachlauf des Vorgängers
+      // Ende bestimmt der Nachlauf des Vorgängers (wie die Prognose: letzter Behälter + Transport), nicht die eigene Bearbeitung
+      const pfe0 = i > 0 && !o.ops[i - 1].complete ? f.ops[i - 1] : null;
+      const pEnd = pfe0 ? (o.ops[i - 1].station === 'EXT' && pfe0.lastReturn != null ? pfe0.lastReturn : pfe0.end) : null;
+      seg.tail = pEnd != null && fe.end <= pEnd + Math.min(op.transferBatch || 10, Math.max(1, left)) * cyc + 600 + 300;
+      seg.prevEnd = pEnd;
       if (op.state === 'active') {
         const mv = c.mv(op.station);
         if (mv && (mv.state === 'fault' || WAIT[mv.state])) stop = { i, op, mv };
@@ -374,8 +381,6 @@
     }
     return { recommend: gain >= 900 && !newlyLate.length && !laterLate.length, gainSec: gain, newlyLate, laterLate, side };
   }
-  /** Überstunden-Text: realistisch nur bis ca. 8 h; darüber reicht es allein nicht */
-  const overtimeTxt = (st, sec) => (sec > 8 * 3600 ? `Überstunden an ${st} allein reichen nicht (es fehlen ca. ${durR(sec)})` : `ca. ${durR(Math.max(900, sec))} Überstunden an ${st}`);
   /** Empfehlung zu einem Auftrag: Eilauftrag nur nach der Engine-Regel, sonst der Hebel an der Hauptursache.
       → { text (Markdown), actions: [Aktionskarten], eilOk, main (Hauptursache), causes } */
   function adviceText(c, o, adv) {
@@ -396,40 +401,45 @@
       const hurt = (wi.newlyLate || []).concat(wi.laterLate || []);
       if (hurt.length) eil = `Kein Eilauftrag – er würde den Verzug nur verschieben: ${listJoin(hurt.slice(0, 2).map(lateOf))}.`;
       else if (!(wi.gainSec >= 60)) {
-        const why = main && main.kind === 'wait' && main.blockers && main.blockers.length ? `${main.station} ist schon mit ${blockTxt(main.blockers)} belegt, bevor die Teile da sind – laufende Arbeitsgänge werden nicht unterbrochen` : `vor ${o.id} liegt nur laufende bzw. ohnehin früher fertige Arbeit`;
-        eil = `Ein Eilauftrag bringt hier nichts (${why}).`;
+        const ws = dc ? dc.items.filter(x => x.kind === 'wait').map(x => x.station) : [];
+        eil = `Ein Eilauftrag bringt nichts – ${ws.length ? listJoin(ws) + (ws.length === 1 ? ' ist' : ' sind') + ' schon belegt, bevor die Teile ankommen (laufende Arbeitsgänge werden nicht unterbrochen)' : 'vor ' + o.id + ' liegt nur laufende bzw. ohnehin früher fertige Arbeit'}.`;
       } else if (wi.gainSec < 900) eil = `Ein Eilauftrag brächte nur ${durR(wi.gainSec)}.`;
     }
-    // Hebel an der Hauptursache
+    // Hebel an der Hauptursache – ein klarer Satz je Hebel
     const lev = [];
     if (adv.action && adv.action.type === 'moveOp') {
-      const a = adv.action, alt = (adv.alternatives || []).find(x => x.kind === 'moveOp' && x.action && x.action.stationId === a.stationId);
-      lev.push(`AG ${a.seq} auf ${mName(a.stationId)} verlagern${alt && alt.gainSec >= 60 ? ' (' + durR(alt.gainSec) + ' früher)' : ''}`);
-      acts.push({ label: `${o.id} AG ${a.seq} auf ${a.stationId} verlagern`, desc: `Dort wird neu gerüstet${alt && alt.gainSec >= 60 ? ' · ' + durR(alt.gainSec) + ' früher fertig' : ''}`, action: a, icon: 'route' });
+      const ac = adv.action, alt = (adv.alternatives || []).find(x => x.kind === 'moveOp' && x.action && x.action.stationId === ac.stationId);
+      lev.push(`AG ${ac.seq} auf ${mName(ac.stationId)} verlagern${alt && alt.gainSec >= 60 ? ' – ' + durR(alt.gainSec) + ' früher fertig' : ''}`);
+      acts.push({ label: `${o.id} AG ${ac.seq} auf ${ac.stationId} verlagern`, desc: `Dort wird neu gerüstet${alt && alt.gainSec >= 60 ? ' · ' + durR(alt.gainSec) + ' früher fertig' : ''}`, action: ac, icon: 'route' });
     }
+    let watch = '';
     if (main) {
+      const st = main.station;
       if (main.kind === 'stop' && main.mv) {
         const fi = faultInfo(main.mv);
-        lev.push(fi ? `Störung an ${main.station} zuerst beheben (${fi.working ? 'Reparatur läuft' : fi.person ? sn(fi.person.name) + ' ist unterwegs' : 'Instandhaltung hinschicken'}, Ende ca. ${clk(fi.endT)})` : lc1(waitAdvice(c, main.mv)).replace(/\.$/, ''));
-      } else if (main.kind === 'wait' || main.kind === 'run') {
-        const st = main.station, sec = late ? Math.min(main.sec, need) : main.sec;
-        if (main.auto) lev.push(`${st} läuft auch unbemannt – Standzeit und Material für die Nacht sichern`);
-        else if (late) lev.push(overtimeTxt(st, sec));
-        else lev.push(`${st} ohne Unterbrechung laufen lassen (Pausenablösung, Störungen dort zuerst)`);
-      } else if (main.kind === 'ext') lev.push(`Expressdurchlauf bei ${main.partner} anfragen (${main.process})`);
-      else if (main.kind === 'material' && main.mv) lev.push(lc1(waitAdvice(c, main.mv)).replace(/\.$/, ''));
+        lev.push(fi ? `Störung an ${st} zuerst beheben – ${fi.working ? 'Reparatur läuft' : fi.person ? sn(fi.person.name) + ' ist unterwegs' : 'Instandhaltung hinschicken'}, Ende ca. ${clk(fi.endT)}` : waitAdvice(c, main.mv).replace(/\.$/, ''));
+        watch = lev[lev.length - 1];
+      } else if (main.kind === 'run' || main.kind === 'wait') {
+        if (main.auto) watch = main.kind === 'wait' ? `${st} läuft auch unbemannt – Standzeit und Material sichern, damit die Warteschlange dort auch nachts weiterläuft` : `${st} läuft auch unbemannt – Standzeit und Material für die Nacht sichern`;
+        else watch = main.kind === 'run' ? `${st} ohne Unterbrechung laufen lassen (${durR(main.sec)} Bearbeitung bis ca. ${tc(main.seg.end)}) – Pausenablösung, Störungen dort zuerst beheben` : `${st} ist bis ca. ${tc(main.seg.start)} belegt – Störungen dort zuerst beheben`;
+        if (late && !main.auto) lev.push(need > 8 * 3600 ? `Überstunden allein holen ${durR(need)} nicht auf – am meisten bringt Zeit an ${st}` : `ca. ${durR(Math.max(900, Math.min(main.sec, need)))} Überstunden an ${st}`);
+        else if (late) lev.push(watch);
+      } else if (main.kind === 'ext') { watch = `Rücklauf aus der Fremdbearbeitung (ca. ${tc(main.seg ? main.seg.to : o.eta)}) – Lose pünktlich bereitstellen`; lev.push(`Expressdurchlauf bei ${main.partner} anfragen (${main.process})`); }
+      else if (main.kind === 'material' && main.mv) { lev.push(waitAdvice(c, main.mv).replace(/\.$/, '')); watch = lev[lev.length - 1]; }
     }
-    if (late) lev.push(`Teillieferung mit ${custShort(o.customer)} abstimmen`);
+    if (late) { const tl = `Teillieferung mit ${custShort(o.customer)} abstimmen`; if (need > 8 * 3600) lev.unshift(tl); else lev.push(tl); }
     let text;
-    if (!late && o.slackSec != null && o.slackSec >= 0) {
-      const watch = main ? `im Blick: ${main.short}` : bnMachine(o) ? `im Blick: ${bnMachine(o)}` : '';
+    if (!late && o.slackSec != null) {
       if (eilOk && o.slackSec < 2 * 3600) text = `Termin hält knapp (${slackTxt(o.slackSec)}). Zur Absicherung: ${eil}`;
-      else text = `Kein Eingriff nötig – ${slackTxt(o.slackSec)} reicht${watch ? '; ' + watch : ''}${lev.length && !eilOk ? ' (' + lev[0] + ')' : ''}.${!eilOk && wi && (wi.newlyLate || []).concat(wi.laterLate || []).length ? ' ' + eil : ''}`;
-      if (!(eilOk && o.slackSec < 2 * 3600)) { const k = acts.findIndex(x => x.action && x.action.type === 'setPriority'); if (k >= 0) acts.splice(k, 1); }
+      else {
+        text = `${o.slackSec < 2 * 3600 ? 'Termin hält, aber nur mit ' + slackTxt(o.slackSec) + ' – kein Eilauftrag nötig.' : 'Kein Eingriff nötig – ' + slackTxt(o.slackSec) + ' reicht.'}${watch ? ' Im Blick: ' + watch + '.' : ''}${wi && (wi.newlyLate || []).concat(wi.laterLate || []).length ? ' ' + eil : ''}`;
+        const k = acts.findIndex(x => x.action && x.action.type === 'setPriority'); if (k >= 0) acts.splice(k, 1);
+      }
     } else {
-      text = [eil, lev.length ? (eilOk ? 'Außerdem: ' : 'Hebel: ') + uc1(listJoin(lev)) + '.' : ''].filter(Boolean).join(' ');
+      text = [eil, lev.length ? (eilOk ? 'Außerdem: ' : 'Hebel: ') + lev.map(uc1).join('; ') + '.' : ''].filter(Boolean).join(' ');
     }
-    return { text: text.replace(/\s+/g, ' ').trim(), actions: acts, eilOk, main, causes: dc };
+    const eilWhy = !eilOk && eil ? eil + (o.slackSec >= 0 ? ` Der Termin hält ohnehin (${slackTxt(o.slackSec)}).` : '') : '';
+    return { text: text.replace(/\s+/g, ' ').trim(), eilWhy, actions: acts, eilOk, main, causes: dc };
   }
   /** Rohmaterialbedarf der offenen Aufträge (noch nicht ausgebucht) je Material */
   function materialNeeds() {
@@ -650,7 +660,12 @@
     // Maschinen: M05 / m 05 / M5 (einstellig nur mit großem M, sonst „m2 z38“ = Modul)
     let m;
     const reM = /(^|[^A-Za-z0-9])([Mm])\s?-?(\d{1,2})(?![0-9])/g;
-    while ((m = reM.exec(raw))) { if (m[3].length === 1 && m[2] !== 'M') continue; const id = 'M' + m[3].padStart(2, '0'); if (st.machines[id]) add(E.machines, id); }
+    // klein geschrieben und einstellig („m5“) nur am Satzanfang oder vor Zustandswörtern – sonst ist „m2 z38“ ein Modul
+    const STATUSW = /^\s*(status|zustand|los|gerade|jetzt|laeuft|läuft|steht|wartet|macht|oee|werkzeug|stoerung|störung|\?|$)/i;
+    while ((m = reM.exec(raw))) {
+      if (m[3].length === 1 && m[2] !== 'M' && !(m.index === 0 || /^\s*$/.test(raw.slice(0, m.index + m[1].length)) || STATUSW.test(raw.slice(m.index + m[0].length)))) continue;
+      const id = 'M' + m[3].padStart(2, '0'); if (st.machines[id]) add(E.machines, id);
+    }
     for (const id in MACHINE_ALIAS) for (const a of MACHINE_ALIAS[id]) if (hasWord(q, a)) { if (a === 'qs' && /qs-|qs pruef/.test(q)) continue; add(E.machines, id); break; }
     // Aufträge: FA-24118, „24118“, Teilebezeichnung, Kunde
     const reO = /\bfa\s?-?\s?(\d{5})\b|\b(2\d{4})\b/g;
@@ -699,7 +714,14 @@
     // Empfehlung als eigener Block (mit den Aktionen), Überschrift aus einer reinen Fett-Zeile am Anfang
     const body = [];
     for (const l of a.md) { const m = REC_RE.exec(l); if (m && !a.rec) a.rec = { label: m[1], text: m[2] }; else body.push(l); }
-    if (!a.head) { const k = body.findIndex(l => l.trim()); if (k >= 0 && /^\*\*[^*]+\*\*$/.test(body[k].trim())) { a.head = body[k].trim().slice(2, -2).replace(/[.:]$/, ''); body.splice(k, 1); } }
+    if (!a.head) {
+      const k = body.findIndex(l => l.trim()), m = k >= 0 ? /^\*\*([^*]{6,}?)\*\*(.*)$/.exec(body[k].trim()) : null;
+      if (m) {
+        a.head = m[1].replace(/[.:]$/, '');
+        const rest = m[2].replace(/^[\s:.,;–-]+/, '').trim();
+        if (rest && rest !== '.') body[k] = uc1(rest); else body.splice(k, 1);
+      }
+    }
     const j = body.join('\n').replace(/\n{3,}/g, '\n\n').trim();
     a.display = j;
     const plain = (a.slots ? j.replace(/\u0005(\w+)/g, (_, k) => (a.slots[k] ? a.slots[k].text : '')) : j.replace(/\u0005\w+/g, '')).replace(/\n{3,}/g, '\n\n').trim();
@@ -789,6 +811,7 @@
       return `Einrichter:in mit vermessenem Werkzeug zu ${mName(mv.id)} schicken – die Maschine steht, bis gewechselt ist.`;
     }
     if (mv.state === 'waitOperator') {
+      if (/passt nicht mehr vor Schichtende|übernimmt ab/.test(mv.cause || '')) return `${mv.id} wird mit der nächsten Schicht gerüstet – das Rüsten würde über das Schichtende reichen; kein Eingriff nötig.`;
       if (ns) return `${mName(mv.id)} wartet auf Bedienung bis zum ${startTxt} – dort zuerst einlegen lassen${mv.order ? ' (' + mv.order.id + ')' : ''}.`;
       const free = freePeopleFor(mv.id);
       return free.length ? `${sn(free[0].name)} (${free[0].role}) ist frei und für ${mv.id} qualifiziert – dorthin schicken.` : `Niemand mit passender Qualifikation ist frei – Pausen versetzen, Mehrmaschinenbedienung neu verteilen oder Einrichter:in als Springer einsetzen.`;
@@ -822,7 +845,7 @@
     const steps = [];
     if (tools.length) steps.push(`Werkzeugwechsel an ${listJoin(tools.map(m => m.id + ' (steht seit ' + clk(m.since) + ')'))}${settersNext().length ? ' – ' + settersNext().join(', ') : ''}`);
     if (ops.length) steps.push(`Einlegen/Prüfen an ${listJoin(ops.slice(0, 4).map(m => m.id + (m.order ? ' (' + m.order.id + (risk(m) === 0 ? ', verspätet' : risk(m) === 1 ? ', knapp' : '') + ')' : '')))}`);
-    return steps.length ? `Zum Schichtbeginn ${clk(sh.endsAt)}: ${steps.map((x, i) => (i + 1) + ') ' + x).join('; ')}.` : null;
+    return steps.length ? `Zum Schichtbeginn ${clk(sh.endsAt)}: ${steps.length === 1 ? steps[0] : steps.map((x, i) => (i + 1) + ') ' + x).join('; ')}.` : null;
   }
   /** „Jetzt tun“: konkrete Eingriffe, wichtigste zuerst – je Punkt Text (Handlung zuerst, ID vorn), kurze Fassung,
       Bezug und optionale Aktion. Eine Rangfolge für Lage, Briefing, Übergabe und „Was muss ich jetzt tun?“. */
@@ -854,7 +877,7 @@
     }
     for (const m of mvs.filter(x => x.fpi && x.fpi.waitingSec >= 600).slice(0, 1)) push({ key: 'fpi:' + m.id, rank: 4, sev: 'warn', entity: { kind: 'machine', id: m.id }, text: `${m.id}: Erstteil prüfen – die Maschine steht seit ${durR(m.fpi.waitingSec)} bis zur Freigabe.`, short: `Erstteil ${m.id} prüfen.` });
     for (const mt of Object.values(S().materials).filter(x => x.onHand < x.min && !x.onOrder).slice(0, 1)) push({ key: 'mat:' + mt.id, rank: 5, sev: 'warn', entity: { kind: 'material', id: mt.id }, text: `${mt.name} nachbestellen – ${matQty(mt, mt.onHand)} (Min. ${matQty(mt, mt.min)}), nicht bestellt.`, short: `${mt.name} nachbestellen.`, actions: [reorderAction(mt)] });
-    for (const n of c.notifs().filter(x => x.status === 'open' && String(x.key).indexOf('ghost:') === 0).slice(0, 1)) {
+    for (const n of c.notifs().filter(x => x.status === 'open' && String(x.key).indexOf('ghost:') === 0 && sh.id && sh.endsAt - c.t <= 3 * 3600).slice(0, 1)) {
       const ga = (n.actions || []).find(x => x.action.type === 'planToolChange'), mid = n.entity && n.entity.id;
       push({ key: 'ghost:' + mid, rank: 5, sev: 'warn', entity: mid ? { kind: 'machine', id: mid } : null, text: `${mid}: vor Schichtende vorbeugend Werkzeug wechseln – sonst steht die Maschine in der Geisterschicht.`, short: `Vorbeugender Wechsel an ${mid}.`, actions: ga ? [{ label: `${ga.label} (${mid})`, desc: n.suggestion, action: ga.action, icon: 'wrench' }] : [] });
     }
@@ -956,7 +979,7 @@
     const loadR = rows.slice(0, 6);
     if (loadR.length > 1) {
       a.md.push('', '### Arbeitsvorrat je Arbeitsplatz');
-      SLOT(a, 'bars3', loadR.map(x => `- ${mName(x.id)}: ${hTxt(x.work)} (≈ ${daysTxt(x.days)})`).join('\n'), { unit: 'h', rows: loadR.map(x => ({ ent: { kind: 'machine', id: x.id }, label: x.st.short, v: x.work, vTxt: hTxt(x.work), sub: '≈ ' + daysTxt(x.days) + (x.auto ? ' · läuft auch unbemannt' : '') + (bnOf(x.id).some(o => o.risk !== 'ok') ? ' · begrenzt ' + listJoin(bnOf(x.id).filter(o => o.risk !== 'ok').map(o => o.id)) : ''), c: x.id === top.id ? 'var(--st-wait)' : 'var(--info)' })) });
+      SLOT(a, 'bars3', loadR.map(x => `- ${mName(x.id)}: ${hTxt(x.work)} (≈ ${daysTxt(x.days)})`).join('\n'), { unit: 'h', rows: loadR.map(x => ({ ent: { kind: 'machine', id: x.id }, label: x.st.short, v: x.work, vTxt: hTxt(x.work), sub: '≈ ' + daysTxt(x.days) + (x.auto ? ' · läuft auch unbemannt' : '') + (bnOf(x.id).some(o => o.risk !== 'ok') ? ' · längster Arbeitsgang von ' + listJoin(bnOf(x.id).filter(o => o.risk !== 'ok').map(o => o.id)) : ''), c: x.id === top.id ? 'var(--st-wait)' : 'var(--info)' })) });
       a.md.push('');
     }
     const waits = c.mvs().filter(m => WAIT[m.state] || m.state === 'fault');
@@ -1009,7 +1032,8 @@
       const k = Math.max(0, rAfter - (t.changeAtParts || 0));
       return { t, k, afterPart: (mv.partNo != null ? mv.partNo : mv.partsDone) + k, tAt: k === 0 ? base : st.loading === 'auto' ? base + k * cycS : addWork(base, k * cycS) };
     }).sort((x, y) => x.tAt - y.tAt);
-    const expTxt = (x) => `${toolShort(x.t.name)} ca. ${tc(x.tAt)} (nach Teil ~${x.afterPart})`;
+    const actOf = (t) => (t.nextAction === 'index' ? 'Schneide wenden' : 'Werkzeugwechsel');
+    const expTxt = (x) => `${actOf(x.t)} ${toolShort(x.t.name)} ca. ${tc(x.tAt)} (nach Teil ~${x.afterPart})`;
     // Kernaussage – passend zur Frage
     if (focus === 'why' && !waiting && !fi && mv.state === 'running') { a.head = `${mName(id)} wartet nicht – sie produziert`; a.md.push(`${uc1(since)}. ${uc1(mv.cause)}.`); }
     else if (focus === 'tools') {
@@ -1017,7 +1041,7 @@
       else if (opTools.some(t => t.status === 'changing')) { a.head = `An ${mName(id)} wird gerade gewechselt`; a.md.push(`${opTools.filter(t => t.status === 'changing').map(t => toolShort(t.name)).join(', ')}.`); }
       else if (expect.length) {
         const x = expect[0], lim = x.t.planWearPct != null ? ` ab ca. ${nm(x.t.planWearPct, 0)} % Verschleiß` : '';
-        a.head = `Voraussichtlich ca. ${tc(x.tAt)}: ${toolShort(x.t.name)} an ${id}`;
+        a.head = `Voraussichtlich ca. ${tc(x.tAt)}: ${actOf(x.t)} ${toolShort(x.t.name)} an ${id}`;
         a.md.push(`Nach Teil ~${x.afterPart} von ${nm(mv.partsTotal)} – noch nicht angekündigt; die Ankündigung mit Uhrzeit und Einrichter:in kommt${lim} (${teile(x.t.changeAtParts || 0)} Reststandzeit als Wechselgrenze).${expect[1] ? ' Danach ' + expTxt(expect[1]) + '.' : ''}`);
       } else if (opTools.length) { a.head = `Kein Werkzeugwechsel bis Ende ${o ? o.id + ' AG ' + o.seq : 'des Arbeitsgangs'}`; a.md.push(`Die Standzeiten an ${mName(id)} reichen für die restlichen ${teile(Math.max(0, mv.partsTotal - mv.partsDone))}.`); }
       else { a.head = `${mName(id)}: ${st.kind === 'machine' ? 'kein eingerichteter Arbeitsgang' : 'Arbeitsplatz ohne Schneidwerkzeug'}`; if (st.kind === 'machine') a.md.push('Werkzeuge werden beim nächsten Rüsten bestückt.'); }
@@ -1068,7 +1092,7 @@
       else {
         const crit = opTools.slice().sort((x, y) => (x.remainingParts == null ? 1e9 : x.remainingParts) - (y.remainingParts == null ? 1e9 : y.remainingParts))[0];
         const ex = expect[0];
-        if (ex) a.md.push(`- **Nächster Werkzeugwechsel (erwartet):** ${expTxt(ex)} – wird ab der Wechselgrenze mit Uhrzeit und Einrichter:in angekündigt.`);
+        if (ex) a.md.push(`- **Nächster Wechsel (erwartet):** ${expTxt(ex)} – wird ab der Wechselgrenze mit Uhrzeit ${ex.t.nextAction === 'index' ? 'angekündigt (Bediener:in an der Maschine)' : 'und Einrichter:in angekündigt'}.`);
         else if (crit && crit.status !== 'changing' && crit.explain) a.md.push(`- **Werkzeug ${toolShort(crit.name)}:** ${explainTxt(crit.explain)}`);
       }
       const chg = opTools.filter(t => t.status === 'changing');
@@ -1210,11 +1234,11 @@
     const act = rows.find(r => r.active);
     const focusR = shown[0] || act || null;
     a.stats = [
-      { l: 'Reparatur bis', v: clk(fi.endT), s: fi.working ? sn(fi.person.name) + ' repariert' : fi.person ? sn(fi.person.name) + ' unterwegs' : 'noch niemand zugeteilt', c: 'crit' },
-      { l: 'Stillstand', v: durR(standSec + fi.rem), s: eur(mv.rate) + '/h · ca. ' + eur(mv.rate * (standSec + fi.rem) / 3600), c: 'warn' },
+      { l: 'Reparatur bis', v: clk(fi.endT), s: fi.person ? sn(fi.person.name) : 'niemand zugeteilt', c: 'crit' },
+      { l: 'Stillstand', v: durR(standSec + fi.rem), s: 'ca. ' + eur(mv.rate * (standSec + fi.rem) / 3600), c: 'warn' },
     ];
-    if (act) a.stats.push({ l: `AG ${act.seq} fertig`, v: tc(act.opA), s: act.dOp != null ? (Math.abs(act.dOp) < 60 ? NOCHG : 'statt ' + tc(act.opB) + ' (' + deltaTxt(act.dOp) + ')') : act.o.id, c: act.dOp != null && act.dOp >= 300 ? 'warn' : '' });
-    if (focusR) a.stats.push({ l: 'Liefertermin ' + focusR.o.id, v: tc(focusR.etaA), s: focusR.dEta != null && Math.abs(focusR.dEta) >= 60 ? deltaTxt(focusR.dEta) + ' · ' + slackTxt(focusR.slack) : slackTxt(focusR.slack), c: focusR.slack < 0 ? 'crit' : focusR.slack < 4 * 3600 ? 'warn' : 'ok' });
+    if (act) a.stats.push({ l: `AG ${act.seq} fertig`, v: tc(act.opA), s: act.dOp != null ? (Math.abs(act.dOp) < 60 ? 'unverändert' : deltaTxt(act.dOp)) : act.o.id, c: act.dOp != null && act.dOp >= 300 ? 'warn' : '' });
+    if (focusR) a.stats.push({ l: 'Lieferung ' + focusR.o.id.replace('FA-', ''), v: tc(focusR.etaA), s: focusR.dEta != null && Math.abs(focusR.dEta) >= 60 ? deltaTxt(focusR.dEta) : slackTxt(focusR.slack), c: focusR.slack < 0 ? 'crit' : focusR.slack < 4 * 3600 ? 'warn' : 'ok' });
     a.md.push('', '### Auswirkung auf Aufträge');
     const notOn = named.filter(oid => !rows.some(r => r.o.id === oid));
     for (const oid of notOn) { const ov = c.ov(oid); a.md.push(`- **${oid}** läuft nicht über ${mid} – keine Auswirkung (${slackTxt(ov.slackSec)}).`); }
@@ -1227,7 +1251,7 @@
       }
       a.md.push(`- **${r.o.id}** ${r.o.part.name} (${custShort(r.o.customer)}), AG ${r.seq}: ${r.active ? `fertig ca. ${tc(r.opA)}${r.opB != null && Math.abs(r.opA - r.opB) >= 60 ? ' statt ' + tc(r.opB) + ' (' + deltaTxt(r.opA - r.opB) + ')' : ''}` : `Start an ${mid} ca. ${tc(Math.max(c.t, r.start))}`}; ${etaLine(r)}${why.length ? ' – ' + why.join('; ') : ''}.`);
     }
-    if (rest.length) a.md.push(`- ${pl(rest.length, 'weiterer Auftrag', 'weitere Aufträge')} an ${mid} (${listJoin(rest.slice(0, 3).map(r => r.o.id))}${rest.length > 3 ? ' u. a.' : ''}) ${rest.length === 1 ? 'startet' : 'starten'} später; Liefertermine ${rest.some(r => r.dEta == null) ? 'mit ausreichend Puffer' : NOCHG}.`);
+    if (rest.length) a.md.push(`- ${pl(rest.length, 'weiterer Auftrag', 'weitere Aufträge')} an ${mid} (${listJoin(rest.slice(0, 3).map(r => r.o.id))}${rest.length > 3 ? ' u. a.' : ''}) ${rest.length === 1 ? 'startet' : 'starten'} später – ${rest.some(r => r.dEta == null) ? 'Liefertermine mit ausreichend Puffer' : 'Liefertermine: ' + NOCHG}.`);
     if (!rows.length) a.md.push(`- An ${mid} ist kein offener Arbeitsgang eingeplant – kein Einfluss auf Termine.`);
     const imp = shown.filter(r => r.etaA != null).slice(0, 5);
     if (imp.length) a.impact = { title: `Liefertermine · Störung ${mid}`, rows: imp.map(r => ({ id: r.o.id, label: 'AG ' + r.seq, before: r.etaB != null ? r.etaB : r.etaA, after: r.etaB != null ? r.etaA : null, due: r.o.due })) };
@@ -1239,7 +1263,7 @@
     if (act) {
       const cov = successorCover(c, act.o, act.seq);
       if (act.dEta != null && act.dEta >= 60) recs.push(`${act.o.id} verschiebt sich um ${durR(act.dEta)}${act.slack < 0 ? ' und ist jetzt ' + durR(-act.slack) + ' zu spät' : ''} – ${act.slack < 0 ? 'Kunde ' + custShort(act.o.customer) + ' informieren bzw. Teillieferung abstimmen' : 'jede weitere Minute Stillstand geht vom Puffer ab'}.`);
-      else if (cov && cov.sec > 0) recs.push(`${act.o.id} hält, solange ${cov.station} Nachschub hat (ca. ${durR(cov.sec)} im Eingang)${act.slack < 4 * 3600 ? '; danach geht jede Minute Stillstand vom Puffer (' + slackTxt(act.slack) + ') ab' : ''}.`);
+      else if (cov && cov.sec > 0) recs.push(`${act.o.id} hält, solange ${cov.station} Nachschub hat (ca. ${durR(cov.sec)} im Eingang)${act.slack < 4 * 3600 ? '; danach geht jede Minute Stillstand vom Puffer (' + durR(act.slack) + ') ab' : ''}.`);
       else if (act.slack < 4 * 3600) recs.push(`${act.o.id} ist knapp (${slackTxt(act.slack)}) – Reparatur hat Vorrang vor allen anderen Aufgaben.`);
       else recs.push('Termine halten – keine weitere Maßnahme nötig.');
     } else if (!crit.length) recs.push('Termine halten – keine weitere Maßnahme nötig.');
@@ -1291,10 +1315,9 @@
     a.md.push(`${o.part.name} (${o.part.no}) für ${o.customer} – ${stk(o.qty)}, Termin ${dueTxt(o.due)}${o.priority === 'eil' ? ', **Eilauftrag**' : ''}; Prognose ${dueTxt(o.eta)}.${o.etaPending ? ` Eine Neuberechnung (${dueTxt(o.etaPending)}) wird gerade bestätigt.` : ''}`);
     const nDone = o.ops.filter(op => op.complete && op.station !== 'VERSAND').length, nAll = o.ops.filter(op => op.station !== 'VERSAND').length;
     a.stats = [
-      { l: 'Prognose', v: tc(o.eta), s: 'Liefertermin-Prognose', c: late ? 'crit' : o.risk === 'knapp' ? 'warn' : 'ok' },
-      { l: 'Termin', v: tc(o.due), s: o.priority === 'eil' ? 'Eilauftrag' : custShort(o.customer) },
+      { l: 'Prognose', v: tc(o.eta), s: 'Termin ' + tc(o.due) + (o.priority === 'eil' ? ' · Eil' : ''), c: late ? 'crit' : o.risk === 'knapp' ? 'warn' : 'ok' },
       { l: late ? 'Verzug' : 'Puffer', v: o.slackSec == null ? '–' : o.slackSec < 60 && o.slackSec >= 0 ? '0 min' : durR(Math.abs(o.slackSec)), s: o.riskLabel, c: late ? 'crit' : o.risk === 'knapp' ? 'warn' : 'ok' },
-      { l: 'Fortschritt', v: pct(o.progress), s: `${nDone}/${nAll} Arbeitsgänge${o.shippedQty ? ' · ' + stk(o.shippedQty) + ' versandt' : ''}` },
+      { l: 'Fortschritt', v: pct(o.progress), s: `${nDone} von ${nAll} Arbeitsgängen${o.shippedQty ? ' · ' + stk(o.shippedQty) + ' versandt' : ''}` },
     ];
     // Störung auf dem Weg des Auftrags: zuerst nennen (Reparatur, vorher/nachher)
     for (const op of o.ops) {
@@ -1320,7 +1343,7 @@
         routeTxt.push(`- AG ${op.seq} ${op.op}: nach Abschluss ca. ${tc(o.eta)}`);
         Object.assign(r, { st: 'ship', pill: 'Versand', sub: `nach Abschluss ca. ${tc(o.eta)}`, c: 'var(--muted)' }); route.push(r); return;
       }
-      const where = op.station === 'EXT' ? 'extern' : op.station === 'VERSAND' ? 'Versand' : mName(op.station);
+      const where = op.station === 'EXT' ? (op.ext && op.ext.partner ? op.ext.partner.replace(/\s*\(Beispiel\)/, '') : 'extern') : op.station === 'VERSAND' ? 'Versand' : mName(op.station);
       const startEnd = fe ? `Start ca. ${tc(Math.max(c.t, fe.start))} · fertig ca. ${tc(Math.max(c.t, op.station === 'EXT' && fe.lastReturn != null ? fe.lastReturn : fe.end))}` : '';
       let s;
       if (op.complete) {
@@ -1335,7 +1358,7 @@
           sub: `${nm(op.good + op.scrap)}/${nm(op.target)}${stopTxt ? ' · ' + stopTxt : ''}${mv && mv.etaOpEnd ? ' · fertig ca. ' + tc(mv.etaOpEnd) : ''}` });
       } else if (op.state === 'external') {
         s = `**in Fremdbearbeitung** – ${op.ext ? op.ext.returnText : ''}`;
-        Object.assign(r, { st: 'ext', pill: 'extern', c: 'var(--info)', sub: `${op.ext ? (op.ext.partner ? op.ext.partner + ' · ' : '') + op.ext.returnText : 'in Fremdbearbeitung'}` });
+        Object.assign(r, { st: 'ext', pill: 'extern', c: 'var(--info)', sub: op.ext ? op.ext.returnText : 'in Fremdbearbeitung' });
       } else if (op.state === 'waiting') {
         const b = isM ? blockerOn(c, op.station, o.id, op.seq) : null;
         const bl = b ? (b.running.length ? `nach ${b.running[0].orderId} AG ${b.running[0].seq} (läuft bis ${tc(b.running[0].end)})` : `nach ${listJoin(b.before.slice(0, 2).map(e => e.orderId + ' AG ' + e.seq))}`) : '';
@@ -1345,7 +1368,6 @@
       } else {
         s = startEnd || 'noch nicht eingeplant';
         Object.assign(r, { sub: startEnd || 'noch nicht eingeplant', pill: op.station === 'EXT' ? 'extern' : 'geplant' });
-        if (op.station === 'EXT' && op.ext && op.ext.partner) r.sub = op.ext.partner + ' · ' + r.sub;
       }
       r.where = where;
       routeTxt.push(`- AG ${op.seq} ${op.op} · ${where}: ${s}`);
@@ -1396,7 +1418,10 @@
     const mvs = c.mvs();
     const nowTools = [];
     for (const mv of mvs) for (const tl of mv.tools || []) if (tl.status === 'due' || tl.status === 'broken' || tl.status === 'changing') nowTools.push({ mv, tl });
-    a.md.push(ch.length ? `**${pl(ch.length, 'Werkzeugwechsel', 'Werkzeugwechsel')} ${horizon}** (bis ${tc(until)}):` : `**Kein Werkzeugwechsel ${horizon}** (bis ${tc(until)}).`, '');
+    a.eyebrow = 'Werkzeuge · Wechselplanung';
+    a.head = ch.length ? `${pl(ch.length, 'Werkzeugwechsel', 'Werkzeugwechsel')} ${horizon}` : `Kein Werkzeugwechsel ${horizon}`;
+    a.sev = mvs.some(m => m.state === 'waitTool') ? 'warn' : ch.some(g => g.waitFromT) ? 'warn' : 'ok';
+    a.md.push(`Bis ${tc(until)}${ch.length ? ' – ' + (ch.filter(g => g.by).length ? ch.filter(g => g.by).length + ' davon mit Einrichter:in zugeteilt' : 'noch niemand zugeteilt') : ''}.`, '');
     for (const g of ch.slice(0, 8)) {
       const late = sh.id && g.t > sh.endsAt && !nextShiftStaffed(g.t);
       const waitNow = g.waitFromT != null && g.waitFromT <= t + 60;
@@ -1447,18 +1472,21 @@
     if (single) {
       const r = rows[0], mt = r.mt;
       a.entity = { kind: 'material', id: mt.id };
-      a.md.push(`**${mt.name}** (${mt.id}): Bestand **${matQty(mt, mt.onHand)}**, Mindestbestand ${matQty(mt, mt.min)}${mt.onOrder ? ', bestellt ' + matQty(mt, mt.onOrder) : ''} – Lagerort ${WF.sim.stationName(mt.location)}.`, '');
+      a.eyebrow = 'Material · ' + mt.id; a.sev = r.status === 'ok' ? 'ok' : r.status === 'fehlt' ? 'crit' : 'warn';
+      a.head = `${mt.name}: ${mt.onHand + (mt.onOrder || 0) >= r.nd ? (mt.onHand >= r.nd ? 'reicht für alle offenen Aufträge' : 'reicht mit der offenen Bestellung') : 'reicht nicht für die offenen Aufträge'}`;
+      a.md.push(`Bestand **${matQty(mt, mt.onHand)}**, Mindestbestand ${matQty(mt, mt.min)}${mt.onOrder ? ', bestellt ' + matQty(mt, mt.onOrder) : ''} – Lagerort ${WF.sim.stationName(mt.location)}.`, '');
+      a.stats = [{ l: 'Bestand', v: matQty(mt, mt.onHand), s: 'Min. ' + matQty(mt, mt.min), c: mt.onHand < mt.min ? 'warn' : 'ok' }, { l: 'Bedarf offen', v: matQty(mt, r.nd), s: 'noch nicht ausgebucht' }, { l: 'Bestellt', v: mt.onOrder ? matQty(mt, mt.onOrder) : '–', s: openPurchases(mt.id)[0] ? 'Lieferung ' + dueTxt(openPurchases(mt.id)[0].etaT) : 'keine Bestellung', c: mt.onOrder ? 'info' : '' }];
       a.md.push(`- Bedarf offener Aufträge (noch nicht ausgebucht): ca. ${matQty(mt, r.nd)}${(users[mt.id] || []).length ? ' – ' + users[mt.id].map(u => `${u.orderId}: ${nm(u.parts)} × ${nm(u.perPart, u.perPart < 1 ? 3 : 0)} ${mt.unit}`).join(', ') : ''}.`);
       a.md.push(`- ${mt.onHand >= r.nd ? 'Bestand reicht für alle offenen Aufträge' + (mt.onHand - r.nd < mt.min ? ', danach unter Mindestbestand' : '') : 'Bestand reicht nicht: es fehlen ca. ' + matQty(mt, r.nd - mt.onHand) + (mt.onOrder ? ' (Bestellung deckt ' + (mt.onHand + mt.onOrder >= r.nd ? 'den Rest' : 'nur einen Teil') + ')' : '')}.`);
       if (mt.usedToday) a.md.push(`- Verbrauch heute: ${matQty(mt, mt.usedToday)}.`);
       for (const p of openPurchases(mt.id)) a.md.push(`- Bestellung ${p.id}: ${matQty(mt, p.qty)} bei ${p.supplier}, Lieferung ca. ${dueTxt(p.etaT)}.`);
-      a.md.push(`- Lieferant: ${mt.supplier}, Lieferzeit ca. ${durR(mt.leadMin * 60)}, ${eur(mt.pricePerUnit)} je ${mt.unit}.`);
+      a.md.push(`- Lieferant: ${mt.supplier}, Lieferzeit ca. ${durR(mt.leadMin * 60)}, ${eurUnit(mt.pricePerUnit)} je ${mt.unit}.`);
       if (r.status !== 'ok' && !mt.onOrder) { addAction(a, reorderAction(mt)); a.md.push('', `> **Empfehlung:** Nachbestellen (${matQty(mt, mt.reorderQty)}, ca. ${eur(mt.reorderQty * mt.pricePerUnit)}).`); }
     } else {
       const nU = rows.filter(r => r.status === 'unter' || r.status === 'fehlt').length, nK = rows.filter(r => r.status === 'knapp').length, nOk = rows.length - nU - nK;
-      a.md.push(nU ? `**${nU} ${nU === 1 ? 'Material' : 'Materialien'} unter Mindestbestand${rows.some(r => r.status === 'fehlt') ? ' bzw. zu knapp für die offenen Aufträge' : ''}**${nK ? `, ${nK} knapp` : ''}, ${nOk} im grünen Bereich:`
-        : nK ? `**Kein Material unter Mindestbestand** – ${nK} knapp, ${nOk} im grünen Bereich:`
-        : `**Alle ${rows.length} Rohmaterialien im grünen Bereich** – Bestand über Mindestbestand und ausreichend für die offenen Aufträge.`, '');
+      a.eyebrow = 'Material · Rohmaterial'; a.sev = rows.some(r => r.status === 'fehlt' && !r.mt.onOrder) ? 'crit' : nU ? 'warn' : nK ? 'info' : 'ok';
+      a.head = nU ? `${nU} ${nU === 1 ? 'Material' : 'Materialien'} unter Mindestbestand${nK ? `, ${nK} knapp` : ''}` : nK ? `Kein Material unter Mindestbestand – ${nK} knapp` : `Alle ${rows.length} Rohmaterialien im grünen Bereich`;
+      a.md.push(nU || nK ? `${nOk} weitere im grünen Bereich${rows.some(r => r.status === 'fehlt') ? '; mindestens eines reicht nicht für die offenen Aufträge' : ''}.` : 'Bestand über Mindestbestand und ausreichend für die offenen Aufträge.', '');
       for (const r of (crit.length ? crit : rows.slice(0, 4))) {
         const mt = r.mt;
         const covers = mt.onHand >= r.nd;
@@ -1505,7 +1533,8 @@
     if (ids && ids.length === 1) {
       const p = list[0];
       a.entity = { kind: 'person', id: p.id };
-      a.md.push(`**${p.name}** (${p.id}, ${p.role}, ${p.shift === 'F' ? 'Frühschicht' : 'Spätschicht'}) – **${p.state === 'idle' ? 'verfügbar' : label('person', p.state)}**${p.state !== 'offShift' && p.state !== 'break' ? ', ' + whereOf(p) : ''}.`);
+      a.eyebrow = `Personal · ${p.role} · ${p.shift === 'F' ? 'Frühschicht' : 'Spätschicht'}`; a.sev = p.state === 'offShift' ? 'info' : 'ok';
+      a.head = `${p.name}: ${p.state === 'idle' ? 'verfügbar' : label('person', p.state)}${p.state !== 'offShift' && p.state !== 'break' ? ', ' + whereOf(p) : ''}`;
       if (p.state !== 'offShift') {
         if (!/^bereit$/i.test(p.activity || '')) a.md.push(`Tätigkeit: ${p.activity}.`);
         a.md.push('');
@@ -1520,6 +1549,7 @@
     }
     const on = list.filter(p => p.state !== 'offShift');
     const sh = WF.sim.shift();
+    a.eyebrow = 'Personal · ' + (sh.id ? sh.name : 'keine Schicht'); a.sev = 'info';
     if (!on.length) {
       a.md.push(`**Niemand ${roles && roles.length ? 'aus dieser Rolle ' : ''}im Dienst** (${sh.id ? sh.name : 'keine Schicht'}).`);
       if (!sh.id) a.md.push(`Nächster Schichtbeginn ${dueTxt(sh.endsAt)} – bis dahin laufen nur autonome Maschinen (Geisterschicht).`);
@@ -1527,7 +1557,7 @@
       const by = (s) => on.filter(p => p.state === s);
       const nw = by('working').length + by('driving').length, nwk = by('walking').length, ni = by('idle').length, nb = by('break').length;
       const parts = [nw ? nw + ' ' + (nw === 1 ? 'arbeitet' : 'arbeiten') : '', nwk ? nwk + ' unterwegs' : '', ni ? ni + ' verfügbar' : '', nb ? nb + ' in Pause' : ''].filter(Boolean);
-      a.md.push(`**${on.length} ${on.length === 1 ? 'Person' : 'Personen'} ${roles && roles.length ? '(' + roles.join(', ') + ') ' : ''}im Dienst** (${sh.id ? sh.name : 'Übergabe'}): ${parts.join(', ')}.`, '');
+      a.head = `${on.length} ${on.length === 1 ? 'Person' : 'Personen'} ${roles && roles.length ? '(' + roles.join(', ') + ') ' : ''}im Dienst – ${parts.join(', ')}`;
       const order = { working: 0, driving: 0, walking: 1, idle: 2, break: 3 };
       const sorted = on.slice().sort((x, y) => (order[x.state] - order[y.state]) || x.id.localeCompare(y.id));
       const actOf = (p) => (p.state === 'idle' ? (/^bereit$/i.test(p.activity || '') ? 'verfügbar' : p.activity) : actWhere(p.activity, p.state === 'break' ? '' : whereOf(p)));
@@ -1558,9 +1588,11 @@
   function ansQuality(c) {
     const a = A('quality'), k = c.k(), t = c.t, d0 = Math.floor(t / DAY) * DAY;
     const by = k.scrapBy || {};
-    a.md.push(`**Qualität heute:** FPY **${pct(k.fpy, 1)}** – ${nm(k.good)} Gutteile, ${nm(k.scrap)} Ausschuss${k.scrap ? ' (' + Object.keys(by).filter(x => by[x]).map(x => x + ' ' + by[x]).join(', ') + ')' : ''}.`);
+    a.eyebrow = 'Qualität · heute';
+    a.head = !(k.good + k.scrap > 0) ? 'Heute noch keine Teile gefertigt' : `FPY heute ${pct(k.fpy, 1)} – ${nm(k.scrap)} Ausschuss`;
+    a.md.push(`${nm(k.good)} Gutteile (je Arbeitsgang gezählt), ${nm(k.scrap)} Ausschuss${k.scrap ? ' (' + Object.keys(by).filter(x => by[x]).map(x => x + ' ' + by[x]).join(', ') + ')' : ''}.`);
     a.stats = [
-      { l: 'FPY heute', v: pct(k.fpy, 1), s: 'gut / alle je AG', c: k.fpy >= 0.98 ? 'ok' : 'warn' },
+      { l: 'FPY heute', v: k.good + k.scrap > 0 ? pct(k.fpy, 1) : '–', s: k.good + k.scrap > 0 ? 'gut / alle je AG' : 'noch keine Teile', c: !(k.good + k.scrap > 0) ? '' : k.fpy >= 0.98 ? 'ok' : 'warn' },
       { l: 'Ausschuss', v: nm(k.scrap) + ' Stk', s: Object.keys(by).filter(x => by[x]).map(x => x + ' ' + by[x]).join(' · ') || 'heute', c: k.scrap ? 'warn' : 'ok' },
       { l: 'Erstteile i.O.', v: nm(k.fpiOk || 0) + ' / ' + nm((k.fpiOk || 0) + (k.fpiNok || 0)), s: 'geprüft heute', c: k.fpiNok ? 'warn' : 'ok' },
     ];
@@ -1601,6 +1633,7 @@
     } else if (fpiWait.length) rec = `Erstteilprüfung an ${fpiWait.map(m => m.id).join(', ')} vor Losprüfungen ziehen – die Maschine steht bis zur Freigabe.`;
     else if (by['Werkzeugbruch']) rec = 'Werkzeugbruch-Ausschuss prüfen: Schnittwerte und Standzeit-Vorgaben der betroffenen Werkzeuge kontrollieren.';
     else rec = 'Prozess stabil – keine Maßnahme nötig.';
+    a.sev = spcOpen.length || repeat || fpiWait.length ? 'warn' : 'ok';
     a.md.push('', '> **Empfehlung:** ' + rec);
     a.sources = ['Messwerte / SPC je Merkmal', 'Ausschussbuchungen heute', 'Erstteilprüfungen', srcStand()];
     a.followups = repeat ? [`Was macht ${repeat.mid} gerade?`, `Wann ist der nächste Werkzeugwechsel an ${repeat.mid}?`] : ['Wo verlieren wir heute Geld?', 'Wie läuft die Schicht?'];
@@ -1612,7 +1645,9 @@
     const a = A('loss'), k = c.k();
     const L = lossByCause(c);
     const top = L.byMachine.filter(x => x.loss > 0).slice(0, 4);
-    a.md.push(`**Heute bisher ${eur(k.lossEur)} Stillstandskosten** – Maschinenstundensatz × Zeit, in der ein Auftrag eingeplant ist, die Maschine aber nicht produziert (Schichtzeit ohne Pausen).`);
+    a.eyebrow = 'Kosten · heute'; a.sev = 'warn';
+    a.head = `Heute bisher ${eur(k.lossEur)} Stillstandskosten`;
+    a.md.push('Maschinenstundensatz × Zeit, in der ein Auftrag eingeplant ist, die Maschine aber nicht produziert (Schichtzeit ohne Pausen).');
     a.stats = [
       { l: 'Stillstand', v: eur(k.lossEur), s: 'heute', c: 'warn' },
       { l: 'Werkzeuge', v: eur(k.toolCostToday), s: pl(k.toolChangesToday || 0, 'Wechsel', 'Wechsel') },
@@ -1664,7 +1699,7 @@
     const want = Object.keys(CAUSE_LABEL).find(k => q.indexOf(norm(CAUSE_LABEL[k]).split(' ').pop()) >= 0) || (/material/.test(q) ? 'starved' : /bediener/.test(q) ? 'waitOperator' : /werkzeug/.test(q) && /wartet/.test(q) ? 'waitTool' : /stoerung/.test(q) ? 'fault' : /erstteil/.test(q) ? 'firstPiece' : null);
     if (!row || !(row.loss > 0)) { a.md.push(`**${mName(id)}: heute keine Stillstandskosten** – die Maschine hat in der Schichtzeit produziert oder hatte keinen Auftrag.`); a.sources = ['Stillstandskosten je Maschine', srcStand()]; return done(a); }
     a.md.push(`**${mName(id)}: heute ${eur(row.loss)} Stillstandskosten** – ${durR(row.lossSec)} mit Auftrag ohne Produktion in der Schichtzeit (Satz ${eur(mv.rate)}/h).`, '');
-    for (const x of row.causes) a.md.push(`- **${CAUSE_LABEL[x.state]}**: ca. ${eur(x.eur)} (${durR(x.sec)})`);
+    for (const x of row.causes.filter(y => y.eur >= 1 || y.sec >= 300)) a.md.push(`- **${CAUSE_LABEL[x.state]}**: ca. ${eur(x.eur)} (${durR(x.sec)})`);
     if (want && !row.causes.some(x => x.state === want)) {
       const allDay = (mv.stateTimes && mv.stateTimes[want]) || 0;
       a.md.push('', `**${CAUSE_LABEL[want]} an ${id}:** heute ${allDay > 0 ? 'nur außerhalb der Schichtzeit bzw. in Pausen (' + durR(allDay) + ') – das zählt nicht als Stillstandskosten' : 'nicht aufgetreten'}.`);
@@ -1716,8 +1751,12 @@
     const h = WF.sim.history, d0 = Math.floor(c.t / DAY) * DAY;
     let peak = null;
     if (h && h.t) for (let i = 0; i < h.t.length; i++) if (h.t[i] >= d0 && h.powerKw[i] != null && (!peak || h.powerKw[i] > peak.v)) peak = { v: h.powerKw[i], t: h.t[i] };
-    a.md.push(`**Energie heute: ${nm(k.energyKwh, 0)} kWh**, aktuelle Leistung **${nm(k.powerKw, 0)} kW**${peak ? ` (Spitze heute ${nm(peak.v, 0)} kW um ${clk(peak.t)}, 5-min-Mittel)` : ''}.`, '');
-    for (const m of mvs.slice(0, 5)) a.md.push(`- **${mName(m.id)}**: ${nm(m.energyKwhToday, 0)} kWh heute, jetzt ${m.powerKw != null ? nm(m.powerKw, 1) + ' kW gemessen' : nm(m.powerKwEst, 1) + ' kW (Modellwert, nicht angebunden)'} – ${stLabel(m.state)}`);
+    const pr = ENERGY_PRICE(), cost = (k.energyKwh || 0) * pr.v;
+    a.eyebrow = 'Energie · heute'; a.sev = 'info';
+    a.head = `Energie heute: ${nm(k.energyKwh, 0)} kWh – ca. ${eur(cost)}`;
+    a.md.push(`Aktuelle Leistung ${nm(k.powerKw, 0)} kW${peak ? `, Spitze heute ${nm(peak.v, 0)} kW um ${clk(peak.t)} (5-min-Mittel)` : ''}. Kosten mit ${U.fmtEur(pr.v, 2)}/kWh${pr.assumed ? ' (Annahme Industrietarif – im Profil hinterlegbar)' : ''}.`, '');
+    a.stats = [{ l: 'Energie', v: nm(k.energyKwh, 0) + ' kWh', s: 'heute' }, { l: 'Kosten', v: eur(cost), s: U.fmtEur(pr.v, 2) + '/kWh' }, { l: 'Leistung', v: nm(k.powerKw, 0) + ' kW', s: peak ? 'Spitze ' + nm(peak.v, 0) + ' kW' : 'jetzt' }];
+    for (const m of mvs.slice(0, 5)) a.md.push(`- **${mName(m.id)}**: ${nm(m.energyKwhToday, 0)} kWh (ca. ${eur((m.energyKwhToday || 0) * pr.v)}) heute, jetzt ${m.powerKw != null ? nm(m.powerKw, 1) + ' kW gemessen' : nm(m.powerKwEst, 1) + ' kW (Modellwert, nicht angebunden)'} – ${stLabel(m.state)}`);
     const idleDraw = c.mvs().filter(m => m.state !== 'running' && (m.powerKw != null ? m.powerKw : m.powerKwEst) >= 3);
     if (idleDraw.length) a.md.push('', `Grundlast ohne Produktion: ${idleDraw.map(m => `${m.id} ${nm(m.powerKw != null ? m.powerKw : m.powerKwEst, 1)} kW (${stLabel(m.state)})`).join(', ')} – zusammen ${nm(idleDraw.reduce((s, m) => s + (m.powerKw != null ? m.powerKw : m.powerKwEst), 0), 0)} kW.`);
     const unm = c.mvs().filter(m => m.powerKw == null);
@@ -1750,7 +1789,9 @@
     const a = A('logistics');
     const agvs = Object.values(S().agvs).filter(x => !ids || !ids.length || ids.indexOf(x.id) >= 0);
     const trs = Object.values(S().transports || {}).filter(x => x.status !== 'done');
-    a.md.push(`**Logistik:** ${agvs.length === 1 ? agvs[0].name : agvs.length + ' AGVs'}, ${pl(trs.length, 'offener Transport', 'offene Transporte')}, heute ${nm(c.k().transportsToday)} erledigt.`, '');
+    a.eyebrow = 'Logistik · AGV und Stapler'; a.sev = 'info';
+    a.head = `${agvs.length === 1 ? agvs[0].name : agvs.length + ' AGVs'}, ${pl(trs.length, 'offener Transport', 'offene Transporte')}`;
+    a.md.push(`Heute ${nm(c.k().transportsToday)} Transporte erledigt.`, '');
     for (const v of agvs) {
       const ct = v.load ? S().containers[v.load] : null;
       a.md.push(`- **${v.name}** – ${label('agv', v.state)}, Akku ${nm(v.battery, 0)} %${ct ? `, geladen: ${stk(ct.qty)} ${ct.orderId}` : ''}${v.taskLabel ? ' · ' + v.taskLabel : ''}`);
@@ -1930,7 +1971,7 @@
     for (const m of mvs.filter(x => x.state === 'setup')) pts.push(`${mName(m.id)} rüstet ${m.order ? m.order.id + ' AG ' + m.order.seq : ''} – ${m.cause}.`);
     const open = c.notifs().filter(n => n.status === 'open' && (n.sev === 'crit' || n.sev === 'warn') && !/^(fault|wait|fpi|late|stock|missing|spc|ghost|tool):/.test(n.key));
     for (const n of open.slice(0, 4)) pts.push(`${n.title}${n.suggestion ? ' – ' + trimTxt(n.suggestion, 120) : ''}`);
-    a.md.push('', '### Offene Punkte');
+    a.md.push('', '### Störungen und Wartezeiten');
     if (pts.length) for (const p of pts) a.md.push('- ' + p); else a.md.push('- Keine Störung, kein Arbeitsplatz wartet länger als 5 min.');
     // Termine
     const ord = c.open().filter(o => o.risk !== 'ok' && o.eta != null).sort((x, y) => x.slackSec - y.slackSec);
@@ -1999,7 +2040,6 @@
     const ov = ansOverview(c);
     a.eyebrow = `Schichtbriefing · ${U.fmtDayClock(t)} · ${sh.id ? sh.name + ' bis ' + clk(sh.endsAt) : 'Geisterschicht'}`;
     a.head = ov.head; a.sev = ov.sev;
-    a.md.push(b.headline.replace(/^[^:]+:\s*/, '').replace(/^./, ch => ch.toUpperCase()), '');
     a.stats = ov.stats;
     // Termine
     const open = c.open().filter(o => o.eta != null);
@@ -2066,7 +2106,7 @@
     if (kind === 'spc' && n.spc) a.md.push(`- Werkzeugverschleiß verschiebt das Maß; Mittelwert der letzten 8 Teile wandert zur Toleranzgrenze. Vorgeschlagene Korrektur ${nm(n.spc.value, 4)} mm.`);
     const own = /^(fault|late|wait)$/.test(kind);
     if (sub) {
-      if (sub.head) a.md.push(`**${sub.head}.**`);
+      if (sub.head && kind !== 'fault') a.md.push(`**${sub.head}.**`);
       a.md.push(...sub.md.filter(l => !REC_RE.test(l)));
       if (sub.slots) a.slots = Object.assign(a.slots || {}, sub.slots);
       if (!a.stats && sub.stats) a.stats = sub.stats;
@@ -2087,11 +2127,277 @@
     return done(a);
   }
 
+  // ------------------------------------------------------------------ Weitere Fragen: Jetzt tun, Rangliste, fällig, Anzahl, Schicht, Fremdbearbeitung, Cpk, Kapazität, Stillstand
+  function ansTodo(c) {
+    const a = A('todo'), todo = todoList(c), sh = WF.sim.shift();
+    a.eyebrow = 'Jetzt tun · ' + WF.sim.clock();
+    const mp = !sh.id ? morningPlan(c) : null;
+    if (!todo.length && !mp) {
+      a.sev = 'ok'; a.head = 'Gerade ist kein Eingriff nötig';
+      a.md.push('Keine Störung, kein Arbeitsplatz wartet länger als 5 min, kein Termin verspätet, Material unter Mindestbestand ist bestellt.');
+      const ch = plannedChanges(c, c.t + 2 * 3600);
+      a.md.push('', `> **Empfehlung:** ${ch.length ? `Nächster Fokus: Werkzeugwechsel ${clk(ch[0].t)} an ${mName(ch[0].machine)} vorbereiten.` : 'Engpass im Blick behalten („Was ist der Engpass?“).'}`);
+    } else {
+      a.sev = todo[0] && todo[0].sev === 'crit' ? 'crit' : 'warn';
+      a.head = mp ? 'Zum Schichtbeginn: Stopps abarbeiten' : /^(FA-|M\d|QS)/.test(todo[0].short) ? `Zuerst ${todo[0].short.replace(/\.$/, '')}` : `Zuerst: ${todo[0].short.replace(/\.$/, '')}`;
+      const list = (mp ? [mp] : []).concat(todo.slice(0, 5).map(x => x.text));
+      a.md.push('Reihenfolge nach Wirkung: Störungen, wartende Maschinen, verspätete Aufträge, dann Vorbereitung.', '');
+      list.forEach((x, i) => a.md.push(`${i + 1}. ${x}`));
+      for (const x of todo.slice(0, 3)) for (const ac of x.actions || []) addAction(a, ac);
+      a.md.push('', `> **Empfehlung:** Mit Punkt 1 beginnen${list.length > 1 ? ' – die übrigen Punkte hängen nicht davon ab und können parallel verteilt werden' : ''}.`);
+    }
+    a.sources = ['Maschinenstatus', 'Terminberatung je Auftrag', 'Werkzeugplanung', 'Meldungen', srcStand()];
+    a.followups = ['Wie läuft die Schicht?', 'Welche Aufträge sind gefährdet und warum?', 'Schreib mir die Schichtübergabe'];
+    return done(a);
+  }
+  function ansRanking(c, q) {
+    const a = A('ranking');
+    const best = /\bbest|hoechst|meist|groesst/.test(q) && !/schlecht|niedrig|wenigst|geringst/.test(q);
+    const metric = /stillstand|verlust|kost|geld/.test(q) ? 'loss' : /energie|strom|verbrauch/.test(q) ? 'energy' : /ausschuss|qualitaet|fpy/.test(q) ? 'scrap' : 'oee';
+    const L = lossByCause(c);
+    let rows = c.mvs().map(mv => {
+      const oe = mv.oeeToday || {};
+      return { mv, v: metric === 'oee' ? oe.oee : metric === 'loss' ? mv.lossEurToday || 0 : metric === 'energy' ? mv.energyKwhToday || 0 : mv.scrapToday || 0, oe };
+    }).filter(r => r.v != null);
+    const higherIsBad = metric !== 'oee';
+    rows.sort((x, y) => (best !== higherIsBad ? y.v - x.v : x.v - y.v));
+    if (metric === 'oee' && !best) rows = rows.filter(r => r.oe.plannedSec > 0 || r.v > 0);
+    const fmtV = (v) => (metric === 'oee' ? pct(v, oeeDec(v)) : metric === 'loss' ? eur(v) : metric === 'energy' ? nm(v, 0) + ' kWh' : stk(v));
+    const what = { oee: 'OEE heute', loss: 'Stillstandskosten heute', energy: 'Energie heute', scrap: 'Ausschuss heute' }[metric];
+    a.eyebrow = 'Rangliste · ' + what;
+    const top = rows[0];
+    if (!top) { a.head = 'Keine Werte für heute'; a.md.push('Heute gab es noch keine Planzeit.'); return done(a); }
+    a.sev = metric === 'oee' ? (top.v >= TARGET_OEE ? 'ok' : 'warn') : 'info';
+    a.head = `${best ? (metric === 'oee' ? 'Beste' : 'Höchste') : (metric === 'oee' ? 'Schlechteste' : 'Höchste')} ${what.replace(' heute', '')}: ${mName(top.mv.id)} mit ${fmtV(top.v)}`;
+    if (metric === 'oee') {
+      const oe = top.oe, comp = [['Verfügbarkeit', oe.availability], ['Leistung', oe.performance], ['Qualität', oe.quality]].filter(x => x[1] != null);
+      const low = comp.slice().sort((x, y) => x[1] - y[1])[0];
+      const row = L.byMachine.find(x => x.mv.id === top.mv.id);
+      a.md.push(`${comp.map(x => x[0] + ' ' + pct(x[1], 1)).join(' × ')}${low ? ` – größter Verlust bei der ${low[0]}` : ''}${row && row.causes[0] ? ` (vor allem ${CAUSE_LABEL[row.causes[0].state]}, ${durR(row.causes[0].sec)})` : ''}.`);
+    }
+    a.md.push('', '### ' + what + ' je Arbeitsplatz');
+    const shown = rows.slice(0, 6);
+    SLOT(a, 'bars', shown.map(r => `- ${mName(r.mv.id)}: ${fmtV(r.v)}`).join('\n'), { max: metric === 'oee' ? 1 : null, rows: shown.map(r => ({ ent: { kind: 'machine', id: r.mv.id }, label: station(r.mv.id).short, v: r.v, vTxt: fmtV(r.v), sub: metric === 'oee' ? `V ${pct(r.oe.availability, 0)} · L ${pct(r.oe.performance, 0)} · Q ${pct(r.oe.quality, 0)} · jetzt ${stLabel(r.mv.state)}` : `jetzt ${stLabel(r.mv.state)}`, c: metric === 'oee' ? (r.v >= TARGET_OEE ? 'var(--st-run)' : 'var(--st-wait)') : 'var(--info)' })) });
+    const row = L.byMachine.find(x => x.mv.id === top.mv.id);
+    a.md.push('', '> **Empfehlung:** ' + (!best && row && row.causes[0] ? `An ${top.mv.id} zuerst ${CAUSE_LABEL[row.causes[0].state]} angehen: ${CAUSE_ADVICE[row.causes[0].state]}` : 'Keine Maßnahme nötig.'));
+    a.entity = { kind: 'machine', id: top.mv.id };
+    a.sources = ['Kennzahlen je Maschine heute', 'Zustandsband (Schichtzeit)', srcStand()];
+    a.followups = [`Was macht ${top.mv.id} gerade?`, 'Wo verlieren wir heute Geld?'];
+    return done(a);
+  }
+  function ansDue(c, q) {
+    const a = A('due'), t = c.t;
+    const off = /uebermorgen/.test(q) ? 2 : /morgen/.test(q) ? 1 : 0;
+    const d0 = Math.floor(t / DAY) * DAY + off * DAY, d1 = d0 + DAY;
+    const dayTxt = off === 0 ? 'heute' : off === 1 ? 'morgen' : U.fmtDay(d0);
+    const all = c.ovs();
+    const due = all.filter(o => o.due >= d0 && o.due < d1).sort((x, y) => x.due - y.due);
+    const fin = all.filter(o => o.status !== 'fertig' && o.eta != null && o.eta >= d0 && o.eta < d1 && due.indexOf(o) < 0).sort((x, y) => x.eta - y.eta);
+    a.eyebrow = `Termine · ${dayTxt}`;
+    const lateDue = due.filter(o => o.status !== 'fertig' && o.slackSec < 0);
+    a.sev = lateDue.length ? 'warn' : 'ok';
+    a.head = due.length ? `${dayTxt === 'heute' ? 'Heute' : uc1(dayTxt)} ${due.length === 1 ? 'ist 1 Auftrag' : 'sind ' + due.length + ' Aufträge'} fällig${lateDue.length ? ' – ' + lateDue.length + ' davon verspätet' : ''}` : `${uc1(dayTxt)} ist kein Auftrag fällig`;
+    for (const o of due) a.md.push(`- **${o.id}** ${o.part.name} (${custShort(o.customer)}), Termin ${clk(o.due)}: ${o.status === 'fertig' ? 'fertig ' + dueTxt(o.doneT) + (o.onTime ? ' – termingerecht' : '') : 'Prognose ' + dueTxt(o.eta) + ' – ' + slackTxt(o.slackSec)}.`);
+    if (fin.length) a.md.push('', `${uc1(dayTxt)} fertig (Termin später): ${fin.slice(0, 6).map(o => `${o.id} ca. ${clk(o.eta)}`).join(', ')}.`);
+    a.md.push('', '> **Empfehlung:** ' + (lateDue.length ? `${lateDue[0].id}: ${adviceText(c, lateDue[0]).text}` : due.length ? 'Alle fälligen Aufträge halten – Versand vorbereiten.' : 'Keine Maßnahme nötig.'));
+    a.sources = ['Aufträge und Liefertermine', 'Prognose', srcStand()];
+    a.followups = ['Welche Aufträge sind gefährdet und warum?', off ? 'Welche Aufträge sind heute fällig?' : 'Welche Aufträge sind morgen fällig?'];
+    return done(a);
+  }
+  function ansCounts(c) {
+    const a = A('counts'), all = c.ovs(), open = all.filter(o => o.status !== 'fertig');
+    const inW = open.filter(o => o.status === 'in Arbeit'), rel = open.filter(o => o.status !== 'in Arbeit');
+    const late = open.filter(o => o.risk === 'spät'), tight = open.filter(o => o.risk === 'knapp'), eil = open.filter(o => o.priority === 'eil');
+    const d0 = Math.floor(c.t / DAY) * DAY, doneToday = all.filter(o => o.status === 'fertig' && o.doneT >= d0);
+    a.eyebrow = 'Aufträge · Übersicht'; a.sev = late.length ? 'warn' : 'ok';
+    a.head = `${open.length} Aufträge offen – ${inW.length} in Arbeit, ${rel.length} freigegeben`;
+    a.stats = [{ l: 'Offen', v: nm(open.length), s: `${inW.length} in Arbeit` }, { l: 'Verspätet', v: nm(late.length), s: late[0] ? late[0].id : '–', c: late.length ? 'crit' : 'ok' }, { l: 'Knapp', v: nm(tight.length), s: '< 4 h Puffer', c: tight.length ? 'warn' : 'ok' }, { l: 'Heute fertig', v: nm(doneToday.length), s: 'Aufträge' }];
+    a.md.push(`${eil.length ? pl(eil.length, 'Eilauftrag', 'Eilaufträge') + ' (' + listJoin(eil.map(o => o.id)) + '). ' : ''}${all.length - open.length ? nm(all.length - open.length) + ' Aufträge fertig, davon ' + doneToday.length + ' heute.' : 'Heute noch kein Auftrag fertig.'} Verspätet: ${late.length ? listJoin(late.map(o => o.id)) : 'keiner'}; knapp: ${tight.length ? listJoin(tight.map(o => o.id)) : 'keiner'}.`);
+    a.sources = ['Auftragsbestand', 'Prognose', srcStand()];
+    a.followups = ['Welche Aufträge sind gefährdet und warum?', 'Welche Aufträge sind heute fällig?'];
+    return done(a);
+  }
+  function ansShift(c, q) {
+    const a = A('shift'), t = c.t, sh = WF.sim.shift();
+    const want = /spaet/.test(q) ? 'S' : /frueh/.test(q) ? 'F' : /naechst|kommende|uebernaechst/.test(q) ? (sh.id === 'F' ? 'S' : 'F') : sh.id || 'F';
+    const def = PROF().shifts.find(x => x.id === want);
+    const d0 = Math.floor(t / DAY) * DAY;
+    let start = d0 + U.hm(def.start), end = d0 + U.hm(def.end);
+    if (end <= t) { let d = Math.floor(t / DAY) + 1; while (d % 7 >= 5) d++; start = d * DAY + U.hm(def.start); end = d * DAY + U.hm(def.end); }
+    const running = sh.id === want;
+    const crew = Object.values(S().people).filter(p => p.shift === want);
+    a.eyebrow = 'Schicht · ' + def.name;
+    a.sev = 'info';
+    a.head = running ? `${def.name} läuft bis ${clk(sh.endsAt)} – ${crew.length} Personen` : `${def.name} ab ${dueTxt(start)} – ${crew.length} Personen`;
+    a.md.push(running ? `Noch ${durR(sh.endsAt - t)} bis Schichtende; Pausen ${def.breaks.map(b => b[0] + '–' + b[1]).join(', ')}.` : `Beginnt in ${durR(start - t)} (${def.start}–${def.end}, Pausen ${def.breaks.map(b => b[0] + '–' + b[1]).join(', ')}).`, '');
+    for (const p of crew.slice().sort((x, y) => x.role.localeCompare(y.role))) a.md.push(`- **${p.name}** (${p.role})${p.machines && p.machines.length ? ' – ' + p.machines.join(', ') : ''}${running ? ' · ' + (p.state === 'idle' ? 'verfügbar' : label('person', p.state)) : ''}`);
+    a.md.push('', `Besetzung: ${roleSummary(crew)}.`);
+    if (want === 'S' && !crew.some(p => /^Instandhalt/.test(p.role))) a.md.push(`In der Spätschicht keine Instandhaltung – Reparaturen übernimmt ${crew.filter(p => p.skills.indexOf('repair') >= 0).map(p => sn(p.name)).join(', ') || 'die Schichtleitung'}.`);
+    a.sources = ['Schichtplan', 'Personalstamm', srcStand()];
+    a.followups = ['Wer ist gerade wo?', 'Schreib mir die Schichtübergabe'];
+    return done(a);
+  }
+  function ansExt(c, q, E) {
+    const a = A('ext'), t = c.t;
+    const rows = [];
+    for (const o of c.open()) {
+      const fops = (c.fc().orders[o.id] || {}).ops || [];
+      o.ops.forEach((op, i) => { if (op.station === 'EXT' && !op.complete) rows.push({ o, op, fe: fops[i] || null }); });
+    }
+    const m = /(\d+|ein|einen|zwei|drei)\s*(tag|tage|tagen)/.exec(q);
+    const days = m ? (NUMW[m[1]] || Number(m[1]) || 1) : /tag spaeter|tag verspaet/.test(q) ? 1 : 0;
+    const delay = days ? days * DAY : E && E.hours && /spaeter|verzoeger|verspaet/.test(q) ? E.hours * 3600 : 0;
+    a.eyebrow = 'Fremdbearbeitung · Härterei';
+    if (!rows.length) { a.sev = 'ok'; a.head = 'Keine offene Fremdbearbeitung'; a.md.push('Alle Lose sind zurück bzw. kein offener Auftrag hat einen externen Arbeitsgang.'); return done(a); }
+    const back = (r) => (r.fe && r.fe.lastReturn != null ? r.fe.lastReturn : r.op.ext && r.op.ext.lastReturnT ? r.op.ext.lastReturnT : r.fe ? r.fe.end : null);
+    rows.sort((x, y) => (back(x) || 0) - (back(y) || 0));
+    if (!delay) {
+      a.sev = rows.some(r => r.o.risk === 'spät') ? 'warn' : 'info';
+      const first = rows.find(r => r.op.ext && r.op.ext.atPartnerQty > 0) || rows[0];
+      a.head = first.op.ext && first.op.ext.returnT ? `Nächster Rücklauf: ${first.o.id} ca. ${dueTxt(first.op.ext.returnT)}` : `${pl(rows.length, 'Auftrag', 'Aufträge')} mit offener Fremdbearbeitung`;
+      for (const r of rows) a.md.push(`- **${r.o.id}** AG ${r.op.seq} ${r.op.ext ? r.op.ext.process : r.op.op} bei ${r.op.ext ? r.op.ext.partner : 'extern'}: ${r.op.ext ? r.op.ext.returnText : '–'}${back(r) ? '; letzter Rücklauf ca. ' + dueTxt(back(r)) : ''} – Auftrag ${slackTxt(r.o.slackSec)}.`);
+      a.md.push('', '> **Empfehlung:** ' + (rows.some(r => r.o.risk === 'spät') ? `${rows.find(r => r.o.risk === 'spät').o.id}: Expressdurchlauf bei ${rows.find(r => r.o.risk === 'spät').op.ext.partner} anfragen, wenn die Härterei auf dem kritischen Weg liegt.` : 'Lose pünktlich zum Lieferfenster bereitstellen – Rückläufe passen zu den Terminen.'));
+    } else {
+      const res = rows.map(r => { const after = r.o.eta + delay; return { r, after, slack: r.o.due - after }; });
+      const flips = res.filter(x => x.slack < 0 && x.r.o.slackSec >= 0);
+      a.sev = flips.length ? 'crit' : 'ok';
+      a.head = flips.length ? `${pl(flips.length, 'Termin kippt', 'Termine kippen')}, wenn die Härterei ${durR(delay)} später liefert` : `Kein Termin kippt bei ${durR(delay)} Verzug der Härterei`;
+      a.md.push(`Annahme: alle offenen Lose kommen ${durR(delay)} später zurück; die Folgeschritte verschieben sich entsprechend (obere Grenze – Puffer in der Kette fangen einen Teil auf).`, '');
+      for (const x of res) a.md.push(`- **${x.r.o.id}** (${custShort(x.r.o.customer)}): Prognose ${dueTxt(x.r.o.eta)} → **${dueTxt(x.after)}**; Termin ${dueTxt(x.r.o.due)} ${x.slack < 0 ? (x.r.o.slackSec < 0 ? 'bleibt verspätet (' + durR(-x.slack) + ')' : '**kippt (' + durR(-x.slack) + ' Verzug)**') : 'hält (' + slackTxt(x.slack) + ')'}.`);
+      a.impact = { title: `Härterei ${durR(delay)} später`, rows: res.slice(0, 6).map(x => ({ id: x.r.o.id, label: 'AG ' + x.r.op.seq, before: x.r.o.eta, after: x.after, due: x.r.o.due })) };
+      a.md.push('', '> **Empfehlung:** ' + (flips.length ? `Für ${listJoin(flips.map(x => x.r.o.id))} den Liefertermin der Härterei schriftlich bestätigen lassen und ${listJoin([...new Set(flips.map(x => custShort(x.r.o.customer)))])} vorab informieren.` : 'Die Puffer reichen – keine Maßnahme nötig.'));
+    }
+    a.sources = ['Fremdbearbeitungs-Lose (Abholung, Rücklauf)', 'Prognose', srcStand()];
+    a.followups = ['Was wäre, wenn die Härterei einen Tag später liefert?', 'Welche Aufträge sind gefährdet und warum?'];
+    return done(a);
+  }
+  /** Prozessfähigkeit eines Merkmals – gleiche Rechnung wie die Qualitätsansicht (WF.quality.stats), sonst identisch nachgerechnet */
+  function capOf(key) {
+    if (WF.quality && typeof WF.quality.stats === 'function') { try { const d = WF.quality.stats(key); if (d) return d; } catch (e) { /* eigene Rechnung */ } }
+    const [oid, sq] = key.split('/'), ch = WF.sim.charOf ? WF.sim.charOf(oid, Number(sq)) : null;
+    const arr = ((S().measurements || {})[key] || []).filter(p => !p.fpi), v = arr.map(p => p.v), N = v.length;
+    if (!ch || N < 2) return { N, enough: false };
+    const lsl = ch.lsl != null ? ch.lsl : ch.nominal + ch.tolMinus, usl = ch.usl != null ? ch.usl : ch.nominal + ch.tolPlus;
+    const mean = v.reduce((x, y) => x + y, 0) / N; let mr = 0; for (let i = 1; i < N; i++) mr += Math.abs(v[i] - v[i - 1]);
+    const sigma = mr / (N - 1) / 1.128, enough = N >= 10 && sigma > 0;
+    return { N, enough, mean, cp: enough ? (usl - lsl) / (6 * sigma) : null, cpk: enough ? Math.min(usl - mean, mean - lsl) / (3 * sigma) : null };
+  }
+  function ansCapability(c, mid) {
+    const a = A('quality');
+    const mvs = mid ? [c.mv(mid)].filter(Boolean) : c.mvs().filter(m => m.order);
+    const rows = [];
+    for (const mv of mvs) { if (!mv.order) continue; const key = mv.order.id + '/' + mv.order.seq, ch = WF.sim.charOf ? WF.sim.charOf(mv.order.id, mv.order.seq) : null; const d = capOf(key); if (d) rows.push({ mv, key, ch, d }); }
+    a.eyebrow = 'Qualität · Prozessfähigkeit';
+    if (!rows.length) { a.head = mid ? `${mName(mid)}: kein laufendes Merkmal` : 'Keine Messreihen im laufenden Betrieb'; a.md.push('Cp/Cpk werden aus den Serienmesswerten des laufenden Arbeitsgangs berechnet.'); return done(a); }
+    const r0 = rows.find(r => r.d.enough) || rows[0];
+    const cn = (r) => (r.ch ? r.ch.name : 'Hauptmerkmal');
+    if (mid) {
+      const d = r0.d;
+      a.sev = !d.enough ? 'info' : d.cpk >= 1.33 ? 'ok' : d.cpk >= 1 ? 'warn' : 'crit';
+      a.head = d.enough ? `${mName(mid)}: Cpk ${nm(d.cpk, 2)} – ${d.cpk >= 1.33 ? 'fähig' : d.cpk >= 1 ? 'bedingt fähig' : 'nicht fähig'}` : `${mName(mid)}: noch zu wenig Messwerte für Cpk`;
+      a.md.push(d.enough ? `Merkmal ${cn(r0)} (${r0.mv.order.id} AG ${r0.mv.order.seq}): Cp ${nm(d.cp, 2)}, Cpk ${nm(d.cpk, 2)} aus ${d.N} Serienwerten${d.N < 30 ? ' – vorläufig, belastbar ab ca. 30 Werten' : ''}. Ziel für Serienfreigabe: Cpk ≥ 1,33.` : `Für Cp/Cpk werden mindestens 10 Serienwerte benötigt (aktuell ${d.N}).`);
+      if (d.enough) a.stats = [{ l: 'Cpk', v: nm(d.cpk, 2), s: 'Ziel ≥ 1,33', c: a.sev }, { l: 'Cp', v: nm(d.cp, 2), s: 'Streuung' }, { l: 'Messwerte', v: nm(d.N), s: 'Serie, ohne Erstteil' }];
+      if (d.enough && d.cp - d.cpk > 0.3) a.md.push('', 'Cp deutlich über Cpk: Die Streuung passt, der Prozess liegt aber nicht mittig – eine Werkzeugkorrektur zentriert ihn.');
+      a.md.push('', '> **Empfehlung:** ' + (!d.enough ? 'Weitere Teile abwarten.' : d.cpk >= 1.33 ? 'Keine Maßnahme nötig.' : d.cp - d.cpk > 0.3 ? `Prozess zentrieren (Werkzeugkorrektur an ${mid}) – siehe Qualitätsansicht.` : `Streuung reduzieren: Werkzeugzustand und Spannung an ${mid} prüfen.`));
+      a.entity = { kind: 'machine', id: mid };
+    } else {
+      const ok = rows.filter(r => r.d.enough);
+      const low = ok.filter(r => r.d.cpk < 1.33).sort((x, y) => x.d.cpk - y.d.cpk);
+      a.sev = low.some(r => r.d.cpk < 1) ? 'crit' : low.length ? 'warn' : 'ok';
+      a.head = low.length ? `${low.length} von ${ok.length} Merkmalen unter Cpk 1,33` : `Alle ${ok.length} laufenden Merkmale fähig (Cpk ≥ 1,33)`;
+      for (const r of ok.sort((x, y) => x.d.cpk - y.d.cpk)) a.md.push(`- **${r.mv.id}** ${cn(r)} (${r.mv.order.id}): Cpk ${nm(r.d.cpk, 2)}, Cp ${nm(r.d.cp, 2)} aus ${r.d.N} Werten`);
+      a.md.push('', '> **Empfehlung:** ' + (low.length ? `${low[0].mv.id} zuerst prüfen (Cpk ${nm(low[0].d.cpk, 2)}).` : 'Keine Maßnahme nötig.'));
+    }
+    a.sources = ['Messwerte je Merkmal (Serie)', 'Toleranzen laut Zeichnung', 'gleiche Rechnung wie Qualitätsansicht', srcStand()];
+    a.followups = ['Wie steht es um die Qualität heute?', mid ? `Was macht ${mid} gerade?` : 'Wie läuft die Schicht?'];
+    return done(a);
+  }
+  const GROUP_LABEL = { turn: 'Drehen', mill: 'Fräsen' };
+  function ansCapacity(c, q) {
+    const a = A('capacity'), rows = loadRows(c), t = c.t;
+    const freeAt = (id) => Math.max(t, ...(c.fc().machines[id] || []).map(e => e.end));
+    const ms = PROF().machines.filter(id => station(id).kind === 'machine').map(id => ({ id, st: station(id), free: freeAt(id), work: (rows.find(r => r.id === id) || { work: 0 }).work }));
+    ms.sort((x, y) => x.free - y.free);
+    const turn = /welle|bolzen|drehteil|dreh|achs/.test(q), mill = /gehaeuse|platte|fraes|block/.test(q);
+    const rel = ms.filter(m => (turn ? TYPE_GROUP[m.st.type] === 'turn' : mill ? TYPE_GROUP[m.st.type] === 'mill' : true));
+    a.eyebrow = 'Kapazität · neuer Auftrag';
+    const first = rel[0];
+    a.sev = first && first.free - t < 4 * 3600 ? 'ok' : 'warn';
+    const dayEnd = Math.floor(t / DAY) * DAY + 22 * 3600, grp = turn ? 'Dreh' : mill ? 'Fräs' : '';
+    a.head = !first ? 'Keine passende Maschine' : /heute/.test(q) && first.free > dayEnd ? `Heute keine freie ${grp ? grp + '-' : ''}Kapazität – frühestens ${mName(first.id)} ab ${dueTxt(first.free)}` : `${turn ? 'Drehen' : mill ? 'Fräsen' : 'Frühester freier Platz'}: ${mName(first.id)} frei ab ${dueTxt(first.free)}`;
+    a.md.push('Frei ab = Ende der letzten eingeplanten Belegung laut Plantafel; ein Eilauftrag könnte eingeplante (nicht laufende) Arbeitsgänge überholen.', '');
+    for (const m of rel.slice(0, 5)) a.md.push(`- **${mName(m.id)}** (${GROUP_LABEL[TYPE_GROUP[m.st.type]] || m.st.type}): frei ab ${dueTxt(m.free)} – Vorrat ${hTxt(m.work)}`);
+    const hasKi = (WF.views || []).some(v => v.id === 'ki-auftrag');
+    a.md.push('', '> **Empfehlung:** ' + (hasKi ? 'Zeichnung im KI-Auftrag hochladen – dort werden Arbeitsplan, Durchlaufzeit und frühester Liefertermin gegen die echte Plantafel gerechnet, bevor zugesagt wird.' : 'Arbeitsplan und Durchlaufzeit gegen die Plantafel prüfen, bevor zugesagt wird.'));
+    if (hasKi) addAction(a, { label: 'KI-Auftrag öffnen', desc: 'Zeichnung → Arbeitsplan → Liefertermin gegen die Plantafel', action: { type: 'navigate', view: 'ki-auftrag' }, icon: 'file', quiet: true });
+    a.sources = ['Plantafel (Belegung je Maschine)', 'Arbeitsvorrat', srcStand()];
+    a.followups = ['Was ist der Engpass?', 'Welche Aufträge sind gefährdet und warum?'];
+    return done(a);
+  }
+  function ansIdle(c) {
+    const a = A('idle'), mvs = c.mvs(), sh = WF.sim.shift();
+    const idle = mvs.filter(m => m.state === 'idle'), waits = mvs.filter(m => WAIT[m.state]), faults = mvs.filter(m => m.state === 'fault');
+    const rows = loadRows(c);
+    a.eyebrow = 'Auslastung · ' + WF.sim.clock();
+    a.sev = faults.length ? 'crit' : waits.length > 2 ? 'warn' : 'info';
+    const stand = idle.length + waits.length + faults.length;
+    a.head = stand ? `${stand} von ${mvs.length} Arbeitsplätzen produzieren gerade nicht` : `Alle ${mvs.length} Arbeitsplätze produzieren`;
+    if (!sh.id) a.md.push(`Geisterschicht: bemannte Plätze stehen bis ${dueTxt(sh.endsAt)}; nur autonome Maschinen laufen weiter.`, '');
+    else if (sh.inBreak) a.md.push(`Pause bis ${clk(sh.breakEndsAt)} – bemannte Plätze pausieren nach dem laufenden Teil.`, '');
+    for (const m of idle) {
+      const next = (c.fc().machines[m.id] || []).filter(e => e.start > c.t).sort((x, y) => x.start - y.start)[0];
+      const r = rows.find(x => x.id === m.id);
+      a.md.push(`- **${mName(m.id)}** ohne Auftrag – ${next ? `nächster Arbeitsgang ${next.orderId} AG ${next.seq} ab ca. ${tc(next.start)} (Vorgänger noch in Arbeit)` : 'nichts eingeplant'}${r ? '; Vorrat ' + hTxt(r.work) : ''}.`);
+    }
+    for (const m of waits) a.md.push(`- **${mName(m.id)}** ${lc1(stLabel(m.state))} seit ${durR(m.sinceSec)}: ${causeCore(m)}.`);
+    for (const m of faults) a.md.push(`- **${mName(m.id)}** Störung ${m.fault.code} – Ende ca. ${clk(faultInfo(m).endT)}.`);
+    const free = idle.filter(m => !(c.fc().machines[m.id] || []).length);
+    a.md.push('', '> **Empfehlung:** ' + (waits.length ? `${waits[0].id} zuerst wieder anlaufen lassen: ${waitAdvice(c, waits[0])}` : free.length ? `${listJoin(free.map(m => m.id))} ${free.length === 1 ? 'hat' : 'haben'} nichts eingeplant – freie Kapazität für Verlagerungen vom Engpass oder neue Aufträge.` : 'Die freien Plätze warten auf Teile vom Vorgänger – kein Eingriff nötig.'));
+    a.sources = ['Maschinenstatus', 'Plantafel', 'Arbeitsvorrat', srcStand()];
+    a.followups = ['Was ist der Engpass?', 'Kann ich heute noch einen Eilauftrag annehmen?'];
+    return done(a);
+  }
+  function ansOee(c) {
+    const a = A('oee'), k = c.k(), L = lossByCause(c);
+    a.eyebrow = 'Kennzahl · OEE heute';
+    if (k.oee == null) { a.head = 'Heute noch keine OEE'; a.md.push('Ohne Planzeit (Nacht, Wochenende) gibt es keine Bezugszeit.'); return done(a); }
+    a.sev = k.oee >= TARGET_OEE ? 'ok' : 'warn';
+    a.head = `OEE heute ${pct(k.oee, 1)} – ${k.oee >= TARGET_OEE ? 'über' : 'unter'} dem Ziel von ${pct(TARGET_OEE)}`;
+    const comp = [['Verfügbarkeit', k.availability], ['Leistung', k.performance], ['Qualität', k.quality]];
+    const low = comp.filter(x => x[1] != null).sort((x, y) => x[1] - y[1])[0];
+    a.md.push(`${comp.map(x => x[0] + ' ' + pct(x[1], 1)).join(' × ')} = ${pct(k.oee, 1)}. Größter Verlust: **${low[0]}** (${pct(1 - low[1], 1)} gehen dort verloren).`);
+    a.stats = [{ l: 'OEE', v: pct(k.oee, 1), s: 'Ziel ' + pct(TARGET_OEE), c: a.sev }].concat(comp.map(x => ({ l: x[0], v: pct(x[1], 1), s: x === low ? 'größter Verlust' : '', c: x === low ? 'warn' : '' })));
+    if (L.causes.length) a.md.push('', `Verfügbarkeit kosten vor allem: ${L.causes.slice(0, 3).map(x => `${CAUSE_LABEL[x.state]} ${durR(x.sec)}`).join(', ')}.`);
+    a.md.push('', '> **Empfehlung:** ' + (L.causes[0] ? `Größter Hebel ${CAUSE_LABEL[L.causes[0].state]}: ${CAUSE_ADVICE[L.causes[0].state]}` : 'Keine Maßnahme nötig.'));
+    a.sources = ['Kennzahlen heute (Verfügbarkeit × Leistung × Qualität)', 'Zustandsband', srcStand()];
+    a.followups = ['Welche Maschine hat die schlechteste OEE?', 'Wo verlieren wir heute Geld?'];
+    return done(a);
+  }
+  function ansRate(c, id) {
+    const a = A('loss'), mv = c.mv(id);
+    a.entity = { kind: 'machine', id };
+    a.eyebrow = 'Kosten · Stundensatz'; a.sev = 'info';
+    a.head = `Eine Stunde Stillstand an ${mName(id)} kostet ca. ${eur(mv.rate)}`;
+    a.md.push(`Maschinenstundensatz ${eur(mv.rate)}/h – gezählt wird die Zeit, in der ein Auftrag eingeplant ist, die Maschine aber nicht produziert (Schichtzeit ohne Pausen). Heute bisher ${eur(mv.lossEurToday)}.`);
+    const rank = c.mvs().slice().sort((x, y) => y.rate - x.rate);
+    a.md.push('', `Teuerste Stunden im Werk: ${rank.slice(0, 3).map(m => `${m.id} ${eur(m.rate)}/h`).join(', ')}.`);
+    a.sources = ['Stundensätze (Stammdaten)', 'Stillstandskosten heute', srcStand()];
+    a.followups = [`Was macht ${id} gerade?`, 'Wo verlieren wir heute Geld?'];
+    return done(a);
+  }
+  function ansSmall(q) {
+    const a = A('small');
+    if (/^(danke|vielen dank|merci|super|top|perfekt|passt|ok|okay|alles klar)/.test(q)) { a.head = 'Gern.'; a.md.push('Wenn sich an der Lage etwas ändert, frag einfach erneut – die Antworten kommen immer aus den Live-Daten.'); }
+    else { a.head = 'Grüß Gott!'; a.md.push('Ich beantworte Fragen zur Fertigung aus den Live-Daten – Lage, Termine, Maschinen, Werkzeuge, Material, Personal und Kosten.'); }
+    a.followups = ['Was muss ich jetzt tun?', 'Wie läuft die Schicht?'];
+    return done(a);
+  }
+
   // ------------------------------------------------------------------ Hilfe / Rückfall
   function ansHelp() {
     const a = A('help');
     a.md.push('**Der Copilot beantwortet Fragen aus den Live-Daten der Halle**, zum Beispiel:', '');
-    a.md.push('- **Lage:** „Wie läuft die Schicht?“, „Schreib mir die Schichtübergabe“');
+    a.md.push('- **Lage:** „Wie läuft die Schicht?“, „Was muss ich jetzt tun?“, „Schreib mir die Schichtübergabe“');
     a.md.push('- **Termine:** „Welche Aufträge sind gefährdet und warum?“, „Wo steht FA-24118?“');
     a.md.push('- **Engpass & Was-wäre-wenn:** „Was ist der Engpass?“, „Was passiert, wenn die Studer S33 2 h ausfällt?“');
     a.md.push('- **Maschinen & Werkzeuge:** „Warum wartet M07?“, „Wann ist der nächste Werkzeugwechsel an M05?“');
@@ -2105,7 +2411,9 @@
   function ansFallback(c, text) {
     const a = A('fallback'), k = c.k();
     const mvs = c.mvs();
-    a.md.push('Dazu habe ich im Offline-Modus keine passende Auswertung. Ich kann Lage, Termine, Engpass, Maschinen, Aufträge, Werkzeuge, Material, Personal, Qualität, Kosten, Was-wäre-wenn und die Schichtübergabe aus den Live-Daten beantworten.', '');
+    a.eyebrow = 'Copilot'; a.sev = 'info';
+    a.head = 'Dazu habe ich keine Daten aus der Fertigung';
+    a.md.push('Ich beantworte Fragen zu Lage, Terminen, Engpass, Maschinen, Aufträgen, Werkzeugen, Material, Personal, Qualität, Kosten, Was-wäre-wenn und Schichtübergabe – immer aus den Live-Daten der Halle.', '');
     const nl = c.open().filter(o => o.risk === 'spät').length;
     a.md.push(`Kurz zur Lage: ${mvs.filter(m => m.state === 'running').length} von ${mvs.length} Arbeitsplätzen produzieren, OEE heute ${pct(k.oee, 1)}, ${nl ? pl(nl, 'Auftrag', 'Aufträge') + ' verspätet' : 'kein Auftrag verspätet'}.`);
     a.sources = ['Live-Daten', srcStand()];
@@ -2137,13 +2445,13 @@
       if (!o0) { return ansRisk(c); }
       const o = c.ov(o0);
       if (o.status === 'fertig') { a.md.push(`${o0} ist bereits fertig.`); return done(a); }
-      if (!normal && o.priority === 'eil') { a.md.push(`${o0} ist bereits Eilauftrag.`); return done(a); }
-      a.md.push(normal ? `**${o0} wieder auf normale Priorität setzen** – die Maschinen planen ihn wieder nach Termin ein.` : `**${o0} als Eilauftrag kennzeichnen:** ${o.part.name} (${custShort(o.customer)}), Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)} – ${o.slackSec >= 0 ? 'Puffer ' + dur0(o.slackSec) : dur0(o.slackSec) + ' Verzug'}. Jede Maschine zieht ihn beim nächsten Auftragswechsel vor; laufende Teile werden nicht unterbrochen.`);
+      if (!normal && o.priority === 'eil') { a.head = `${o0} ist bereits Eilauftrag`; a.eyebrow = 'Aktion · Priorität'; a.sev = 'info'; a.md.push(`Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)} – ${slackTxt(o.slackSec)}.`); a.entity = { kind: 'order', id: o0 }; a.followups = [`Stell ${o0} wieder auf normal`, `Wo steht ${o0} gerade?`]; return done(a); }
+      if (normal && o.priority !== 'eil') { a.head = `${o0} hat bereits normale Priorität`; a.eyebrow = 'Aktion · Priorität'; a.sev = 'info'; a.md.push(`Die Maschinen planen ${o0} nach Termin ein (Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)} – ${slackTxt(o.slackSec)}).`); a.entity = { kind: 'order', id: o0 }; a.followups = [`Wo steht ${o0} gerade?`]; return done(a); }
+      a.md.push(normal ? `${o.part.name} (${custShort(o.customer)}), ${o.priority === 'eil' ? 'derzeit Eilauftrag' : 'derzeit schon normal'} – die Maschinen planen ihn dann wieder nach Termin ein (Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)}).` : `${o.part.name} (${custShort(o.customer)}), Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)} – ${slackTxt(o.slackSec)}. Jede Maschine zieht ihn beim nächsten Auftragswechsel vor; laufende Teile werden nicht unterbrochen.`);
       let eilOk = true;
-      if (!normal) { const adv = adviceText(c, o); eilOk = adv.eilOk; a.md.push('', `> **${eilOk ? 'Empfehlung' : 'Hinweis'}:** ${adv.text}`); }
+      if (!normal) { const adv = adviceText(c, o); eilOk = adv.eilOk; a.md.push('', `> **${eilOk ? 'Empfehlung' : 'Hinweis'}:** ${eilOk ? adv.text : adv.eilWhy || adv.text}`); }
       a.head = normal ? `${o0} wieder auf normale Priorität setzen?` : `${o0} als Eilauftrag kennzeichnen?`;
       a.eyebrow = 'Aktion · Priorität'; a.sev = !normal && !eilOk ? 'warn' : 'info';
-      a.md[0] = a.md[0].replace(/^\*\*[^*]+\*\*:?\s*/, '');
       addAction(a, { label: normal ? `${o0} normal priorisieren` : eilOk ? `${o0} als Eilauftrag` : `Trotzdem als Eilauftrag`, desc: normal ? 'Priorität normal – Einplanung wieder nach Termin' : 'Priorität Eil – Vorrang beim nächsten Auftragswechsel', action: { type: 'setPriority', orderId: o0, priority: normal ? 'normal' : 'eil' }, icon: 'bolt' });
       a.entity = { kind: 'order', id: o0 };
       a.followups = [`Wo steht ${o0} gerade?`, 'Welche Aufträge sind gefährdet und warum?'];
@@ -2228,7 +2536,10 @@
     const q = norm(text), E = entities(text);
     // Bezug: ausdrücklicher Kontext (Detail offen, „Copilot fragen“) gilt, solange die Frage nicht ausdrücklich das ganze Werk meint;
     // die zuletzt besprochene Entität nur bei Rückbezug („er“, „dort“, „bedeutet das“ …)
-    const deictic = /\b(dies(e[rsnm]?|es)?|hier|dort|da(fuer|von|mit|bei|rauf)|er|ihn|ihm|dessen|derselbe)\b|\bdas\s+(fuer|bedeutet|heisst)\b|(bedeutet|heisst|kostet|bringt) das\b/.test(q);
+    const short = q.length < 70;
+    const deictic = /\b(dies(e[rsnm]?|es)?|hier|dort|da(fuer|von|mit|bei|rauf)|er|ihn|ihm|dessen|derselbe)\b|\bdas\s+(fuer|bedeutet|heisst)\b|(bedeutet|heisst|kostet|bringt) das\b/.test(q)
+      || (short && /^(und|aber|und dann)\b/.test(q)) // Folgefrage: „Und wann ist der fertig?“
+      || (short && /\b(der|die|das|den|dem)\s*(denn\s*)?(fertig|dran|los|gerade|jetzt|weiter|zurueck)?\s*$/.test(q));
     const globalQ = /\b(welche[rsnm]?|alle[rsnm]?|insgesamt|gesamt|ueberhaupt|ueberall|im werk|in der halle|schicht)\b/.test(q);
     const ctxOk = context && context.kind && context.id && context.kind !== 'view' && context.kind !== 'notification' && (context.fromLast ? deictic && !globalQ : !globalQ || deictic);
     const ctxEnt = ctxOk ? { kind: context.kind, id: context.id } : null;
@@ -2246,19 +2557,32 @@
     // Benachrichtigung
     if (context && context.kind === 'notification') return { intent: 'notification', E, q, id: context.id };
     if (has(/^(hilfe|help)\b|was kannst du|wie funktionier|was weisst du|was kann der copilot|wobei hilfst/)) return { intent: 'help', E, q };
+    if (q.length < 40 && has(/^(danke|vielen dank|merci|super|top|perfekt|passt|ok|okay|alles klar|hallo|servus|gruess gott|guten (morgen|tag|abend)|hi)\b/)) return { intent: 'small', E, q };
+    // Fremdbearbeitung (auch „Was wäre, wenn die Härterei einen Tag später liefert?“)
+    if (has(/haerterei|fremdbearbeit|eloxal|lohnhaert|galvanik|beschichter/) && !E.machines.length) return { intent: 'ext', E, q };
     // Was-wäre-wenn (vor Aktionen: „simuliere einen Ausfall für 2 h“ ist eine Analyse)
     const whatIf = has(/was (passiert|waere|ist|bedeutet)[a-z ,]*\b(wenn|falls)\b|\bwenn\b.*\b(ausfaell|ausfaellt|ausfallen|steht|stehen|stillsteht|kaputt)|\bfalls\b.*\b(ausfaell|ausfaellt|steht)|angenommen|szenario|was waere wenn|\bausfall\b.*\d|\d.*\bausfall\b/);
     if (whatIf && (E.machines.length || has(/ausfaell|ausfall|steht/))) return { intent: 'whatif', E, q };
     // Aktionen (Imperative)
-    const imp = has(/^(bitte |kannst du |koenntest du |jetzt )?(loese|loes|simulier|erzeug|bestell|setz|setze|mach|markier|kennzeichne|priorisier|verlager|plan|beauftrag|quittier|oeffne|zeig|geh|wechsle zu|navigier|repariere|behebe)|bitte\b|\b(ausloesen|simulieren|nachbestellen|bestellen|quittieren|verlagern|priorisieren|oeffnen|beheben|reparieren|beauftragen)\b/);
+    const imp = has(/^(bitte |kannst du |koenntest du |jetzt )?(loese|loes|simulier|erzeug|bestell|setz|setze|stell|stelle|mach|markier|kennzeichne|priorisier|verlager|plan|beauftrag|quittier|oeffne|zeig|geh|wechsle zu|navigier|repariere|behebe)|bitte\b|\b(ausloesen|simulieren|nachbestellen|bestellen|quittieren|verlagern|priorisieren|oeffnen|beheben|reparieren|beauftragen)\b/);
     if (has(/(stoerung|alarm|fehler|ausfall)\w*.*\b(ausloes|simulier|erzeug|provozier|starte)|\b(ausloes|simulier|erzeug|provozier|starte)\w*.*\b(stoerung|alarm|ausfall)|\bloes\w*\b.*\b(stoerung|alarm)\w*\b.*\baus\b/)) return { intent: 'action', act: 'fault', E, q };
     if (has(/\b(repar|beheb|stoerung (beenden|aufheben|weg))/) && imp) return { intent: 'action', act: 'repair', E, q };
     if (has(/quittier/)) return { intent: 'action', act: 'ack', E, q };
-    if (has(/\beil(auftrag|ig|-)?\b|als eil|prioris|vorzieh|hoeher prior|dringend machen|normale? prior/) && (E.orders.length || imp) && !has(/welche|sollte|sollten|wer |was ist/)) return { intent: 'action', act: 'priority', E, q };
+    if (has(/\beil(auftrag|ig|-)?\b|als eil|prioris|vorzieh|hoeher prior|dringend machen|normale? prior|(auf|wieder) normal|nicht mehr eil|kein eil/) && (E.orders.length || imp) && !has(/welche|sollte|sollten|wer |was ist|annehmen/)) return { intent: 'action', act: 'priority', E, q };
     if (has(/(nach)?bestell/) && imp && !has(/welche|was muss|muessen wir|sollte/)) return { intent: 'action', act: 'reorder', E, q };
     if (has(/verlager|umplan|auf (eine )?andere maschine/) && imp) return { intent: 'action', act: 'move', E, q };
     if ((has(/(werkzeugwechsel|wechsel)\w*.*\b(planen|beauftrag|vorzieh|vorbeug)|vorbeugend\w* (werkzeug)?wechsel/) && imp) || has(/^(bitte )?(plane|plan|beauftrage)\b.*wechsel/)) return { intent: 'action', act: 'toolchange', E, q };
     if (has(/^(bitte )?(oeffne|zeig mir die|zeige die|geh (zu|zur|in)|wechsle (zu|zur|in)|navigier)/) && (E.views.length || E.machines.length || E.orders.length)) return { intent: 'action', act: 'view', E, q };
+    if (E.machines.length && has(/(stunde|std) stillstand|stundensatz|kostet .*stunde|pro stunde|je stunde|stunde .*kostet/)) return { intent: 'rate', E, q };
+    // Störung: Alarm, Reparatur, Auswirkung – nie die allgemeine Auftragskarte
+    if (has(/stoerung|alarm|defekt|kaputt|reparatur|ausgefallen|stillstand (an|bei|der|des)/) && !has(/welche maschine|stoerungen heute|wie viele stoerung/)) {
+      // genannte Maschine (ansFault leitet auf die gestörte Maschine auf dem Weg des Auftrags um), sonst die gestörte
+      const faulted = Object.keys(S().machines).filter(id => S().machines[id].state === 'fault');
+      const onRoute = faulted.find(x => E.orders.some(oid => { const o = S().orders[oid]; return o && o.routing.some((r, i) => r.station === x && !o.ops[i].complete); }));
+      const mid = E.machines.find(x => S().machines[x]) || onRoute || faulted[0];
+      if (mid) return { intent: 'fault', E, q, machine: mid };
+    }
+    if (has(/was (muss|soll|sollte|sollten) (ich|wir)|was ist (jetzt )?zu tun|was tun\b|wichtigste|prioritaeten|womit (soll ich )?anfangen|wo (soll|muss) ich anfangen|was steht an/) && !E.machines.length && !E.orders.length) return { intent: 'todo', E, q };
     // Lageeinschätzung zu einer Entität (z. B. „Copilot fragen“ im Detail)
     if (has(/lageeinschaetzung|einschaetzung|lagebild|gesamtbild|was ist kritisch/)) {
       if (E.machines.length) return { intent: 'machine', E, q, focus: 'full' };
@@ -2270,10 +2594,19 @@
     // Übergabe / Briefing
     if (has(/uebergabe|schichtbericht|schichtprotokoll|handover/)) return { intent: 'handover', E, q };
     if (has(/briefing/)) return { intent: 'briefing', E, q };
+    // Schicht, Kennzahlen, Rangliste, Fälligkeiten, Kapazität
+    if (has(/(spaet|frueh|naechste|kommende)\s*schicht|schichtwechsel|schichtbeginn/) && has(/\bwer\b|wann|wie viele|besetz|personal|kommt|beginnt|faengt|leute|im dienst|\bist\b/)) return { intent: 'shift', E, q };
+    if (has(/\bcpk\b|\bcp\b|prozessfaehig|maschinenfaehig|faehigkeit/)) return { intent: 'capability', E, q };
+    if (has(/(schlechtest|best|hoechst|niedrigst|meist|wenigst|groesst|geringst)\w*/) && has(/oee|stillstand|verlust|kost|energie|strom|ausschuss|verbrauch/) && !(E.machines.length && !E.fromContext)) return { intent: 'ranking', E, q };
+    if (has(/\boee\b/) && has(/warum|wieso|weshalb|ziel|zusammen|aufschluessel|verfuegbarkeit|leistung|wie hoch|wie ist|wie gut/) && !(E.machines.length && !E.fromContext)) return { intent: 'oee', E, q };
+    if (has(/(heute|morgen|uebermorgen)\s*(noch\s*)?(faellig|ausliefern|geliefert|versand|versendet|raus)|faellig\s*(heute|morgen)|geht heute raus|liefern wir heute|heute fertig werden|heute fertig\b/) && !E.orders.length) return { intent: 'due', E, q };
+    if (has(/wie ?viele\s*(offene\s*)?auftraege|anzahl\s*(der\s*)?(offenen\s*)?auftraege|auftraege (sind )?(noch )?offen\b|offene auftraege gibt/) && !has(/gefaehrdet|verspaet|knapp/)) return { intent: 'counts', E, q };
+    if (has(/annehmen|zusaetzliche[nr]? auftrag|neue[nr]? auftrag|freie kapazitaet|kapazitaet frei|reinschieben|einschieben|dazwischen schieben|noch rein|unterbringen/) && !E.orders.length) return { intent: 'capacity', E, q };
+    if (!(E.machines.length && !E.fromContext) && has(/(maschinen|arbeitsplaetze|plaetze|anlagen)\b.*\b(frei|leer|stehen|still|untaetig|nichts zu tun)|warum (stehen|sind so viele)|ohne auftrag|nicht ausgelastet|leerlauf|stehen (so viele|so viel)/)) return { intent: 'idle', E, q };
     // Themen
     if (has(/engpass|flaschenhals|bottleneck|limitier|kapazitaet|auslastung|ausgelastet|arbeitsvorrat/) && !E.orders.length && !(E.machines.length && !E.fromContext)) return { intent: 'bottleneck', E, q };
     if (has(/angebunden|anbindung|vernetzt|\bopc\b|mtconnect|focas|schnittstelle|nachruest|sensorik|datenquelle|digitalisier|\blevel \d/)) return E.machines.length ? { intent: 'connectM', E, q } : { intent: 'connect', E, q };
-    if (has(/\bgeld|kosten|verlust|verlier|stillstandskost|\beuro\b|€|\bteuer|verschwend|\bsparen|rentab|wirtschaftlich/) && !has(/werkzeugkosten/)) return E.machines.length ? { intent: 'lossM', E, q } : { intent: 'loss', E, q };
+    if (has(/\bgeld|kost(en|et)|verlust|verlier|stillstandskost|\beuro\b|€|\bteuer|verschwend|\bsparen|rentab|wirtschaftlich/) && !has(/werkzeugkosten|strom|energie|kwh/)) return E.machines.length ? { intent: 'lossM', E, q } : { intent: 'loss', E, q };
     if (has(/energie|strom|kwh|kilowatt|verbrauch|leistungsaufnahme|\bkw\b/) && !E.materials.length) return { intent: 'energy', E, q };
     if (has(/qualitaet|ausschuss|\bspc\b|fpy|messwert|erstteil|toleranz|n\.?i\.?o|nacharbeit|regelkarte|reklamation/)) return { intent: 'quality', E, q, focusM: E.machines[0] };
     const toolQ = has(/werkzeug|\bwsp\b|wendeplatte|wendeschneid|standzeit|verschleiss|schleifscheibe|waelzfraeser|bohrer|saegeband|bohrkopf|schneide/);
@@ -2322,7 +2655,7 @@
         case 'help': a = ansHelp(); break;
         case 'whatif': {
           const id = E.machines[0];
-          if (!id) { a = A('whatif'); a.md.push('Welche Maschine soll ausfallen? Zum Beispiel: „Was passiert, wenn die Studer S33 2 h ausfällt?“'); a.followups = ['Was passiert, wenn M09 2 h ausfällt?', 'Was passiert, wenn M07 4 h ausfällt?']; a = done(a); }
+          if (!id) { a = A('whatif'); a.head = 'Welche Maschine soll ausfallen?'; a.md.push('Zum Beispiel: „Was passiert, wenn die Studer S33 2 h ausfällt?“'); a.followups = ['Was passiert, wenn M09 2 h ausfällt?', 'Was passiert, wenn M07 4 h ausfällt?']; a = done(a); }
           else a = ansWhatIf(c, id, E.hours || 2);
           break;
         }
@@ -2343,13 +2676,31 @@
         case 'order': a = ansOrder(c, E.orders[0], cl.focus); break;
         case 'customer': a = ansCustomer(c, E.customers[0]); break;
         case 'risk': a = ansRisk(c, cl.customer); break;
-        case 'machine': a = ansMachine(c, E.machines[0], cl.focus); break;
+        case 'machine': {
+          const mv0 = c.mv(E.machines[0]);
+          // gestörte Maschine: Alarm, Reparatur und Auswirkung zuerst (außer bei Werkzeug-/Personal-/Termin-Fragen)
+          a = mv0 && mv0.state === 'fault' && ['tools', 'people', 'eta'].indexOf(cl.focus) < 0 ? ansFault(c, E.machines[0], E.orders) : ansMachine(c, E.machines[0], cl.focus);
+          break;
+        }
+        case 'fault': a = ansFault(c, cl.machine, E.orders); break;
+        case 'todo': a = ansTodo(c); break;
+        case 'small': a = ansSmall(cl.q); break;
+        case 'ext': a = ansExt(c, cl.q, E); break;
+        case 'shift': a = ansShift(c, cl.q); break;
+        case 'capability': a = ansCapability(c, E.machines[0]); break;
+        case 'ranking': a = ansRanking(c, cl.q); break;
+        case 'oee': a = ansOee(c); break;
+        case 'due': a = ansDue(c, cl.q); break;
+        case 'counts': a = ansCounts(c); break;
+        case 'capacity': a = ansCapacity(c, cl.q); break;
+        case 'idle': a = ansIdle(c); break;
+        case 'rate': a = ansRate(c, E.machines[0]); break;
         case 'overview': a = ansOverview(c); break;
         default: a = ansFallback(c, text);
       }
     } catch (e) {
       if (G.console) console.error('[ai] offline', e);
-      a = done(Object.assign(A('error'), { md: ['Bei der Auswertung ist ein Fehler aufgetreten: ' + (e && e.message ? e.message : e)] }));
+      a = done(Object.assign(A('error'), { head: 'Auswertung nicht möglich', sev: 'warn', md: ['Bei der Auswertung ist ein Fehler aufgetreten: ' + (e && e.message ? e.message : e)] }));
     }
     a.intent = cl.intent;
     return a;
@@ -2461,7 +2812,7 @@
       live.sample = fn;
       try { const lim = await fn.limits(); live.tools = !!(lim && lim.tools); live.maxTools = lim && lim.tools ? lim.tools.maxCount : 0; } catch (e) { live.tools = false; }
       live.status = 'live';
-      live.reason = live.tools ? 'Claude antwortet aus den Live-Daten, liest Details über Werkzeuge und führt Aktionen nur nach Bestätigung aus.' : 'Claude antwortet aus der Lageübersicht (ohne Werkzeuge in dieser Ansicht).';
+      live.reason = live.tools ? 'Claude antwortet aus den Live-Daten, liest Details über Datenabfragen und führt Aktionen nur nach Bestätigung aus.' : 'Claude antwortet aus der Lageübersicht (ohne Datenabfragen in dieser Ansicht).';
       emitStatus();
       return fn;
     }, () => { live.status = 'offline'; live.reason = 'Verbindung zu Claude fehlgeschlagen – Offline-Copilot aktiv.'; emitStatus(); return null; });
@@ -2510,7 +2861,7 @@
     return {
       id: o.id, kunde: o.customer, teil: o.part.name, teilNr: o.part.no, werkstoff: o.part.material, menge: o.qty, termin: U.fmtDayClock(o.due), prio: o.priority, status: o.status,
       versandt: o.shippedQty, fortschrittPct: Math.round(o.progress * 100), prognose: o.eta ? U.fmtDayClock(o.eta) : null, pufferMin: minOf(o.slackSec), risiko: o.riskLabel, engpass: o.bottleneck,
-      arbeitsgaenge: o.ops.map(op => ({ ag: op.seq, op: op.op, platz: op.station, status: op.stateLabel, gut: op.good, ausschuss: op.scrap, soll: op.target, wartend: op.waiting, ursache: op.cause ? trimTxt(op.cause, 90) : undefined, plan: op.plannedStart ? tc(op.plannedStart) + '–' + tc(op.plannedEnd) : null, extern: op.ext ? op.ext.returnText : undefined })),
+      arbeitsgaenge: o.ops.map((op, i) => { const fe = ((WF.sim.forecast().orders[o.id] || {}).ops || [])[i]; return { ag: op.seq, op: op.op, platz: op.station, status: op.stateLabel, gut: op.good, ausschuss: op.scrap, soll: op.target, wartend: op.waiting, ursache: op.cause ? trimTxt(op.cause, 90) : undefined, plan: op.complete ? null : fe ? 'Start ' + tc(Math.max(NOW(), fe.start)) + ', fertig ' + tc(Math.max(NOW(), fe.lastReturn != null ? fe.lastReturn : fe.end)) : null, extern: op.ext ? op.ext.returnText : undefined }; }),
       behaelter: o.containers.filter(x => x.state !== 'shipped').slice(0, 6).map(x => x.qty + ' Stk ' + x.where),
     };
   }
@@ -2525,7 +2876,9 @@
       run: (i) => { const id = String(i.id || '').toUpperCase().replace(/^FA(\d)/, 'FA-$1').replace(/^(\d{5})$/, 'FA-$1'); const o = WF.sim.orderView(id); if (!o) throw new Error('Unbekannter Auftrag: ' + i.id);
         const r = trimOrder(o);
         // Vorab-Abwägung der Regel-Engine (hilft ein Eilauftrag? wer würde überholt? Alternativen) – Claude prüft und nutzt sie
-        if (o.status !== 'fertig' && o.risk !== 'ok') { try { r.regelEinschaetzung = trimTxt(orderAdvice(data(), o).text.replace(/\*\*/g, ''), 600); } catch (e) { /* ohne Einschätzung */ } }
+        if (o.status !== 'fertig' && o.risk !== 'ok') {
+          try { const c = data(), adv = adviceText(c, o), dc = adv.causes; r.ursachen = dc ? dc.items.map(x => x.text) : []; r.regelEinschaetzung = trimTxt(adv.text.replace(/\*\*/g, ''), 600); r.eilauftragEmpfohlen = adv.eilOk; } catch (e) { /* ohne Einschätzung */ }
+        }
         return fit(r); } },
     { name: 'get_forecast', label: () => 'Liest Prognose und Plantafel', description: 'Prognose: je offenem Auftrag Liefertermin-Prognose, Puffer (min) und Engpass; je Maschine die nächsten eingeplanten Arbeitsgänge (Start–Ende).',
       run: () => { const f = WF.sim.forecast(), o = {}, m = {}; for (const id in f.orders) { const x = f.orders[id]; if (x.done) continue; o[id] = { prognose: U.fmtDayClock(x.eta), pufferMin: minOf(x.slackSec), spaet: x.late, engpass: x.bottleneck }; } for (const id in f.machines) m[id] = f.machines[id].slice(0, 4).map(e => e.orderId + ' AG' + e.seq + ' ' + tc(e.start) + '–' + tc(e.end)); return fit({ auftraege: o, plantafel: m }); } },
@@ -2567,6 +2920,9 @@
       inputSchema: { type: 'object', properties: { kind: { type: 'string' }, id: { type: 'string' } }, required: ['kind', 'id'] },
       run: (i) => { if (WF.app) UI.openEntity(String(i.kind), String(i.id)); return { ok: true }; } },
   ];
+  /** Tools nach Wichtigkeit – reicht das Kontingent (maxCount) nicht, fallen zuerst die seltenen weg */
+  const TOOL_PRIO = ['get_overview', 'get_order', 'get_machine', 'get_forecast', 'set_priority', 'reorder_material', 'get_tools', 'get_materials', 'get_people', 'get_notifications', 'trigger_fault', 'move_operation', 'plan_tool_change', 'ack_notification', 'open_view', 'select_entity'];
+  const toolList = () => TOOLS.slice().sort((x, y) => TOOL_PRIO.indexOf(x.name) - TOOL_PRIO.indexOf(y.name)).slice(0, live.maxTools || TOOLS.length);
   function normMachineId(x) {
     if (!x) return null;
     const s = String(x).trim().toUpperCase();
@@ -2574,7 +2930,8 @@
     const m = /^M\s?-?(\d{1,2})$/.exec(s); if (m && S().machines['M' + m[1].padStart(2, '0')]) return 'M' + m[1].padStart(2, '0');
     const E = entities(String(x)); return E.machines[0] || null;
   }
-  function instructions(ctx) {
+  const ACT_LABEL = { trigger_fault: 'Störung auslösen (Demo)', set_priority: 'Priorität', reorder_material: 'Nachbestellung', move_operation: 'Verlagerung', plan_tool_change: 'Werkzeugwechsel planen', ack_notification: 'Quittieren' };
+  function instructions(ctx, tools) {
     const P = PROF(), co = WF.app && WF.app.company ? WF.app.company() : { name: P.company.name, site: P.company.site };
     const view = WF.app && WF.app.current ? WF.app.current.title : 'Leitstand';
     const ent = ctx && ctx.kind && ctx.id && ctx.kind !== 'view' ? (WF.app ? WF.app.entityLabel({ kind: ctx.kind === 'notification' && ctx.entity ? ctx.entity.kind : ctx.kind, id: ctx.kind === 'notification' && ctx.entity ? ctx.entity.id : ctx.id }) : ctx.id) : null;
@@ -2586,14 +2943,15 @@
       `Nutzer: Produktions- bzw. Schichtleitung. Geöffnete Ansicht: ${view}${ent ? '; Bezug der Frage: ' + ent : ''}. Jetzt: ${WF.sim.clock()}, ${WF.sim.shift().name}.`,
       'Regeln:',
       '- Antworte auf Deutsch, sachlich und knapp (meist 4–10 Zeilen), neutrale Formulierungen ohne Du/Sie, keine Emojis.',
-      '- Nenne konkrete IDs und Zahlen (FA-24118, M05, P06, Uhrzeiten, Teile, €) ausschließlich aus der Lageübersicht unten oder aus Werkzeug-Ergebnissen. Erfinde nichts; fehlt etwas, sag es und lies es über ein Werkzeug nach.',
+      '- Nenne konkrete IDs und Zahlen (FA-24118, M05, P06, Uhrzeiten, Teile, €) ausschließlich aus der Lageübersicht unten oder aus den Ergebnissen deiner Datenabfragen (Tools). Erfinde nichts; fehlt etwas, sag es und frag es über ein Tool ab. „Werkzeug“ bedeutet in dieser Fabrik immer Schneidwerkzeug.',
+      '- Aufbau: erste Zeile = Kernaussage fett (**…**, höchstens ca. 12 Wörter), danach 2–6 Zeilen Begründung mit Zahlen, zum Schluss eine eigene Zeile „> **Empfehlung:** …“ (Handlung zuerst, ID vorn).',
       '- Erkläre Ursachen (Zustand → Ursache → Auswirkung auf Termin/Kosten) und schließe mit einer konkreten Empfehlung als eigener Zeile „> **Empfehlung:** …“.',
       '- Formatierung: **fett** für Kernaussagen, Listen mit „- “, höchstens Überschriften „### “. Keine Tabellen.',
       '- Grafiken: Eine eigene Zeile [[route FA-24118]] zeigt die Arbeitsgang-Kette eines Auftrags, [[werkzeuge M05]] die Werkzeug-Standzeiten, [[maschine M05]] die Kennzahlen einer Maschine, [[termine]] Prognose gegen Termin der gefährdeten Aufträge, [[risiko]] die Risiko-Karten, [[engpass]] den Arbeitsinhalt je Arbeitsplatz, [[verluste]] die Stillstandskosten je Arbeitsplatz, [[ursachen]] die Stillstandskosten je Ursache, [[material]] die Bestände, [[personal]] das Personal im Dienst. Höchstens zwei pro Antwort und nur, wenn sie die Aussage stützen; die gezeigten Zahlen dann nicht noch einmal als Liste wiederholen.',
       '- Eilauftrag nur empfehlen, wenn er wirklich Zeit gewinnt: er wirkt erst beim nächsten Auftragswechsel und nur, wenn die Teile schon da sind; überholte Aufträge rutschen um die Belegzeit nach hinten. Das Feld regelEinschaetzung in get_order enthält diese Abwägung bereits.',
-      '- Aktionen (Störung auslösen, Priorität, Nachbestellung, Verlagerung, Werkzeugwechsel, Quittieren) nur auf ausdrücklichen Wunsch; der Nutzer bestätigt jede Aktion im Panel. Abgelehnt = nicht erneut versuchen. Nach einer Aktion das Ergebnis kurz berichten.',
+      (() => { const acts = (tools || []).filter(t => t.act).map(t => ACT_LABEL[t.name] || t.name); return acts.length ? `- Aktionen (${acts.join(', ')}) nur auf ausdrücklichen Wunsch; der Nutzer bestätigt jede Aktion im Panel. Abgelehnt = nicht erneut versuchen. Nach einer Aktion das Ergebnis kurz berichten.` : '- Aktionen kannst du in dieser Ansicht nicht ausführen – nenne die passende Aktion als Empfehlung; der Nutzer führt sie in der Oberfläche aus.'; })(),
       '- Fachbegriffe: Zustände Produktion, Rüsten, Erstteilprüfung, Werkzeugwechsel, Wartet auf Werkzeug/Bediener/Material, Ausgang voll, Störung, Bereit. Werkzeuge werden nur zwischen zwei Teilen gewechselt, angekündigt mit Uhrzeit und Einrichter. Prognose = Plantafel; Engpass = längster Arbeitsgang im Plan; Stillstandskosten = Maschinenstundensatz × Zeit mit eingeplantem Auftrag ohne Produktion (Schichtzeit).',
-      live.tools ? '- Für Details die Werkzeuge nutzen (get_machine, get_order, get_forecast, get_tools, get_materials, get_people, get_notifications).' : '- In dieser Ansicht gibt es keine Werkzeuge: antworte nur aus der Lageübersicht und sag, wenn Details fehlen.',
+      tools && tools.length ? `- Für Details die Tools nutzen (${tools.filter(t => !t.act).map(t => t.name).join(', ')}).` : '- In dieser Ansicht gibt es keine Tools: antworte nur aus der Lageübersicht und sag, wenn Details fehlen.',
       '',
       `Lageübersicht (JSON, Stand ${snap.clock}):`,
       JSON.stringify(snap),
@@ -2612,7 +2970,10 @@
     prompt_too_large: 'Die Unterhaltung ist zu lang geworden. Bitte „Neu beginnen“ und erneut fragen.',
     upstream_error: 'Die Verbindung zu Claude wurde unterbrochen.',
   };
-  const PERMANENT = { not_granted: 'Claude wurde für diese Seite nicht freigegeben', sampling_disabled: 'Claude ist für dieses Konto nicht verfügbar', not_declared: 'Die Seite hat keinen Claude-Zugang', capability_disabled: 'Claude ist in dieser Ansicht deaktiviert', capability_removed: 'Diese Claude-Funktion ist hier nicht verfügbar', invalid_request: 'Anfrage an Claude war ungültig', transform_error: 'Anfrage an Claude konnte nicht vorbereitet werden', queue_overflow: 'Zu viele Anfragen an Claude' };
+  const PERMANENT = { not_granted: 'Claude wurde für diese Seite nicht freigegeben', sampling_disabled: 'Claude ist für dieses Konto nicht verfügbar', not_declared: 'Die Seite hat keinen Claude-Zugang', capability_disabled: 'Claude ist in dieser Ansicht deaktiviert', capability_removed: 'Diese Claude-Funktion ist hier nicht verfügbar', transform_error: 'Anfrage an Claude konnte nicht vorbereitet werden', queue_overflow: 'Zu viele Anfragen an Claude' };
+  ERR.invalid_request = 'Claude konnte die Anfrage mit Datenabfragen nicht annehmen. Erneut senden – dann ohne Datenabfragen, nur mit der Lageübersicht.';
+  /** Ergebnis bleibt bei unveränderter Frage gleich – kein „Erneut senden“, sondern umformulieren oder offline antworten */
+  const NO_RETRY = { refused: 1, empty_completion: 1 };
 
   // ================================================================== Oberfläche
   const UI = {};
@@ -2689,7 +3050,7 @@
         analyse: ['Wo verlieren wir heute Geld?', 'Wie hoch ist der Energieverbrauch?'], halle: ['Wie läuft die Schicht?', 'Was machen die AGVs gerade?'], anbindung: ['Welche Maschinen sind nicht angebunden?'],
       };
       for (const x of VIEW_S[view] || []) push(x);
-      for (const x of ['Wie läuft die Schicht?', 'Welche Aufträge sind gefährdet und warum?', 'Was passiert, wenn die Studer S33 2 h ausfällt?', 'Schreib mir die Schichtübergabe', 'Wo verlieren wir heute Geld?']) push(x);
+      for (const x of ['Wie läuft die Schicht?', 'Was muss ich jetzt tun?', 'Welche Aufträge sind gefährdet und warum?', 'Was passiert, wenn die Studer S33 2 h ausfällt?', 'Schreib mir die Schichtübergabe', 'Wo verlieren wir heute Geld?']) push(x);
     } catch (e) { /* Vorschläge sind optional */ }
     return out.slice(0, 7);
   }
@@ -2703,6 +3064,7 @@
     visibility:hidden;transition:transform .28s cubic-bezier(.2,.8,.2,1),right .28s cubic-bezier(.2,.8,.2,1),visibility 0s linear .28s;overflow:hidden}
   .ai-panel.open{transform:none;visibility:visible;transition:transform .28s cubic-bezier(.2,.8,.2,1),right .28s cubic-bezier(.2,.8,.2,1),visibility 0s}
   .ai-panel.beside{right:min(480px,100%);border-right:1px solid var(--line2)}
+  .ai-panel.cover{width:min(480px,100%)}
   .ai-panel::before{content:"";position:absolute;inset:0 0 auto;height:180px;pointer-events:none;
     background:radial-gradient(420px 160px at 85% -40px,color-mix(in srgb,var(--accent) 15%,transparent),transparent 72%),radial-gradient(300px 140px at 0% -60px,color-mix(in srgb,var(--st-tool) 10%,transparent),transparent 70%)}
   .ai-h{position:relative;display:flex;align-items:center;gap:11px;padding:13px 12px 12px 16px;border-bottom:1px solid var(--line)}
@@ -2741,18 +3103,55 @@
   .ai-bub{background:color-mix(in srgb,var(--accent) 14%,var(--card));border:1px solid color-mix(in srgb,var(--accent) 28%,transparent);border-radius:14px 14px 4px 14px;
     padding:8px 12px;font-size:13.5px;line-height:1.45;color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere}
   .ai-meta{font:500 10.5px/1 var(--f-ui);color:var(--faint);margin-top:5px;font-variant-numeric:tabular-nums;display:flex;gap:6px;align-items:center}
-  .ai-m.a{display:grid;grid-template-columns:24px minmax(0,1fr);column-gap:10px}
-  .ai-m.a > .ai-orb{margin-top:1px}
-  .ai-ah{display:flex;align-items:center;gap:7px;min-height:24px;font-size:12px;color:var(--text);font-weight:600}
-  .ai-ah .ai-tag{font:600 9.5px/1 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;padding:3px 5px;border-radius:4px;color:var(--muted);border:1px solid var(--line2)}
+  .ai-m.a{display:flex;flex-direction:column;gap:7px}
+  .ai-ah{display:flex;align-items:center;gap:7px;min-height:20px;padding:0 2px;font-size:11.5px;color:var(--text2);font-weight:600}
+  .ai-ah .ai-orb.sm{--s:20px;border-radius:6px}
+  .ai-ah .ai-tag{font:600 9px/1 var(--f-ui);letter-spacing:.09em;text-transform:uppercase;padding:3px 5px;border-radius:4px;color:var(--muted);border:1px solid var(--line2)}
+  /* Antwortkarte: Bezug · Kernaussage · Kennzahlen · Text · Empfehlung mit Aktionen · Datenbasis */
+  .ai-card{--c:var(--info);position:relative;min-width:0;padding:14px 15px 12px;border-radius:13px;border:1px solid var(--line);
+    background:linear-gradient(180deg,color-mix(in srgb,var(--c) 5%,var(--card)) 0,var(--card) 90px);box-shadow:0 12px 32px rgba(0,0,0,.2),inset 0 1px 0 rgba(255,255,255,.035);overflow:hidden}
+  .ai-card::before{content:"";position:absolute;left:14px;right:14px;top:0;height:2px;border-radius:0 0 2px 2px;background:linear-gradient(90deg,var(--c),color-mix(in srgb,var(--c) 0%,transparent));opacity:.85}
+  .ai-card.sev-crit{--c:var(--st-fault)} .ai-card.sev-warn{--c:var(--st-wait)} .ai-card.sev-ok{--c:var(--st-run)} .ai-card.sev-info{--c:var(--info)}
+  .ai-top:empty{display:none}
+  .ai-eb{display:flex;align-items:center;gap:7px;min-width:0;margin:1px 0 7px;font:600 10px/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .ai-eb i{width:7px;height:7px;border-radius:50%;flex:none;background:var(--c);box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 18%,transparent)}
+  .ai-eb span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ai-hl{margin:0 0 10px;font:600 19px/1.24 var(--f-cond);letter-spacing:.005em;color:var(--text);text-wrap:balance;overflow-wrap:anywhere}
+  .ai-md > .ai-hl:first-child{margin-top:0}
+  .ai-hl .ai-ent{height:20px;font-size:12px;vertical-align:2px}
+  .ai-rec{margin:12px 0 2px;padding:11px 12px 11px;border-radius:10px;background:color-mix(in srgb,var(--accent) 7%,var(--bg2));border:1px solid color-mix(in srgb,var(--accent) 24%,var(--line))}
+  .ai-rec.note{background:color-mix(in srgb,var(--st-wait) 6%,var(--bg2));border-color:color-mix(in srgb,var(--st-wait) 26%,var(--line))}
+  .ai-rec-h{display:flex;align-items:center;gap:6px;margin-bottom:5px;font:700 10px/1 var(--f-ui);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+  .ai-rec.note .ai-rec-h{color:var(--st-wait)}
+  .ai-rec-t{font-size:13.4px;line-height:1.55;color:var(--text)}
+  .ai-rec-t b{font-weight:600}
+  .ai-ras{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+  .ai-ra{display:flex;align-items:center;gap:10px;padding:8px 8px 8px 9px;border-radius:9px;background:var(--card);border:1px solid var(--line);min-width:0}
+  .ai-ra .ic{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;flex:none;color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+  .ai-ra .tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+  .ai-ra .tx b{font-size:12.8px;font-weight:600;color:var(--text);line-height:1.3}
+  .ai-ra .tx small{font-size:11.3px;color:var(--muted);line-height:1.35;overflow-wrap:anywhere}
+  .ai-ra .b{flex:none;display:flex;align-items:center}
+  .ai-ra .res{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;white-space:nowrap}
+  .ai-ra .res.ok,.ai-ra.done .ic{color:var(--st-run)} .ai-ra .res.fail{color:var(--st-wait)}
+  .ai-ra.done{border-color:color-mix(in srgb,var(--st-run) 35%,var(--line))} .ai-ra.done .ic{background:color-mix(in srgb,var(--st-run) 12%,transparent)}
+  .ai-more{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+  .ai-mb{display:inline-flex;align-items:center;gap:6px;height:27px;padding:0 10px;border-radius:7px;border:1px solid var(--line2);background:transparent;color:var(--text2);font:500 12px/1 var(--f-ui);cursor:pointer}
+  .ai-mb:hover{border-color:var(--muted);color:var(--text)}
+  .ai-mb.danger{color:color-mix(in srgb,var(--st-fault) 85%,white);border-color:color-mix(in srgb,var(--st-fault) 35%,transparent)}
+  .ai-mb.done{opacity:.55;cursor:default}
+  .ai-extra.ai-in > *{animation:aiIn .25s ease both}
+  .ai-after:empty{display:none}
+  .ai-after .ai-fu{margin-top:2px;padding-left:2px}
+  .ai-md:empty{display:none}
   .ai-ah .ai-tag.ki{color:var(--st-run);border-color:color-mix(in srgb,var(--st-run) 35%,transparent)}
   .ai-ah time{margin-left:auto;font:500 10.5px/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums}
+  .ai-tchips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
   .ai-copy{display:inline-grid;place-items:center;width:24px;height:22px;margin:-3px -4px -3px 2px;border-radius:6px;border:0;background:transparent;color:var(--faint);cursor:pointer;opacity:0;transition:opacity .15s ease,color .15s ease}
   .ai-m.a:hover .ai-copy,.ai-copy:focus-visible{opacity:1}
   .ai-copy:hover{color:var(--text);background:var(--card)}
   .ai-copy.ok{opacity:1;color:var(--st-run)}
   @media (hover:none){.ai-copy{opacity:.8}}
-  .ai-ab{min-width:0;margin-top:3px}
   .ai-md{font-size:13.5px;line-height:1.56;color:var(--text2);overflow-wrap:anywhere}
   .ai-md > :first-child{margin-top:0}
   .ai-md p{margin:0 0 8px}
@@ -2790,6 +3189,7 @@
   .ai-stat.ok{--c:var(--st-run)} .ai-stat.warn{--c:var(--st-wait)} .ai-stat.crit{--c:var(--st-fault)} .ai-stat.info{--c:var(--info)}
   .ai-stat .l{font:500 10.5px/1.2 var(--f-ui);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ai-stat .v{font:600 19px/1.15 var(--f-cond);color:var(--text);margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ai-stats.n4 .ai-stat{padding:8px 8px 8px 10px} .ai-stats.n4 .ai-stat .v{font-size:17.5px}
   @media (max-width:520px){.ai-stats.n4{grid-template-columns:repeat(2,minmax(0,1fr))}.ai-stats.n4 .ai-stat:nth-child(3){border-left:0}.ai-stats.n4 .ai-stat:nth-child(n+3){border-top:1px solid var(--line)}}
   .ai-stat .s{font-size:10.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
   .ai-imp{margin:9px 0 11px;padding:10px 12px 8px;border-radius:9px;background:var(--bg2);border:1px solid var(--line)}
@@ -2800,7 +3200,7 @@
   .lg-due{display:inline-block;width:2px;height:10px;border-radius:1px;background:var(--text2)}
   .lg-was{display:inline-block;width:7px;height:7px;border-radius:50%;border:1.5px solid var(--muted)}
   .lg-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--st-run)}
-  .ai-imp-b{position:relative;margin-left:76px;margin-right:70px}
+  .ai-imp-b{position:relative;margin-left:76px;margin-right:82px}
   .ai-imp-g{position:absolute;inset:0;pointer-events:none}
   .ai-imp-g i{position:absolute;top:0;bottom:0;width:1px;background:color-mix(in srgb,var(--line) 70%,transparent)}
   .ai-imp-r{position:relative;display:block;height:34px}
@@ -2815,12 +3215,11 @@
   .ai-imp-r .due{position:absolute;top:8px;width:2px;height:18px;margin-left:-1px;border-radius:1px;background:var(--text2)}
   .ai-imp-r .dot{position:absolute;top:12px;width:10px;height:10px;margin-left:-5px;border-radius:50%;background:var(--c);box-shadow:0 0 0 2px var(--bg2),0 0 0 4px color-mix(in srgb,var(--c) 25%,transparent)}
   .ai-imp-r .dot.was{top:13px;width:8px;height:8px;margin-left:-4px;background:var(--bg2);border:1.5px solid var(--muted);box-shadow:none}
-  .ai-imp-r .v{position:absolute;right:-70px;top:0;width:64px;height:34px;display:flex;flex-direction:column;justify-content:center;align-items:flex-end;gap:2px;font:600 12px/1 var(--f-ui);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ai-imp-r .v{position:absolute;right:-82px;top:0;width:76px;height:34px;display:flex;flex-direction:column;justify-content:center;align-items:flex-end;gap:2px;font:600 12px/1 var(--f-ui);font-variant-numeric:tabular-nums;white-space:nowrap}
   .ai-imp-r .v small{font:500 10px/1 var(--f-ui);color:var(--faint)}
-  .ai-imp-ax{position:relative;height:14px;margin:2px 70px 0 76px;font:500 10px/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums}
+  .ai-imp-ax{position:relative;height:14px;margin:2px 82px 0 76px;font:500 10px/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums}
   .ai-imp-ax span{position:absolute;top:3px;transform:translateX(-50%);white-space:nowrap}
   .ai-imp-ax span.now{left:0;transform:none}
-  .ai-tools{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 9px}
   .ai-tc{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px 0 8px;border-radius:999px;font-size:11.5px;color:var(--text2);background:var(--card);border:1px solid var(--line);animation:aiIn .2s ease}
   .ai-tc .ico{color:var(--st-run)} .ai-tc.err .ico{color:var(--st-fault)} .ai-tc.err{color:var(--muted)}
   .ai-spin{width:11px;height:11px;border-radius:50%;border:2px solid color-mix(in srgb,var(--accent) 25%,transparent);border-top-color:var(--accent);animation:aiSpin .8s linear infinite;flex:none}
@@ -2828,7 +3227,7 @@
   .ai-dots{display:inline-flex;gap:4px}
   .ai-dots i{width:6px;height:6px;border-radius:50%;background:color-mix(in srgb,var(--accent) 70%,var(--muted));animation:aiDot 1.2s ease-in-out infinite}
   .ai-dots i:nth-child(2){animation-delay:.15s} .ai-dots i:nth-child(3){animation-delay:.3s}
-  .ai-src{display:flex;align-items:flex-start;gap:7px;margin-top:11px;padding-top:9px;border-top:1px dashed var(--line);font-size:11px;line-height:1.45;color:var(--faint)}
+  .ai-src{display:flex;align-items:flex-start;gap:7px;margin-top:12px;padding-top:9px;border-top:1px solid color-mix(in srgb,var(--line) 75%,transparent);font-size:10.8px;line-height:1.45;color:var(--faint)}
   .ai-src .ico{flex:none;margin-top:1px;color:var(--faint)}
   .ai-src b{font-weight:600;color:var(--muted)}
   .ai-acts{display:flex;flex-direction:column;gap:7px;margin-top:11px}
@@ -2847,8 +3246,10 @@
   .ai-notice{display:flex;gap:8px;align-items:flex-start;margin:2px 0 9px;padding:7px 10px;border-radius:8px;font-size:12px;line-height:1.45;color:var(--text2);
     background:color-mix(in srgb,var(--st-wait) 7%,transparent);border:1px solid color-mix(in srgb,var(--st-wait) 26%,transparent)}
   .ai-notice .ico{flex:none;color:var(--st-wait);margin-top:1px}
-  body.ai-open #toasts{transition:right .28s ease}
-  @media (min-width:900px){ body.ai-open #toasts{right:calc(min(440px,100%) + 16px)} body.ai-open.ai-beside #toasts{right:calc(920px + 16px)} }
+  /* Meldungen bei offenem Copilot oben rechts im freien Bereich – nie über Navigation, Tour-Karte oder Drawer */
+  @media (min-width:561px){ body.ai-open #toasts{top:calc(var(--top-h) + 12px);bottom:auto;right:calc(var(--ai-occ,440px) + 16px)} }
+  @media (min-width:561px) and (max-width:900px){ body.ai-open #toasts{left:12px;right:calc(var(--ai-occ,440px) + 12px)} body.ai-open .toast{min-width:0;max-width:none} }
+  @media (hover:none){ .ai-kb{display:none} }
   .ai-err{display:flex;gap:9px;align-items:flex-start;margin-top:8px;padding:9px 11px;border-radius:9px;font-size:12.5px;line-height:1.45;color:var(--text2);
     background:color-mix(in srgb,var(--st-wait) 8%,var(--card));border:1px solid color-mix(in srgb,var(--st-wait) 32%,transparent)}
   .ai-err .ico{color:var(--st-wait);flex:none;margin-top:1px}
@@ -3015,6 +3416,7 @@
     .ai-h{padding:10px 8px 10px 12px;gap:9px} .ai-orb{--s:30px} .ai-ttl{font-size:17px}
     .ai-log{padding:12px 12px 8px;gap:16px} .ai-ctx{padding:6px 10px 6px 12px}
     .ai-foot{padding:8px 10px max(9px,env(safe-area-inset-bottom,0px))} .ai-hint .ai-kb{display:none}
+    .ai-card{padding:12px 12px 11px;border-radius:12px} .ai-hl{font-size:18px} .ai-ra{flex-wrap:wrap} .ai-ra .b{margin-left:36px}
     .ai-m.u{max-width:92%}
     .ai-tip{width:260px}
   }
@@ -3057,6 +3459,9 @@
     t = t.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/__(.+?)__/g, '<b>$1</b>');
     t = t.replace(/(^|[\s(])\*(?!\s)([^*\n]+?)\*(?=[\s).,;:!?]|$)/g, '$1<i>$2</i>');
     t = t.replace(/\u0003/g, '<span class="ai-cursor"></span>');
+    // Zahl und Einheit nicht trennen („2 h 05 min“, „25 Stk“, „AG 20“, „Di 06:00“)
+    t = t.replace(/(\d) (?=(?:h|min|s|Stk|m|kW|kWh|T|Tage|Tag|Teile|Teil|mm|Std|Uhr)(?![A-Za-zÄÖÜäöüß])|€|%)/g, '$1\u00a0')
+      .replace(/(^|[\s(])(h|T|AG|Mo|Di|Mi|Do|Fr|Sa|So|ca\.|Teil|Nr\.) (?=\d)/g, '$1$2\u00a0');
     return t.replace(/\u0001(\d+)\u0002/g, (_, i) => ph[Number(i)]);
   }
   function md(src) {
@@ -3070,7 +3475,13 @@
       table = [];
     };
     const flushP = () => { if (para.length) { html += '<p>' + para.map(x => inline(x)).join('<br>') + '</p>'; para = []; } };
-    const flushQ = () => { if (quote.length) { html += '<blockquote>' + quote.map(x => inline(x)).join('<br>') + '</blockquote>'; quote = []; } };
+    const flushQ = () => {
+      if (!quote.length) return;
+      const mm = /^\*\*(Empfehlung|Einschätzung|Hinweis|Jetzt tun):\*\*\s*(.*)$/.exec(quote[0]);
+      if (mm) html += `<div class="ai-rec${mm[1] === 'Hinweis' ? ' note' : ''}"><div class="ai-rec-h">${icon(mm[1] === 'Hinweis' ? 'info' : mm[1] === 'Einschätzung' ? 'check' : 'target', 13)}${esc(mm[1])}</div><div class="ai-rec-t">${[mm[2]].concat(quote.slice(1)).map(x => inline(x)).join('<br>')}</div></div>`;
+      else html += '<blockquote>' + quote.map(x => inline(x)).join('<br>') + '</blockquote>';
+      quote = [];
+    };
     const closeL = () => { if (list) { html += '</' + list + '>'; list = null; } };
     for (const raw of lines) {
       const line = raw.replace(/\s+$/, '');
@@ -3100,7 +3511,7 @@
   // ------------------------------------------------------------------ Panel aufbauen
   let panel = null, R = {};
   const EXAMPLES = [
-    { g: 'Lage', items: [['gauge', 'Wie läuft die Schicht?'], ['file', 'Schreib mir die Schichtübergabe']] },
+    { g: 'Lage', items: [['gauge', 'Wie läuft die Schicht?'], ['target', 'Was muss ich jetzt tun?'], ['file', 'Schreib mir die Schichtübergabe']] },
     { g: 'Termine & Engpass', items: [['clock', 'Welche Aufträge sind gefährdet und warum?'], ['target', 'Was ist der Engpass?']] },
     { g: 'Was-wäre-wenn & Kosten', items: [['alert', 'Was passiert, wenn die Studer S33 2 h ausfällt?'], ['euro', 'Wo verlieren wir heute Geld?']] },
     { g: 'Ressourcen', items: [['wrench', 'Welche Werkzeugwechsel stehen in den nächsten 2 h an?'], ['box', 'Welches Material wird knapp?'], ['users', 'Wer ist gerade wo?']] },
@@ -3182,14 +3593,22 @@
   };
 
   // ------------------------------------------------------------------ Öffnen / Schließen / Kontext
-  let openState = false, beside = false;
+  let openState = false, beside = false, selfSelect = false;
   const wide = () => G.matchMedia && G.matchMedia('(min-width: 1100px)').matches;
+  /** Copilot neben dem Drawer nur, wenn danach noch genug Arbeitsfläche bleibt (≥ 1680 px); sonst deckt er den Drawer bündig ab */
+  const roomBeside = () => G.matchMedia && G.matchMedia('(min-width: 1680px)').matches;
   const drawerOpen = () => { const d = document.getElementById('drawer'); return !!(d && d.classList.contains('open')); };
   function layout() {
     if (!panel) return;
-    beside = openState && wide() && drawerOpen();
+    const dr = openState && drawerOpen();
+    beside = dr && roomBeside();
+    const cover = dr && !beside;
     panel.classList.toggle('beside', beside);
+    panel.classList.toggle('cover', cover);
     document.body.classList.toggle('ai-beside', beside);
+    // Breite, die rechts belegt ist – Meldungen (Toasts) stehen links davon
+    const w = G.innerWidth || 1440, pw = Math.min(cover ? 480 : 440, w);
+    document.body.style.setProperty('--ai-occ', (beside ? Math.min(480, w) + pw : pw) + 'px');
   }
   UI.isOpen = () => openState;
   UI.open = (opts) => {
@@ -3215,8 +3634,10 @@
   UI.toggle = () => (openState ? UI.close() : UI.open());
   UI.openEntity = (kind, id) => {
     if (!WF.app) return;
-    if (!wide()) UI.close();
-    WF.app.select(kind, id);
+    // ohne Platz neben dem Drawer: Copilot schließen, damit das Detail sichtbar ist (Unterhaltung bleibt erhalten)
+    if (!roomBeside()) UI.close();
+    selfSelect = true;
+    try { WF.app.select(kind, id); } finally { selfSelect = false; }
     layout();
   };
   function ctxLabel(ctx) {
@@ -3299,14 +3720,18 @@
     const m = { id: ++conv.seq, role: 'assistant', text: '', t: NOW(), mode, tools: [], actions: [], status: 'pending' };
     conv.msgs.push(m);
     const n = WF.ui.el('div', { class: 'ai-m a', 'data-mid': String(m.id) });
-    n.innerHTML = `<div class="ai-orb sm" aria-hidden="true">${icon('sparkles', 13)}</div>
-      <div class="ai-ab"><div class="ai-ah">Copilot <span class="ai-tag ${mode === 'KI' ? 'ki' : ''}">${mode === 'KI' ? 'Claude' : 'Offline'}</span><time title="${esc(U.fmtDayClock(m.t))} (Simulationszeit)">${nowLabel()}</time><button type="button" class="ai-copy" data-copy="${m.id}" title="Antwort als Text kopieren" aria-label="Antwort kopieren" hidden>${icon('file', 13)}</button></div>
-        <div class="ai-tools" hidden></div>
+    n.innerHTML = `<div class="ai-ah"><span class="ai-orb sm" aria-hidden="true">${icon('sparkles', 12)}</span><span class="ai-who">Copilot</span><span class="ai-tag ${mode === 'KI' ? 'ki' : ''}">${mode === 'KI' ? 'Claude' : 'Offline'}</span><time title="${esc(U.fmtDayClock(m.t))} (Simulationszeit)">${nowLabel()}</time><button type="button" class="ai-copy" data-copy="${m.id}" title="Antwort als Text kopieren" aria-label="Antwort kopieren" hidden>${icon('file', 13)}</button></div>
+      <div class="ai-card">
+        <div class="ai-tchips" hidden></div>
         <div class="ai-asks"></div>
+        <div class="ai-top"></div>
         <div class="ai-body"><div class="ai-typing"><span class="ai-dots"><i></i><i></i><i></i></span><span class="ai-tyt">${mode === 'KI' ? 'Claude denkt nach …' : 'Liest Live-Daten …'}</span></div></div>
-        <div class="ai-extra"></div></div>`;
+        <div class="ai-extra"></div>
+      </div>
+      <div class="ai-after"></div>`;
     R.log.append(n);
-    m.el = n; m.body = n.querySelector('.ai-body'); m.toolsEl = n.querySelector('.ai-tools'); m.extra = n.querySelector('.ai-extra'); m.asks = n.querySelector('.ai-asks'); m.tagEl = n.querySelector('.ai-tag');
+    m.el = n; m.card = n.querySelector('.ai-card'); m.top = n.querySelector('.ai-top'); m.body = n.querySelector('.ai-body'); m.toolsEl = n.querySelector('.ai-tchips');
+    m.extra = n.querySelector('.ai-extra'); m.after = n.querySelector('.ai-after'); m.asks = n.querySelector('.ai-asks'); m.tagEl = n.querySelector('.ai-tag');
     scrollEnd(true);
     return m;
   }
@@ -3332,7 +3757,9 @@
   function renderBody(m, streaming) {
     // während des Streamens eine angefangene Grafik-Zeile „[[…“ noch nicht als Text zeigen
     const src = streaming ? m.text.replace(/(^|\n)\[\[[^\]\n]*\]?$/, '$1') : m.text;
-    const html = md(src + (streaming ? '\u0003' : ''));
+    let html = md(src + (streaming ? '\u0003' : ''));
+    // Claude: erste fette Zeile = Kernaussage (gleiche Gestaltung wie die Offline-Antworten)
+    if (m.mode === 'KI') html = html.replace(/^<p><b>((?:(?!<\/b>)[\s\S]){3,4000}?)<\/b>(<\/p>|<br>)/, (_, t, end) => `<h3 class="ai-hl">${t}</h3>` + (end === '<br>' ? '<p>' : ''));
     if (m._h === html) return;
     m._h = html;
     m.body.innerHTML = `<div class="ai-md">${html}</div>`;
@@ -3389,7 +3816,7 @@
     const ticks = [];
     const hourStep = span <= 4 * 3600 ? 3600 : span <= 8 * 3600 ? 2 * 3600 : span <= 20 * 3600 ? 4 * 3600 : 0;
     if (hourStep) { for (let t = Math.ceil(t0 / hourStep) * hourStep; t <= t1; t += hourStep) ticks.push({ t, l: U.fmtClock(t) }); }
-    else { for (let t = Math.floor(t0 / DAY) * DAY + DAY; t <= t1; t += DAY) ticks.push({ t, l: U.fmtDay(t) }); }
+    else { const ds = Math.max(1, Math.ceil(span / DAY / 5)) * DAY; for (let t = Math.floor(t0 / DAY) * DAY + DAY; t <= t1; t += ds) ticks.push({ t, l: U.fmtDay(t) }); }
     const ax = ticks.filter(x => X(x.t) > 16 && X(x.t) < 92).map(x => `<span style="left:${X(x.t).toFixed(2)}%">${esc(x.l)}</span>`).join('');
     const grid = ticks.filter(x => X(x.t) > 0 && X(x.t) < 100).map(x => `<i style="left:${X(x.t).toFixed(2)}%"></i>`).join('');
     return `<div class="ai-imp"><div class="ai-imp-h"><span class="tt">${esc(imp.title || 'Prognose gegen Termin')}</span><span class="lg"><span><i class="lg-due"></i>Termin</span>${shifted ? '<span><i class="lg-was"></i>vorher</span>' : ''}<span><i class="lg-dot"></i>Prognose</span></span></div>
@@ -3457,7 +3884,7 @@
   /** Balken (horizontal): Wert relativ zum größten Wert; optional Maschinen-Chip und Unterzeile */
   function barsHTML(d) {
     const rows = d && d.rows || []; if (!rows.length) return '';
-    const max = Math.max(...rows.map(r => r.v || 0), 1e-9);
+    const max = d.max != null ? d.max : Math.max(...rows.map(r => r.v || 0), 1e-9);
     return `<div class="ai-bars">${rows.map(r => `<div class="ai-br" style="--c:${r.c || 'var(--accent)'}">
       <div class="h">${r.ent ? entChip(r.ent.kind, r.ent.id) : ''}<span class="n">${esc(r.label)}</span><span class="q">${esc(r.vTxt)}</span></div>
       <div class="tr"><i style="width:${Math.max(1.5, (r.v || 0) / max * 100).toFixed(1)}%"></i></div>
@@ -3482,7 +3909,7 @@
       default: return '';
     }
   }
-  const durShort = (sec) => { const m = Math.round(sec / 60); if (m < 60) return m + ' min'; const h = Math.floor(m / 60), r = m % 60; return h >= 24 ? (Math.round(h / 24 * 10) / 10).toString().replace('.', ',') + ' d' : h + ' h' + (r ? ' ' + String(r).padStart(2, '0') : ''); };
+  const durShort = (sec) => durR(sec);
   function sourcesHTML(src) {
     if (!src || !src.length) return '';
     return `<div class="ai-src">${icon('layers', 13)}<span><b>Datenbasis:</b> ${src.map(x => esc(x)).join(' · ')}</span></div>`;
@@ -3491,13 +3918,13 @@
     if (!list || !list.length) return '';
     return `<div class="ai-fu">${list.slice(0, 3).map(s => `<button type="button" class="ai-chip" data-ask="${esc(s)}">${icon('arrowRight', 12)}${esc(s)}</button>`).join('')}</div>`;
   }
-  /** Aktionskarte: Vorschlag → „Ausführen“ (Bestätigung) → Ergebnis */
+  /** Bestätigungskarte für Aktionen, die Claude vorschlägt (Live-Modus): „Bestätigen“ → Ergebnis an Claude zurück */
   function actionCard(m, act, opts) {
-    const host = opts && opts.ask ? m.asks : m.extra;
+    const host = m.asks;
     const box = host.querySelector('.ai-acts') || host.appendChild(WF.ui.el('div', { class: 'ai-acts' }));
     const n = WF.ui.el('div', { class: 'ai-act' + (act.danger ? ' danger' : '') + (act.quiet ? ' quiet' : '') });
     n.innerHTML = `<span class="ic">${icon(act.icon || 'bolt', 15)}</span><div style="min-width:0"><div class="t">${esc(act.title || act.label)}</div>${act.desc ? `<div class="d">${esc(act.desc)}</div>` : ''}</div>
-      <div class="b"><button type="button" class="btn sm ghost" data-no>${opts && opts.ask ? 'Ablehnen' : 'Verwerfen'}</button><button type="button" class="btn sm ${act.danger ? 'danger' : 'primary'}" data-go>${icon('check', 13)}${opts && opts.ask ? 'Bestätigen' : 'Ausführen'}</button></div>`;
+      <div class="b"><button type="button" class="btn sm ghost" data-no>Ablehnen</button><button type="button" class="btn sm ${act.danger ? 'danger' : 'primary'}" data-go>${icon('check', 13)}Bestätigen</button></div>`;
     box.append(n);
     scrollEnd(false);
     return new Promise((resolve) => {
@@ -3506,38 +3933,68 @@
         const r = runAct(act.action);
         const ok = !(r && r.ok === false);
         fin(ok ? 'ok' : 'fail', `${icon(ok ? 'check' : 'alert', 13)}${esc(ok ? 'Ausgeführt ' + nowLabel() : 'Nicht möglich')}`, { ok, msg: (r && r.msg) || (ok ? 'Ausgeführt' : 'Nicht möglich'), result: r });
-        if (!(opts && opts.ask)) addSys((r && r.msg) || (ok ? 'Ausgeführt' : 'Nicht möglich'), ok ? 'ok' : 'warn');
         renderSugg(true);
       };
-      n.querySelector('[data-no]').onclick = () => fin('no', `${icon('x', 13)}Verworfen`, { ok: false, rejected: true, msg: 'Vom Nutzer abgelehnt' });
+      n.querySelector('[data-no]').onclick = () => fin('no', `${icon('x', 13)}Abgelehnt`, { ok: false, rejected: true, msg: 'Vom Nutzer abgelehnt' });
       if (opts && opts.signal) opts.signal.addEventListener('abort', () => { if (n.querySelector('[data-go]')) fin('no', `${icon('x', 13)}Abgebrochen`, { ok: false, rejected: true, msg: 'Abgebrochen' }); });
     });
   }
+  /** Aktion ausführen – über WF.app.runAction (eine Stelle für Meldungen, Leitstand und Copilot) */
   function runAct(action) {
     if (!action) return { ok: false, msg: 'Keine Aktion' };
+    ADVC = { t: -1, m: {} };
     if (action.type === 'select' || action.type === 'open') { UI.openEntity(action.kind, action.id); return { ok: true, msg: 'Geöffnet' }; }
+    if (action.type === 'ackMany') { let n = 0; for (const id of action.ids || []) { const r = WF.sim.actions.ack(id, 'Schichtleitung'); if (r && r.ok) n++; } if (WF.app && WF.app.toast) WF.app.toast(n ? pl(n, 'Meldung', 'Meldungen') + ' quittiert' : 'Keine Meldung mehr offen', n ? 'ok' : 'warn'); return { ok: n > 0, msg: n ? pl(n, 'Meldung', 'Meldungen') + ' quittiert' : 'Keine Meldung mehr offen' }; }
     if (action.type === 'navigate') { if (WF.app) WF.app.navigate(action.view, action.params); return { ok: true, msg: 'Ansicht ' + VIEW_TITLE(action.view) + ' geöffnet' }; }
-    if (action.type === 'ackMany') { let n = 0; for (const id of action.ids || []) { const r = WF.sim.actions.ack(id, 'Schichtleitung'); if (r && r.ok) n++; } return { ok: n > 0, msg: n ? pl(n, 'Meldung', 'Meldungen') + ' quittiert' : 'Keine Meldung mehr offen' }; }
     let r;
-    try { r = WF.sim.runAction(action); } catch (e) { r = { ok: false, msg: e.message }; }
-    if (!openState && r && r.ok !== false && WF.app && WF.app.toast) WF.app.toast(r.msg || 'Ausgeführt', 'ok');
+    try { r = WF.app && WF.app.runAction ? WF.app.runAction(action) : WF.sim.runAction(action); } catch (e) { r = { ok: false, msg: e.message }; }
     return r;
+  }
+  /** Kopf der Antwort: Bezugszeile (eyebrow), Kernaussage, 2–4 Kennzahlen; bei Szenarien/Störung gleich das Termin-Diagramm */
+  const TOP_IMPACT = { whatif: 1, fault: 1, ext: 1 };
+  function topHTML(a) {
+    let h = '';
+    if (a.eyebrow) h += `<div class="ai-eb"><i></i><span>${esc(a.eyebrow)}</span></div>`;
+    if (a.head) h += `<h3 class="ai-hl">${inline(a.head, true)}</h3>`;
+    if (a.stats && a.stats.length) h += statsHTML(a.stats.slice(0, 4));
+    if (a.impact && !a.impact.hidden && TOP_IMPACT[a.kind]) h += impactHTML(a.impact);
+    return h;
+  }
+  /** Empfehlung mit den zugehörigen Aktionen (Handlung ausführen = WF.app.runAction), Nebenaktionen leise darunter */
+  function recHTML(a) {
+    const acts = a.actions || [];
+    const prim = acts.filter(x => !x.quiet && !x.danger), sec = acts.filter(x => x.quiet || x.danger);
+    let h = '';
+    if (a.rec || prim.length) {
+      const lab = a.rec ? a.rec.label : 'Vorschlag';
+      h += `<div class="ai-rec${lab === 'Hinweis' ? ' note' : ''}"><div class="ai-rec-h">${icon(lab === 'Hinweis' ? 'info' : lab === 'Einschätzung' ? 'check' : 'target', 13)}${esc(lab)}</div>${a.rec ? `<div class="ai-rec-t">${inline(a.rec.text)}</div>` : ''}`;
+      if (prim.length) h += `<div class="ai-ras">${prim.map((x, i) => `<div class="ai-ra" data-ai-act="${acts.indexOf(x)}"><span class="ic">${icon(x.icon || 'bolt', 14)}</span><span class="tx"><b>${esc(x.label)}</b>${x.desc ? `<small>${esc(x.desc)}</small>` : ''}</span><span class="b"><button type="button" class="btn sm ${i === 0 ? 'primary' : ''}" data-run="${acts.indexOf(x)}">Ausführen</button></span></div>`).join('')}</div>`;
+      h += '</div>';
+    }
+    if (sec.length) h += `<div class="ai-more">${sec.map(x => `<button type="button" class="ai-mb${x.danger ? ' danger' : ''}" data-run="${acts.indexOf(x)}" title="${esc(x.desc || '')}">${icon(x.icon || 'arrowRight', 13)}${esc(x.label)}</button>`).join('')}</div>`;
+    return h;
   }
   function finishExtras(m, a) {
     let html = '';
-    if (a.stats) html += statsHTML(a.stats);
-    if (a.impact) html += impactHTML(a.impact);
-    if (html) m.body.insertAdjacentHTML('afterbegin', html.replace(/^/, ''));
-    if (a.stats || a.impact) { // Kennzahlen nach dem ersten Absatz einfügen (Kernaussage zuerst)
-      const mdEl = m.body.querySelector('.ai-md'), first = mdEl && mdEl.firstElementChild;
-      const blocks = Array.from(m.body.querySelectorAll(':scope > .ai-stats, :scope > .ai-imp'));
-      if (first) { let ref = first; for (const b of blocks) { if (b.classList.contains('ai-imp') && a.kind !== 'whatif' && a.kind !== 'order') { const q = mdEl.querySelector('blockquote'); if (q) { mdEl.insertBefore(b, q); continue; } } ref.after(b); ref = b; } }
-    }
-    m.extra.insertAdjacentHTML('beforeend', sourcesHTML(a.sources));
-    for (const act of a.actions || []) actionCard(m, act);
-    m.extra.insertAdjacentHTML('beforeend', followHTML(a.followups));
+    if (a.impact && !a.impact.hidden && !TOP_IMPACT[a.kind]) html += impactHTML(a.impact);
+    html += recHTML(a);
+    html += sourcesHTML(a.sources);
+    m.extra.insertAdjacentHTML('beforeend', html);
+    m.extra.classList.add('ai-in');
+    m.actions = a.actions || [];
+    m.after.innerHTML = followHTML(a.followups);
     m.followups = a.followups || [];
     scrollEnd(false);
+  }
+  /** Aktion aus der Empfehlung ausführen; Ergebnis bleibt sichtbar an der Zeile */
+  function runFromCard(m, idx, btn) {
+    const act = m.actions && m.actions[idx]; if (!act) return;
+    const r = runAct(act.action), ok = !(r && r.ok === false);
+    const row = btn.closest('.ai-ra');
+    const res = `<span class="res ${ok ? 'ok' : 'fail'}">${icon(ok ? 'check' : 'alert', 13)}${esc(ok ? (act.action.type === 'select' || act.action.type === 'navigate' ? 'Geöffnet' : 'Ausgeführt ' + nowLabel()) : 'Nicht möglich')}</span>`;
+    if (row) { row.classList.add(ok ? 'done' : 'fail'); row.querySelector('.b').innerHTML = res; if (r && r.msg) { const sm = row.querySelector('small'); if (sm) sm.textContent = r.msg; else row.querySelector('.tx').insertAdjacentHTML('beforeend', `<small>${esc(r.msg)}</small>`); } }
+    else { btn.disabled = true; btn.classList.add(ok ? 'done' : 'fail'); btn.title = (r && r.msg) || ''; }
+    renderSugg(true);
   }
 
   // ------------------------------------------------------------------ Senden
@@ -3611,8 +4068,10 @@
         if (ctl.signal.aborted) { m.body.innerHTML = '<div class="ai-md"><p class="muted">Abgebrochen.</p></div>'; return resolve(null); }
         const a = offlineAnswer(text, ctx);
         if (a.entity) conv.lastEntity = a.entity;
-        if (note) m.el.querySelector('.ai-asks').insertAdjacentHTML('beforebegin', `<div class="ai-notice">${icon('info', 14)}<span>${esc(note)}</span></div>`);
-        const full = a.display || a.text;
+        if (note) m.asks.insertAdjacentHTML('beforebegin', `<div class="ai-notice">${icon('info', 14)}<span>${esc(note)}</span></div>`);
+        m.card.className = 'ai-card sev-' + (a.sev || 'info');
+        m.top.innerHTML = topHTML(a);
+        const full = a.display != null ? a.display : a.text;
         m.plain = a.text;
         if (a.slots) { m.slots = {}; for (const k in a.slots) { const f = SLOT_HTML[k] || SLOT_HTML[k.replace(/\d+$/, '')]; m.slots[k] = f ? f(a.slots[k].data) : ''; } }
         const words = full.split(/(\s+)/);
@@ -3639,9 +4098,10 @@
     });
   }
   /** Live: Claude mit leitender Anweisung, Verlauf und Werkzeugen */
-  async function askLive(sample, text, context, ctl) {
+  async function askLive(sample, text, context, ctl, noTools) {
     const m = addAssistant('KI');
-    const turns = [{ role: 'user', content: instructions(context) }];
+    const toolSet = live.tools && !noTools ? toolList() : [];
+    const turns = [{ role: 'user', content: instructions(context, toolSet) }];
     const hist = conv.history.slice(-10).map(x => ({ role: x.role, content: trimTxt(x.content, 3000) }));
     for (const x of hist) turns.push(x);
     turns.push({ role: 'user', content: text });
@@ -3650,8 +4110,8 @@
       modelTier: pickTier(text),
       onText: ({ text: tx }) => { m.text = tx; renderBody(m, true); },
     };
-    if (live.tools) {
-      opts.tools = TOOLS.slice(0, live.maxTools || TOOLS.length).map(tl => ({
+    if (toolSet.length) {
+      opts.tools = toolSet.map(tl => ({
         name: tl.name, description: tl.description, inputSchema: tl.inputSchema || { type: 'object', properties: {} },
         execute: async (input, tctx) => {
           input = input || {};
@@ -3677,7 +4137,7 @@
       const r = await sample(turns, opts);
       m.text = r.text; renderBody(m, false); m.status = 'done'; showCopy(m);
       if (r.truncated) m.extra.insertAdjacentHTML('beforeend', `<div class="ai-err">${icon('info', 14)}<div>Antwort wurde gekürzt (Längenlimit). Für Details gezielter nachfragen.</div></div>`);
-      m.extra.insertAdjacentHTML('beforeend', sourcesHTML(['Claude' + (r.modelTierApplied ? ' (' + (r.modelTierApplied === 'quick' ? 'schnell' : r.modelTierApplied === 'complex' ? 'ausführlich' : 'Standard') + ')' : ''), 'Lageübersicht ' + U.fmtClock(NOW()), live.tools ? 'Werkzeug-Abfragen' : 'ohne Werkzeuge']));
+      m.extra.insertAdjacentHTML('beforeend', sourcesHTML(['Claude' + (r.modelTierApplied ? ' (' + (r.modelTierApplied === 'quick' ? 'schnell' : r.modelTierApplied === 'complex' ? 'ausführlich' : 'Standard') + ')' : ''), 'Lageübersicht ' + U.fmtClock(NOW()), live.tools ? 'Live-Datenabfragen' : 'ohne Datenabfragen']));
       const E = entities(text + ' ' + r.text);
       if (E.orders[0]) conv.lastEntity = { kind: 'order', id: E.orders[0] }; else if (E.machines[0]) conv.lastEntity = { kind: 'machine', id: E.machines[0] };
       conv.history.push({ role: 'user', content: text }, { role: 'assistant', content: r.text });
@@ -3688,14 +4148,23 @@
       if (e && e.text) { m.text = e.text; renderBody(m, false); } else if (code !== 'cancelled' || !m.text) m.body.innerHTML = '';
       if (code === 'cancelled') { m.body.insertAdjacentHTML('beforeend', '<div class="ai-meta">Abgebrochen</div>'); if (!m.text) m.body.innerHTML = '<div class="ai-md"><p class="muted">Abgebrochen.</p></div>'; return null; }
       if (code === 'refused') m.body.innerHTML = '';
-      if (PERMANENT[code] || code === 'tools_unavailable') {
-        if (code === 'tools_unavailable') { live.tools = false; }
-        else goOffline(PERMANENT[code] + ' – Offline-Copilot aktiv.');
+      if (code === 'tools_unavailable' && toolSet.length) {
+        // Datenabfragen hier nicht verfügbar: genau ein Aufruf ohne Tools (vom Nutzer ausgelöst, keine Schleife)
+        live.tools = false; live.reason = 'Claude antwortet aus der Lageübersicht (ohne Datenabfragen in dieser Ansicht).'; emitStatus();
         m.el.remove(); conv.msgs.splice(conv.msgs.indexOf(m), 1);
-        return askOffline(text, context, ctl, `${code === 'tools_unavailable' ? 'Werkzeuge sind in dieser Ansicht nicht verfügbar' : PERMANENT[code]} – Antwort vom Offline-Copilot aus den Live-Daten.`);
+        return askLive(sample, text, context, ctl, true);
       }
-      const msg = ERR[code] || ERR.upstream_error;
-      m.extra.insertAdjacentHTML('beforeend', `<div class="ai-err">${icon('alert', 15)}<div>${esc(msg)}<div class="b"><button type="button" class="btn sm" data-retry="${esc(text)}">${icon('refresh', 13)}Erneut senden</button><button type="button" class="btn sm ghost" data-offline="${esc(text)}">Offline-Antwort anzeigen</button></div></div></div>`);
+      if (PERMANENT[code]) {
+        goOffline(PERMANENT[code] + ' – Offline-Copilot aktiv.');
+        m.el.remove(); conv.msgs.splice(conv.msgs.indexOf(m), 1);
+        return askOffline(text, context, ctl, `${PERMANENT[code]} – Antwort vom Offline-Copilot aus den Live-Daten.`);
+      }
+      if (code === 'invalid_request' && live.tools) { live.tools = false; emitStatus(); }
+      const msg = code === 'invalid_request' && !toolSet.length ? 'Die Anfrage an Claude war ungültig – bitte anders formulieren oder erneut senden.' : ERR[code] || ERR.upstream_error;
+      const btns = NO_RETRY[code]
+        ? `<button type="button" class="btn sm" data-rephrase="${esc(text)}">${icon('file', 13)}Frage umformulieren</button><button type="button" class="btn sm ghost" data-offline="${esc(text)}">Offline-Antwort anzeigen</button>`
+        : `<button type="button" class="btn sm" data-retry="${esc(text)}">${icon('refresh', 13)}Erneut senden</button><button type="button" class="btn sm ghost" data-offline="${esc(text)}">Offline-Antwort anzeigen</button>`;
+      m.extra.insertAdjacentHTML('beforeend', `<div class="ai-err">${icon('alert', 15)}<div>${esc(msg)}<div class="b">${btns}</div></div></div>`);
       if (!m.text && !m.body.innerHTML) m.body.innerHTML = '';
       scrollEnd(false);
       return null;
@@ -3718,10 +4187,12 @@
     if (!t || !panel.contains(t)) return;
     if (t.dataset.ask) { if (!conv.busy) send(t.dataset.ask, conv.context); return; }
     if (t.dataset.copy) { copyMsg(t.dataset.copy, t); return; }
+    if (t.dataset.run != null) { const mEl = t.closest('.ai-m'), m = mEl && conv.msgs.find(x => String(x.id) === mEl.dataset.mid); if (m && !t.disabled) runFromCard(m, Number(t.dataset.run), t); return; }
     if (t.classList.contains('ai-ent') && t.dataset.k) { UI.openEntity(t.dataset.k, t.dataset.id); return; }
     if (t.dataset.entK) { UI.openEntity(t.dataset.entK, t.dataset.entId); return; }
     if (t.hasAttribute('data-ctxx')) { conv.context = null; renderCtx(); renderSugg(true); return; }
     if (t.dataset.retry) { if (!conv.busy) send(t.dataset.retry, conv.context); return; }
+    if (t.dataset.rephrase) { R.input.value = t.dataset.rephrase; autoGrow(); R.send.disabled = false; try { R.input.focus(); R.input.select(); } catch (e2) { /* */ } return; }
     if (t.dataset.offline) { if (conv.busy) return; const ctl = new AbortController(); conv.ctl = ctl; setBusy(true); askOffline(t.dataset.offline, conv.context, ctl, 'Antwort vom Offline-Copilot (regelbasiert, aus Live-Daten).').finally(() => { setBusy(false); conv.ctl = null; }); }
   }
 
@@ -3736,6 +4207,8 @@
   });
   WF.bus.on('select', (p) => {
     if (!panel) return;
+    // Detail in der App geöffnet und kein Platz daneben: der Copilot würde es verdecken – also Platz machen
+    if (openState && p && p.kind && p.id && !selfSelect && !roomBeside()) { setTimeout(() => { if (openState && drawerOpen() && !conv.busy && !roomBeside()) UI.close(); }, 0); }
     if (openState && p && p.kind && p.id && (!conv.context || conv.context.auto || conv.context.kind !== 'notification')) conv.context = { kind: p.kind, id: p.id, auto: true };
     else if (p && !p.kind && conv.context && conv.context.auto) conv.context = null;
     setTimeout(layout, 0);
@@ -3757,6 +4230,9 @@
     renderCtx(); renderSugg(false);
     if (R.log.querySelector('.ai-empty') && !conv.msgs.length) { const sig = Object.values(S().machines).filter(m => m.state === 'running').length + '|' + Object.values(S().people).filter(p => p.state !== 'offShift').length; if (sig !== R.log._sig) { R.log._sig = sig; renderEmpty(); } }
   }, 2000);
+  // Prognose-Verlauf mitschreiben (für „vorher/nachher“ bei Störungen) – liest nur die gecachte Prognose
+  setInterval(() => { try { logEta(); } catch (e) { /* optional */ } }, 2000);
+  WF.bus.on('sim:reset', () => { etaLog.length = 0; ADVC = { t: -1, m: {} }; });
   // Eigenes Scrollen (Rad, Wischen, Tasten) beendet das Mitlaufen bis zur nächsten Frage
   const pin = () => { if (R.log) for (const ev of ['wheel', 'touchmove', 'keydown']) R.log.addEventListener(ev, () => { autoScroll = false; }, { passive: true }); };
   // Panel früh aufbauen (unsichtbar), damit der erste Klick sofort reagiert; Claude-Verbindung im Hintergrund prüfen

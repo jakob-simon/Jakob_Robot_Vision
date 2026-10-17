@@ -42,6 +42,12 @@
   @media (max-width:560px){.tour-hero{grid-template-columns:1fr}.tour-card.center .tour-t{font-size:26px}
     .tour-dots{display:none}.tour-step{white-space:nowrap}.tour-card{padding:12px 14px 12px}.tour-x{font-size:13px}.tour-t{font-size:19px}
     .tour-card.center{max-height:calc(100vh - 120px);overflow:auto}.tour-hero div{padding:8px 10px}.tour-hero b{font-size:20px}}
+  /* Telefon mit offenem Copilot: Karte schrumpft zur Leiste oben, Eingabefeld und Antwort bleiben frei */
+  .tour-card.mini{top:calc(var(--top-h) + env(safe-area-inset-top,0px) + 6px);bottom:auto;padding:8px 10px 8px 14px;
+    display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:10px}
+  .tour-card.mini .tour-top{grid-column:1;margin:0}.tour-card.mini .tour-t{grid-column:1;font-size:15px;margin:2px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tour-card.mini .tour-f{grid-column:2;grid-row:1/3;margin:0}
+  .tour-card.mini .tour-x,.tour-card.mini .tour-more,.tour-card.mini .tour-auto,.tour-card.mini .tour-dots,.tour-card.mini [data-prev],.tour-card.mini .tour-f .spacer,.tour-card.mini .tour-progress{display:none}
   @media (min-width:900px){body.ai-open .tour-card:not(.center){left:max(16px,calc(var(--side-w) + 16px));transform:none;width:min(560px,calc(100vw - var(--side-w) - 440px - 48px))}}
   `, 'tour');
 
@@ -226,6 +232,8 @@
   function placeCard() {
     if (!card || card.classList.contains('center')) return;
     const f = freeArea();
+    // Telefon: offener Copilot verdeckt sonst Eingabe und Antwort
+    card.classList.toggle('mini', window.innerWidth < 700 && !!document.querySelector('.ai-panel.open'));
     if (window.innerWidth < 700) { card.style.left = ''; card.style.width = ''; card.style.transform = ''; return; }
     // Karte immer im freien Bereich zwischen Navigation und Detail-/Copilot-Panel halten
     const avail = f.right - f.left - 32;

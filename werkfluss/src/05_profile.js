@@ -31,7 +31,7 @@
       vendor: 'Behringer', model: 'HBE320A', control: 'Behringer SPS', year: 2009,
       footprint: { x: 2, z: 13.5, w: 6.5, d: 5 }, facing: 'S', ...back(5.5),
       automation: 'magazine', loading: 'auto', skill: 'saw', rate: 55, power: { idle: 1.2, run: 6.5 },
-      inCap: 0, outCap: 4, mtbfH: 60, fpiMin: 0,
+      inCap: 0, outCap: 6, mtbfH: 60, fpiMin: 0, // Zuschnitt-Ablage für 6 Behälter/Gitterboxen
       conn: { level: 1, protocol: 'Nachrüst-Sensorik (Strom + Signalsäule)', gateway: 'werkfluss Edge 01' } },
     { id: 'M02', kind: 'machine', type: 'lathe', name: 'CNC-Drehfräszentrum mit Portallader', short: 'INDEX G220', area: 'Dreherei',
       vendor: 'INDEX', model: 'G220', control: 'Siemens SINUMERIK 840D sl', year: 2020,

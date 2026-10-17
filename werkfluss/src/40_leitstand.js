@@ -1329,7 +1329,7 @@
   function renderBrief() {
     const b = brief.data; if (!b) return;
     const now = WF.sim.t;
-    setText(R.briefMode, brief.pending ? 'erstellt …' : b.mode === 'regelbasiert' ? 'Regelbasiert' : b.mode);
+    setText(R.briefMode, brief.pending ? 'erstellt …' : b.mode === 'regelbasiert' ? 'aus Live-Daten' : b.mode);
     setAttr(R.briefMode, 'title', b.mode === 'regelbasiert' ? 'Offline-Modus: aus Live-Daten nach festen Regeln erstellt' : 'Vom KI-Modell erstellt');
     const linkify = (x) => {
       const txt = esc(x.text);
