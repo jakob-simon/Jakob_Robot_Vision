@@ -188,6 +188,13 @@
     const { type, args, ...rest } = action;
     if (type === 'select' || type === 'open') { app.select(rest.kind, rest.id); return { ok: true }; }
     if (type === 'navigate') { app.navigate(rest.view, rest.params); return { ok: true }; }
+    if (typeof WF.sim.actions.run === 'function') {
+      // Engine kennt die Parameter ihrer eigenen Aktionen (Benachrichtigungs-Buttons)
+      let r; try { r = WF.sim.actions.run(action); } catch (e) { r = { ok: false, msg: e.message }; }
+      const okR = !(r && r.ok === false);
+      app.toast((r && r.msg) || (okR ? 'Ausgeführt' : 'Nicht möglich'), okR ? 'ok' : 'warn');
+      return r;
+    }
     const fn = WF.sim.actions[type];
     if (typeof fn !== 'function') return { ok: false, msg: 'Unbekannte Aktion ' + type };
     let res;
