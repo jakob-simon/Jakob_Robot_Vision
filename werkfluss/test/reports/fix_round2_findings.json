@@ -355,6 +355,394 @@
    "evidence": "At 768 and 1024 (both 'narrow'), the toolbar shows four coloured circles (orange/blue/green/white) with no text: Materialfluss, Datenfluss, Personen, Beschriftung. The meaning is only in `title`, which touch devices never show. Each toggle is 28×30 px. Minimap station labels render at 8.8 px effective and M06/M09/M10/M11 crowd each other. Screenshots: /tmp/rv-mobile/tab-halle.png, /tmp/rv-mobile/land-halle.png.",
    "fix": "In narrow mode keep short labels instead of hiding them (`.h3-root.narrow .h3-tb .h3-chip span{display:inline;font-size:11px}` with texts 'Material', 'Daten', 'Personen', 'Text'). If space is short, drop the camera-preset label rather than the layer names. Make chips at least 36×36 under pointer:coarse. Hide the minimap when the free width is < 900 px, or raise its text to 2.8 viewBox units (≥ 11 px effective).",
    "lens": ""
+  },
+  {
+   "severity": "high",
+   "file": "src/30_hall3d.js",
+   "title": "Order trace (\"In der Halle verfolgen\" / tour step 5) shows a tiny, half-covered hall and stays zoomed out afterwards",
+   "evidence": "/tmp/rv-hall3d/o-trace-drawer.png, o-trace2.png, tour-order.png: camera-to-target distance is 124.2 m with drawerW=480. The hall fills only about 500×380 px of 1440×900, and the status card, Hallenplan and tour card cover a large part of that. After WF.app.closeDrawer() the camera stays 124 m away, leaving a small hall in a dark void (o-trace-nodrawer.png). Cause: focusOrder() uses r = clamp(span*1.25+12,26,96)*mobK*drawerK, and drawerK = (1/0.61)^0.8*1.12 ≈ 1.67, so r ≈ 137.",
+   "fix": "Replace the r heuristic with a fit-to-free-rect solver. The free rect is the canvas minus the drawer (R.drawerW), minus R.uiRects, minus the tour card rect. Project all route station footprints (y 0..2.5 m) and choose the smallest r and target offset that keeps every point inside the rect with a 12 px margin. A grid search with exactly this approach works (see the preset finding). For routes use phi≈44°, th≈12°. While a route is shown, collapse the status card and Hallenplan (add a .h3-root.focus class that hides .h3-status and .h3-mapbox, or shrinks them to a 36 px pill). When the drawer closes, re-run the fit and goCam() to the new r.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "high",
+   "file": "src/30_hall3d.js",
+   "title": "Route labels are anchored on the shared main aisle and point at the wrong machines; the bottleneck step label is dropped",
+   "evidence": "/tmp/rv-hall3d/o-trace2-crop.png, tour-order.png. For FA-24118, R.rtLb.s4 ('AG 50 · Rundschleifen Lagersitze', M09) has shown=false, yet this is exactly the step the drawer names as the forecast bottleneck. buildRoute() places discs and labels at st.dock, and the docks of back-row and front-row machines all lie on the main aisle (M07 41.5/22, QS 49.5/22, M09 28/22, M04 33.5/22). Labels are offset +12 px down and right with no leader line (.h3-lb.rt::after{display:none}). As a result 'AG 30 Tieflochbohren' sits over M10/M11 and 'AG 60 Endprüfung' sits over M07.",
+   "fix": "Anchor each step at its machine: footprint centre with y = TYPE_H[type]+0.4 for the label, and the disc at the station's inPos (slotPos(st,'in',0)), not the dock. Re-enable a leader line for .rt labels (1 px line from label corner to anchor, color var(--rc)). Route labels must never vanish: try 8 positions at two radii (12 px and 40 px), then fall back to a compact chip '5 · AG 50'. Give the active step and the forecast-bottleneck step priority 220, placed before all other labels, and outline the bottleneck in --st-wait with the text 'Engpass'.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "high",
+   "file": "src/30_hall3d.js",
+   "title": "AGV drives into and under the shipping pallets at Versand",
+   "evidence": "/tmp/rv-hall3d/e-agv.png: AGV1 (toCharge, just unloaded) renders underneath a carton pallet. A 6 h simulation showed AGV1 unloads at VERSAND.inPos (58.5, 28.0), and its diagonal approach from the dock (55.5, 31) crosses VERS_SLOTS (x 57.95/59.4/60.85, z 27.4 + 1.55·r). 385 of 43,200 AGV samples were inside a pallet-slot square.",
+   "fix": "Rebuild VERS_SLOTS so they leave a 2.4×2.4 m AGV hand-over square around VERSAND.inPos and the approach corridor from the dock clear. For example, use two columns at x ∈ {60.3, 61.75} and z = 25.4 + 1.55·r for r = 0..8 (18 slots), or reuse slotList(), which already avoids aisles. Paint a green-dashed 'AGV-ÜBERGABE' box at inPos in texFloorMarks so the drop point reads as intentional.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "high",
+   "file": "src/30_hall3d.js",
+   "title": "Hover tooltip comes back after clicking a machine and is cut off by the drawer",
+   "evidence": "/tmp/rv-hall3d/h-click-M04.png: after clicking M04 the drawer opens, but the hover card 'M04 · WFL M80 … Klicken für Details' stays on screen, half hidden under the drawer edge. This happens on every click in the demo script. The pointerdown handler removes .on, but update() calls renderTip(false) 4×/s while R.hover is set. positionTip() also clamps x to R.w and ignores R.drawerW.",
+   "fix": "In renderTip(), return early with tip.classList.remove('on') when R.selTarget matches R.hover (the drawer already shows it), or when a click happened and the mouse has not moved more than 6 px since. In positionTip(), clamp to R.w - (R.drawerW||0) - 10 and flip left first. Also skip the tooltip when that machine's label is already at level 2: the two cards repeat the same order and progress lines (h-hover-M04.png).",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "high",
+   "file": "src/30_hall3d.js",
+   "title": "Ghost-shift status card says autonomous machines are running while none produce",
+   "evidence": "/tmp/rv-hall3d/n-overview.png at Di 00:12: the card reads 'Keine Schicht · autonome Maschinen laufen · Schichtbeginn Di 06:00' next to PRODUKTION 0/13 '12 wartend · 1 bereit'. The text in update() at line 3446 is static. The same static phrase appears in 40_leitstand.js:1038/1044 and 47_people.js:847.",
+   "fix": "Make it data-driven: `${run ? plural(run, 'autonome Maschine läuft', 'autonome Maschinen laufen') : 'alle Maschinen stehen – ' + (wait ? wait + ' warten auf Bediener' : 'kein Auftrag')} · Schichtbeginn …`. Tell the Leitstand and Personal owners to apply the same rule.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Camera presets cut off their own zones and hide parts under the overlays",
+   "evidence": "Screenshots /tmp/rv-hall3d/p-dreherei.png, p-logistik.png, p-messraum.png, 02-overview-settled.png. I projected each zone's footprints against R.uiRects and the viewport:\n- Dreherei: M01 83% hidden, M08 100% off-screen, M07 36%; the foreground is filled by giant 'SCHLEIFEREI/REINIGUNG' floor text.\n- Logistik: CHG (AGV charging) 100% off-screen, RAW 36% under the status card.\n- Messraum: M11 66%, M13 26%.\n- Übersicht: RAW 45% and WE 27% under the panels; the empty front yard takes the lower-left quarter.",
+   "fix": "Fit presets to the free rect (same solver as the order trace) and re-run it on resize and when the drawer opens or closes. A grid search at 1440×900 with the current panels, keeping phi and th, gave:\n- uebersicht t=[28.1,0,21.3] r=93\n- dreherei t=[30.4,0,18.3] r=66\n- fraeserei t=[26.5,0,27.1] r=42\n- logistik t=[25.4,0,7.6] r=59\n- messraum t=[51.3,0,32.7] r=43\nAdd CHG to logistik.zone and drop M11 from messraum.zone. Also consider shrinking the front apron depth AD from 11.5 to 6 m.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Hobber, cylindrical grinder and VMC are indistinguishable white boxes: their signature mechanics are hidden under opaque roofs",
+   "evidence": "/tmp/rv-hall3d/c-M06.png, c-M08.png, c-M09.png, interiors-M08-M09.png. Every demo camera (phi 43–58°) looks down onto the opaque cabin roof; through the vertical window you only see the table or bed. The Liebherr hob (Ø0.13 m, y≈1.65) and the Studer wheel are never visible, and M09's interior is near-black. Haas VF-4, Liebherr LC 180 and Studer S33 share the same silhouette: sliding doors, swivel HMI, mist collector, tower. A machinist could not name M08 or M09.",
+   "fix": "(1) In cabin(), add opt.roofGlass: build the roof shell over the work area (zi..zf) from M.glass framed by 0.06 m Pm edges, or fade the roof to 0.3 opacity when the camera is above 60° and within 35 m.\n(2) Brighten interiors: lighten M.glass (color 0x9fb4c4, opacity 0.18, envMapIntensity 0.8) and add an emissive LED strip inside the top front edge (MeshBasic #fff6e8 ×2, 0.03 m).\n(3) Silhouette cues per machine:\n- Hobber: hob head on a 30° swivel with the hob scaled ×1.6, a visible counter column, and a ring loader on the +x side.\n- Studer: dark-grey lower base band with a white upper hood, plus a wheelhead hood bulge on the back roof.\n- Haas VMC: a Z-column hump rising 0.35 m through the roof.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Every worker wears a construction hard hat and hi-vis vest; role colours reuse machine-state colours",
+   "evidence": "/tmp/rv-hall3d/e-person.png, c-M06.png, c-M09.png, e-fork.png. personGeos() gives every role a helmet (hemisphere, brim and peak) and a full vest. Hard hats are not worn in a Viennese machining job shop, and machinists do not wear hi-vis. The vest hues also collide with state hues in the legend (h-legend.png): Logistik green vs Produktion, Einrichter yellow vs Wartet, Montage purple vs Werkzeugwechsel, QS blue vs Rüsten.",
+   "fix": "Replace the hat with hair (dark/brown hemisphere scaled 1, 0.7, 1) and give the shift lead a cap. Dress everyone in navy or anthracite workwear and show the role as a 0.06 m shoulder yoke plus chest stripe. Keep a full hi-vis vest only for 'log' and the forklift driver, and add safety glasses as two thin dark boxes. Choose role hues outside the STATE palette (for example teal, coral, sand, slate, white) and update ROLES and the legend.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Material-flow layer is barely visible at overview distance, contradicting the tour copy",
+   "evidence": "/tmp/rv-hall3d/l-none.png vs l-flow.png: toggling Materialfluss only adds faint hairlines. tour-hall-crop.png: on tour step 4 ('Orange: welcher Behälter gerade von wo nach wo fährt') no orange path is identifiable. The order-flow arcs (netMat) use opacity 0.21 (additive) and tube radius 0.022–0.062 m, under 1 px at r = 86 m; transport ribbons are 0.42 m (about 6 px). Simulation from 08:40 to 09:20: no transport is moving 79% of the time.",
+   "fix": "Scale with camera distance: ribbon width = max(0.42, dist·0.0065) m (scale the geometry normal offset in the vertex shader via a uniform) and net tube radius = max(0.03, dist·0.0012). Raise netMat uOp to about 0.45 at overview and draw the arcs higher (mid.y = 3 + d·0.12) so they read as arcs. Make the netPulses particles 2× larger. Add a short 'Fluss'-highlight: when the Materialfluss chip is toggled on, flash all flows at full opacity for 1.5 s.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Waiting transports appear only as a pulsing ring; the legend gives the wrong reason",
+   "evidence": "Sim at 08:50: four open transports (TR-0018, -0021, -0022, -0025), all with waitReason 'Zielpuffer INDEX G220 / Haas VF-4 voll', the oldest open since 08:08, while AGV1 and AGV2 sit idle at 100%. The hall draws only C.wait rings at the containers. The legend says 'Abholung offen – Behälter steht bereit, Transport noch nicht vergeben' (h-legend.png), which is not why they wait.",
+   "fix": "For open transports with a waitReason, draw a dashed ghost path (flowMaterial mode 1 at 40% opacity) from container to destination. Put a stop marker on the full in-buffer and a small route-style label 'Ziel voll · wartet 42 min' (from tr.waitReason and S.t - tr.createdT). Change the legend entry to 'Wartet auf Transport (Grund im Tooltip, z. B. Zielpuffer voll)'. This visualises the WIP-limit/pull logic, a strong selling point.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Floor area names are chopped by machines and columns, and appear upside-down in the Fräserei preset",
+   "evidence": "/tmp/rv-hall3d/l-none-crop-areas.png: 'SONDERBEARB[M07]UNG VER[M08]HNUNG' reads as one garbled line. Back-row names (z 12.2–13.4) lie behind the machines from every front camera, and Sonderbearbeitung (about x 39–51) overlaps Verzahnung (about 50–57). l-none-crop-front.png: 'SCHL|IFEREI' is split by a hall column. p-fraeserei.png (th=194°): all floor stencils read upside-down.",
+   "fix": "Replace the big floor area names with suspended zone signs: double-sided 3.2×0.7 m panels at y≈5.3 m on two rods from the roof, using texSign-style canvases, fixed facing +z and also readable from -z. This is what real halls use and it stays legible from every preset. If floor text stays: move back-row names to z=11.0, rename 'Sonderbearbeitung' to 'Tiefbohren', reduce the font to 0.75 m, and shift 'Schleiferei' +2 m in x off the column.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Cable tray cuts across every back-row close-up as a heavy grey beam",
+   "evidence": "/tmp/rv-hall3d/c-M01.png, c-M04.png, c-M05.png, p-dreherei.png, e-aisle-low.png. The 0.4 m tray at TRAY_Y=6.2 runs along z=22 and passes between the camera and the machines in all close and mid views, including the 'Dreherei' preset. OrbitControls (minDistance 6, maxPolar 76°) easily reach camera heights at tray level.",
+   "fix": "Fade the tray like the walls. Each frame compute k = clamp((camY - 7)/5, 0, 1) · clamp((distToTrayLine - 4)/8, 0, 1) and set the tray material opacity to 0.12 + 0.88·k (transparent, depthWrite off when k < 1), always keeping the cyan glow line and pulses. Alternatively raise TRAY_Y to 7.6 m, just under the lamps, and thin the side rails to 0.05 m.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Machine labels pick detail levels inconsistently, and their text is too small for a projector",
+   "evidence": "/tmp/rv-hall3d/02-overview-settled.png, 03-crop-mid.png: idle M10/M11 get full labels ('Okamoto ACC · Bereit') while producing M01/M03/M05/M06/M09 show only ID chips. placeLabels() decides the level from px/m and first-come collisions, and at level 1 tries only the 'above' slot. Secondary lines use 10.5–11 px in --muted (CSS .h3-lb .r2/.r3/.r4, .sp, .ct).",
+   "fix": "For level ≥ 1, try the 4 positions (above, below, right, left) before downgrading. Place labels by priority, then screen-y, so neighbours resolve the same way each time. At overview, if under 70% of labels fit at level 1, use level 0 for all for a consistent look. Raise the base .h3-lb font to 12.5 px (b 13.5 px) and r2–r4 to 11.5 px, and use --text2 instead of --muted for r2.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Only the back and left walls exist, so close-ups facing east or south end in a dark void",
+   "evidence": "/tmp/rv-hall3d/c-M13.png (top right: navy void where the east wall should be), c-QS.png, p-messraum.png (bottom right). buildHall() builds the right and front walls only to plinth height (1.2 m). R.walls contains only back and left, with outside() fade.",
+   "fix": "Build the east and front walls with mkWall() as well, with door openings as roller-door panels in M.paint and a window band. Register them in R.walls with outside: c => c.x > HW+0.6 and c => c.z > HD+0.6. The overview camera is outside both planes, so the dollhouse look stays, while interior close-ups get a real hall backdrop.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/70_tour.js",
+   "title": "In the hall, the tour card overlaps the order drawer on the 'Auftrag verfolgen' step",
+   "evidence": "/tmp/rv-hall3d/tour-order.png: the card spans about x 410–1030 while the drawer starts at about x 960. Drawer content beneath is clipped ('ngang', 'eschlossen vor Mo 06:00', 'M80 (M04)'). The card also covers the lower third of the hall area showing the route.",
+   "fix": "In placeCard()/freeArea(), set f.right = min(f.right, drawer.getBoundingClientRect().left) whenever the drawer is open. On the hall 'order' step, dock the card left (x = nav right + 16) at about 440 px wide so the route between status card and drawer stays visible, and pass the card rect to the hall's fit solver.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "low",
+   "file": "src/30_hall3d.js",
+   "title": "People at the break table hop seats whenever someone else starts a break",
+   "evidence": "Simulated 16 h with the hall's seat rule (BREAK_SLOTS[bi++] in iteration order): 58 seat reassignments, for example at 09:00 P09 seat 1→2→3→5→6 and P10 4→6→7. They are not 'walking' (pe.moving is false), so they slide sideways around or through the table without stepping.",
+   "fix": "Keep a stable map R.breakSeat (personId → index). Assign the lowest free index the first time a person is sampled on break without a route, and free it when p.state !== 'break'. Also add the engine's break slot as the walk-to target so arrival does not slide.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "low",
+   "file": "src/30_hall3d.js",
+   "title": "Long hard sun shadows inside a closed hall create diagonal stripe clutter",
+   "evidence": "/tmp/rv-hall3d/c-M10.png, c-M09.png, l-none.png: 8.6 m columns and the tray drops cast 5–6 m diagonal shadows across aisles and machines. buildLights() puts the sun at (cx-26, 58, cz+30), about 56° elevation, which is implausible under a roof and adds noise at overview.",
+   "fix": "Raise the key light to about 72° elevation (position cx-12, 70, cz+16), lower its intensity from 1.22 to 0.95, and raise the hemisphere light from 0.5 to 0.75. Grounding then comes from the existing batch-shader AO and floor AO texture. Optionally give columns castShadow=false. Keep shadows for machines and racks.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "low",
+   "file": "src/10_sim.js",
+   "title": "Forklift parks wherever its last task ended, in the main aisle between machines",
+   "evidence": "/tmp/rv-hall3d/p-dreherei.png, l-flow-mid.png, c-M03.png: during the break the forklift stands in the Dreherei aisle next to M02/M03 inside machine frames. parkForklift(p) sets f.pos = driver position.",
+   "fix": "After the last task, route the driver to a fixed Stapler bay (for example node near RAW, around x 9.5 / z 8, with a charger) before parking. In 30_hall3d.js, paint the bay ('STAPLER', yellow box) and add a small charger cabinet.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "low",
+   "file": "src/30_hall3d.js",
+   "title": "Shadows of moving parts update at only 4 Hz, and every refresh redraws the full 4096² soft shadow map",
+   "evidence": "Code: renderer.shadowMap.autoUpdate=false, and needsUpdate is set every 0.25 s. Builder.build() defaults castShadow=true, so animated groups cast shadows: M01 saw bow, M02 gantry carriage, M05 pallet changer, M04 parts. Their shadows move in steps, and every 15th frame at 60 fps re-renders 141 casters into a 4096² soft shadow map, a periodic spike on laptop GPUs. Measured: 414–424 draw calls, about 155k triangles.",
+   "fix": "Build animated sub-groups with build(group, false) so they cast no shadow; their contact AO is enough. Use a 2048² map whenever adaptPerf has lowered R.dpr below R.dprMax, or on integrated GPUs (renderer.capabilities.maxTextureSize < 16384 is a crude heuristic). Then shadows only need updating when walls fade or the machine state changes.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "low",
+   "file": "src/30_hall3d.js",
+   "title": "Parts in KLT bins and Gitterboxes look like white eggs",
+   "evidence": "/tmp/rv-hall3d/c-M06.png, c-M01.png, e-fork.png: Gitterboxes and KLTs are filled with white spheres (texParts()), which does not read as machined steel parts.",
+   "fix": "Redraw texParts as steel parts seen from the top: base #8e979f, highlight #c9d0d6, a 1 px dark outline and a centre bore for turned parts. Tint per material using MAT_COL at 15% so material families are visible, and lower the fill plane brightness.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "low",
+   "file": "src/30_hall3d.js",
+   "title": "Layer toolbar collapses to four unlabeled coloured dots when the drawer is open",
+   "evidence": "/tmp/rv-hall3d/h-click-M04.png, o-trace-drawer.png: with the drawer open, Materialfluss, Datenfluss, Personen and Beschriftung become plain orange, cyan, green and white dots with no text.",
+   "fix": "In the narrow state, replace the chips with an 'Ebenen ▾' dropdown that lists the labelled chips (as the mobile sheet already does), or keep the labels and drop the camera dropdown text. At minimum add title and aria-label to each chip.",
+   "lens": "hall3d"
+  }
+ ],
+ "hall-ux": [
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Halle 3D at 1440: default camera crops the flow endpoints; flow arcs faint; labels collide",
+   "evidence": "/tmp/rv-art-desktop/tour-03.png and h-legend.png (1440×900): the 'Übersicht' camera cuts off the front of the hall. Versand, Wareneingang/Fremdbearbeitung gates and the van are partly off-screen at the bottom/right, so the material flow has no visible start or end. HUD (290×210) and Hallenplan (290×215) cover the left 20% of the scene. At 1920 (w-halle.png) everything fits. Material (orange) and data (cyan) arcs are about 1px and low-contrast on the light grey floor (h-crop1.png), so the 'felt connection' is weak. M10/M11 'Bereit' label chips overlap each other and the M09 label (h-crop1.png), and collision culling leaves some machines with a bare 'M01'/'M03' chip while neighbours show name plus count.",
+   "fix": "Fit the overview camera to the hall bounding box inside the free viewport (canvas rect minus HUD/minimap insets, e.g. left 300px, bottom 16px), recomputed on resize; at 1440 that needs about 8–10% more distance or a 3° steeper pitch. Render flows as screen-space 2.5–3px lines (Line2/LineMaterial) with moving 6px particles in --mat/--info, darken the floor slab about 15% so they read, and fade non-selected flows to 30% when an order is followed. Label collisions: use one compact label format 'M10 · Bereit', and on overlap stack offset vertically with a leader line instead of dropping content.",
+   "lens": ""
+  },
+  {
+   "severity": "low",
+   "file": "src/30_hall3d.js",
+   "title": "Hallenplan minimap labels clipped and too small",
+   "evidence": "/tmp/rv-art-desktop/h-mini-2x.png (2× upscale of the 1440 view): 'M13' renders as ''13' (the first glyph is cut by the box), the 'M08' label overflows its box edge, M06/M10/M11 labels are about 9px mono on boxes narrower than the text, and the AGV/person dots overlap labels.",
+   "fix": "Auto-fit: if the measured text width is more than the box width minus 4px, render only the number ('13') or put the label below the box. Minimum label size 10px; use the machine short name on hover. Draw dots on a layer under labels (or offset labels upward by 2px with a --bg2 halo: paint-order:stroke; stroke:var(--bg2); stroke-width:3px).",
+   "lens": ""
+  },
+  {
+   "severity": "high",
+   "file": "src/30_hall3d.js",
+   "title": "Hall overlays collide and run off-screen when a drawer is open on tablets",
+   "evidence": "At 768×1024, select M04 in the hall: drawer at x 288–768, but the hall stays in desktop layout (class 'h3-root narrow', not 'm'). The toolbar sits at x=-37…274, partly off-screen and on top of the status panel (14…302). The status panel (288 px wide) and the minimap (14…302, y 797–1010) fill the whole 288 px of remaining 3D area, and the mouse hint is cut off ('…Rechte Maustaste verschieben · Ma'). At 1024×768 with the drawer open, the toolbar (219…530) covers the status panel (80…368, both at y=72), and the order selection bar is cut by the drawer. Screenshots: /tmp/rv-mobile/hallsel-tab.png, /tmp/rv-mobile/follow-land.png, /tmp/rv-mobile/follow-land-machine.png. Cause: resize() decides mobile mode from the full canvas width (`const mob = w <= 640`). syncDrawer() only toggles 'narrow'.",
+   "fix": "Base the compact layout on the width actually left over: in resize() and syncDrawer() use `const avail = R.w - (R.drawerW||0)`, set `R.root.classList.toggle('m', avail <= 640)` (compact status line, bottom bar, no toolbar or minimap). Also add `nomap` when avail < 900. As a safety net, clamp the toolbar so it never overlaps the status panel: if the toolbar's left edge < status right + 8, move it to `top: calc(14px + statusHeight + 8px)`. Alternative for viewports ≤ 1024: in the hall call WF.app.hideDrawer() on select and show the existing selection bar with an 'Details' button, as phone does.",
+   "lens": ""
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Touch devices get mouse instructions in the hall; phone gets no gesture hint at all",
+   "evidence": "On tablet portrait and landscape (touch) the hint reads 'Ziehen drehen · Rechte Maustaste verschieben · Mausrad zoomen · Klick Details · Doppelklick heranholen'. At 768 px it is cut off (right edge 794 > 768). On phone the hint is hidden (`.h3-root.m .h3-hint{display:none}`), so nothing explains one-finger rotate / two-finger zoom (OrbitControls touches ONE: ROTATE, TWO: DOLLY_PAN). The minimap caption 'Klick: Maschine · Ziehen: Ausschnitt' is also mouse wording. Screenshots: /tmp/rv-mobile/tab-halle.png, /tmp/rv-mobile/land-halle.png, /tmp/rv-mobile/phone-halle.png.",
+   "fix": "In the ui.hint creation (line ~2911): `const touch = matchMedia('(pointer: coarse)').matches`. If touch, use '<b>Wischen</b> drehen · <b>Zwei Finger</b> zoomen & verschieben · <b>Tippen</b> Details · <b>Doppeltippen</b> heranholen' and 'Tippen: Maschine · Ziehen: Ausschnitt' for the minimap. Show the hint on phone too, above the bottom bar (`.h3-root.m .h3-hint{display:block;bottom:62px}`), with auto-fade after about 6 s. Add `max-width:calc(100% - 28px - var(--dw,0px)); white-space:normal; text-align:center` so it never clips.",
+   "lens": ""
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Phone route view: big route cards pile up, and the bottleneck step AG 50 is hidden",
+   "evidence": "Phone, FA-24118 → 'In der Halle verfolgen' (and tour step 5): six 2-line route cards (about 180×40 px each) cover most of the hall and the stations they belong to. AG 60 and AG 40 touch and overlap visually, and the step numbers are hidden under the cards. AG 50 'Rundschleifen Lagersitze' (M09) is culled (class 'h3-lb rt off', opacity 0). That is the step the order drawer names as the bottleneck ('Durchlauf begrenzt durch M09 Studer S33 (AG 50)'). Screenshots: /tmp/rv-mobile/route-phone.png, /tmp/rv-mobile/follow-phone.png, /tmp/rv-mobile/tour-phone-04.png.",
+   "fix": "When R.mobile is set, render route labels compact: the number badge plus the station short name on one line ('5 M09', with ✓ when done), and drop the second line (`.h3-root.m .h3-lb.rt .s{display:none}`). In the collision culling, give priority to the active step and the bottleneck step so they are never set 'off'. Put the full step list (AG, station, status, qty) in the sheet opened by 'Route zeigen'.",
+   "lens": ""
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Tablet hall: layer toggles are unlabeled 28 px coloured dots; minimap labels 8.8 px",
+   "evidence": "At 768 and 1024 (both 'narrow'), the toolbar shows four coloured circles (orange/blue/green/white) with no text: Materialfluss, Datenfluss, Personen, Beschriftung. The meaning is only in `title`, which touch devices never show. Each toggle is 28×30 px. Minimap station labels render at 8.8 px effective and M06/M09/M10/M11 crowd each other. Screenshots: /tmp/rv-mobile/tab-halle.png, /tmp/rv-mobile/land-halle.png.",
+   "fix": "In narrow mode keep short labels instead of hiding them (`.h3-root.narrow .h3-tb .h3-chip span{display:inline;font-size:11px}` with texts 'Material', 'Daten', 'Personen', 'Text'). If space is short, drop the camera-preset label rather than the layer names. Make chips at least 36×36 under pointer:coarse. Hide the minimap when the free width is < 900 px, or raise its text to 2.8 viewBox units (≥ 11 px effective).",
+   "lens": ""
+  },
+  {
+   "severity": "high",
+   "file": "src/30_hall3d.js",
+   "title": "Order trace (\"In der Halle verfolgen\" / tour step 5) shows a tiny, half-covered hall and stays zoomed out afterwards",
+   "evidence": "/tmp/rv-hall3d/o-trace-drawer.png, o-trace2.png, tour-order.png: camera-to-target distance is 124.2 m with drawerW=480. The hall fills only about 500×380 px of 1440×900, and the status card, Hallenplan and tour card cover a large part of that. After WF.app.closeDrawer() the camera stays 124 m away, leaving a small hall in a dark void (o-trace-nodrawer.png). Cause: focusOrder() uses r = clamp(span*1.25+12,26,96)*mobK*drawerK, and drawerK = (1/0.61)^0.8*1.12 ≈ 1.67, so r ≈ 137.",
+   "fix": "Replace the r heuristic with a fit-to-free-rect solver. The free rect is the canvas minus the drawer (R.drawerW), minus R.uiRects, minus the tour card rect. Project all route station footprints (y 0..2.5 m) and choose the smallest r and target offset that keeps every point inside the rect with a 12 px margin. A grid search with exactly this approach works (see the preset finding). For routes use phi≈44°, th≈12°. While a route is shown, collapse the status card and Hallenplan (add a .h3-root.focus class that hides .h3-status and .h3-mapbox, or shrinks them to a 36 px pill). When the drawer closes, re-run the fit and goCam() to the new r.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "high",
+   "file": "src/30_hall3d.js",
+   "title": "Route labels are anchored on the shared main aisle and point at the wrong machines; the bottleneck step label is dropped",
+   "evidence": "/tmp/rv-hall3d/o-trace2-crop.png, tour-order.png. For FA-24118, R.rtLb.s4 ('AG 50 · Rundschleifen Lagersitze', M09) has shown=false, yet this is exactly the step the drawer names as the forecast bottleneck. buildRoute() places discs and labels at st.dock, and the docks of back-row and front-row machines all lie on the main aisle (M07 41.5/22, QS 49.5/22, M09 28/22, M04 33.5/22). Labels are offset +12 px down and right with no leader line (.h3-lb.rt::after{display:none}). As a result 'AG 30 Tieflochbohren' sits over M10/M11 and 'AG 60 Endprüfung' sits over M07.",
+   "fix": "Anchor each step at its machine: footprint centre with y = TYPE_H[type]+0.4 for the label, and the disc at the station's inPos (slotPos(st,'in',0)), not the dock. Re-enable a leader line for .rt labels (1 px line from label corner to anchor, color var(--rc)). Route labels must never vanish: try 8 positions at two radii (12 px and 40 px), then fall back to a compact chip '5 · AG 50'. Give the active step and the forecast-bottleneck step priority 220, placed before all other labels, and outline the bottleneck in --st-wait with the text 'Engpass'.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "high",
+   "file": "src/30_hall3d.js",
+   "title": "AGV drives into and under the shipping pallets at Versand",
+   "evidence": "/tmp/rv-hall3d/e-agv.png: AGV1 (toCharge, just unloaded) renders underneath a carton pallet. A 6 h simulation showed AGV1 unloads at VERSAND.inPos (58.5, 28.0), and its diagonal approach from the dock (55.5, 31) crosses VERS_SLOTS (x 57.95/59.4/60.85, z 27.4 + 1.55·r). 385 of 43,200 AGV samples were inside a pallet-slot square.",
+   "fix": "Rebuild VERS_SLOTS so they leave a 2.4×2.4 m AGV hand-over square around VERSAND.inPos and the approach corridor from the dock clear. For example, use two columns at x ∈ {60.3, 61.75} and z = 25.4 + 1.55·r for r = 0..8 (18 slots), or reuse slotList(), which already avoids aisles. Paint a green-dashed 'AGV-ÜBERGABE' box at inPos in texFloorMarks so the drop point reads as intentional.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "high",
+   "file": "src/30_hall3d.js",
+   "title": "Hover tooltip comes back after clicking a machine and is cut off by the drawer",
+   "evidence": "/tmp/rv-hall3d/h-click-M04.png: after clicking M04 the drawer opens, but the hover card 'M04 · WFL M80 … Klicken für Details' stays on screen, half hidden under the drawer edge. This happens on every click in the demo script. The pointerdown handler removes .on, but update() calls renderTip(false) 4×/s while R.hover is set. positionTip() also clamps x to R.w and ignores R.drawerW.",
+   "fix": "In renderTip(), return early with tip.classList.remove('on') when R.selTarget matches R.hover (the drawer already shows it), or when a click happened and the mouse has not moved more than 6 px since. In positionTip(), clamp to R.w - (R.drawerW||0) - 10 and flip left first. Also skip the tooltip when that machine's label is already at level 2: the two cards repeat the same order and progress lines (h-hover-M04.png).",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "high",
+   "file": "src/30_hall3d.js",
+   "title": "Ghost-shift status card says autonomous machines are running while none produce",
+   "evidence": "/tmp/rv-hall3d/n-overview.png at Di 00:12: the card reads 'Keine Schicht · autonome Maschinen laufen · Schichtbeginn Di 06:00' next to PRODUKTION 0/13 '12 wartend · 1 bereit'. The text in update() at line 3446 is static. The same static phrase appears in 40_leitstand.js:1038/1044 and 47_people.js:847.",
+   "fix": "Make it data-driven: `${run ? plural(run, 'autonome Maschine läuft', 'autonome Maschinen laufen') : 'alle Maschinen stehen – ' + (wait ? wait + ' warten auf Bediener' : 'kein Auftrag')} · Schichtbeginn …`. Tell the Leitstand and Personal owners to apply the same rule.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Camera presets cut off their own zones and hide parts under the overlays",
+   "evidence": "Screenshots /tmp/rv-hall3d/p-dreherei.png, p-logistik.png, p-messraum.png, 02-overview-settled.png. I projected each zone's footprints against R.uiRects and the viewport:\n- Dreherei: M01 83% hidden, M08 100% off-screen, M07 36%; the foreground is filled by giant 'SCHLEIFEREI/REINIGUNG' floor text.\n- Logistik: CHG (AGV charging) 100% off-screen, RAW 36% under the status card.\n- Messraum: M11 66%, M13 26%.\n- Übersicht: RAW 45% and WE 27% under the panels; the empty front yard takes the lower-left quarter.",
+   "fix": "Fit presets to the free rect (same solver as the order trace) and re-run it on resize and when the drawer opens or closes. A grid search at 1440×900 with the current panels, keeping phi and th, gave:\n- uebersicht t=[28.1,0,21.3] r=93\n- dreherei t=[30.4,0,18.3] r=66\n- fraeserei t=[26.5,0,27.1] r=42\n- logistik t=[25.4,0,7.6] r=59\n- messraum t=[51.3,0,32.7] r=43\nAdd CHG to logistik.zone and drop M11 from messraum.zone. Also consider shrinking the front apron depth AD from 11.5 to 6 m.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Material-flow layer is barely visible at overview distance, contradicting the tour copy",
+   "evidence": "/tmp/rv-hall3d/l-none.png vs l-flow.png: toggling Materialfluss only adds faint hairlines. tour-hall-crop.png: on tour step 4 ('Orange: welcher Behälter gerade von wo nach wo fährt') no orange path is identifiable. The order-flow arcs (netMat) use opacity 0.21 (additive) and tube radius 0.022–0.062 m, under 1 px at r = 86 m; transport ribbons are 0.42 m (about 6 px). Simulation from 08:40 to 09:20: no transport is moving 79% of the time.",
+   "fix": "Scale with camera distance: ribbon width = max(0.42, dist·0.0065) m (scale the geometry normal offset in the vertex shader via a uniform) and net tube radius = max(0.03, dist·0.0012). Raise netMat uOp to about 0.45 at overview and draw the arcs higher (mid.y = 3 + d·0.12) so they read as arcs. Make the netPulses particles 2× larger. Add a short 'Fluss'-highlight: when the Materialfluss chip is toggled on, flash all flows at full opacity for 1.5 s.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Waiting transports appear only as a pulsing ring; the legend gives the wrong reason",
+   "evidence": "Sim at 08:50: four open transports (TR-0018, -0021, -0022, -0025), all with waitReason 'Zielpuffer INDEX G220 / Haas VF-4 voll', the oldest open since 08:08, while AGV1 and AGV2 sit idle at 100%. The hall draws only C.wait rings at the containers. The legend says 'Abholung offen – Behälter steht bereit, Transport noch nicht vergeben' (h-legend.png), which is not why they wait.",
+   "fix": "For open transports with a waitReason, draw a dashed ghost path (flowMaterial mode 1 at 40% opacity) from container to destination. Put a stop marker on the full in-buffer and a small route-style label 'Ziel voll · wartet 42 min' (from tr.waitReason and S.t - tr.createdT). Change the legend entry to 'Wartet auf Transport (Grund im Tooltip, z. B. Zielpuffer voll)'. This visualises the WIP-limit/pull logic, a strong selling point.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Machine labels pick detail levels inconsistently, and their text is too small for a projector",
+   "evidence": "/tmp/rv-hall3d/02-overview-settled.png, 03-crop-mid.png: idle M10/M11 get full labels ('Okamoto ACC · Bereit') while producing M01/M03/M05/M06/M09 show only ID chips. placeLabels() decides the level from px/m and first-come collisions, and at level 1 tries only the 'above' slot. Secondary lines use 10.5–11 px in --muted (CSS .h3-lb .r2/.r3/.r4, .sp, .ct).",
+   "fix": "For level ≥ 1, try the 4 positions (above, below, right, left) before downgrading. Place labels by priority, then screen-y, so neighbours resolve the same way each time. At overview, if under 70% of labels fit at level 1, use level 0 for all for a consistent look. Raise the base .h3-lb font to 12.5 px (b 13.5 px) and r2–r4 to 11.5 px, and use --text2 instead of --muted for r2.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/70_tour.js",
+   "title": "In the hall, the tour card overlaps the order drawer on the 'Auftrag verfolgen' step",
+   "evidence": "/tmp/rv-hall3d/tour-order.png: the card spans about x 410–1030 while the drawer starts at about x 960. Drawer content beneath is clipped ('ngang', 'eschlossen vor Mo 06:00', 'M80 (M04)'). The card also covers the lower third of the hall area showing the route.",
+   "fix": "In placeCard()/freeArea(), set f.right = min(f.right, drawer.getBoundingClientRect().left) whenever the drawer is open. On the hall 'order' step, dock the card left (x = nav right + 16) at about 440 px wide so the route between status card and drawer stays visible, and pass the card rect to the hall's fit solver.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "low",
+   "file": "src/30_hall3d.js",
+   "title": "Layer toolbar collapses to four unlabeled coloured dots when the drawer is open",
+   "evidence": "/tmp/rv-hall3d/h-click-M04.png, o-trace-drawer.png: with the drawer open, Materialfluss, Datenfluss, Personen and Beschriftung become plain orange, cyan, green and white dots with no text.",
+   "fix": "In the narrow state, replace the chips with an 'Ebenen ▾' dropdown that lists the labelled chips (as the mobile sheet already does), or keep the labels and drop the camera dropdown text. At minimum add title and aria-label to each chip.",
+   "lens": "hall3d"
+  }
+ ],
+ "hall-art": [
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Hobber, cylindrical grinder and VMC are indistinguishable white boxes: their signature mechanics are hidden under opaque roofs",
+   "evidence": "/tmp/rv-hall3d/c-M06.png, c-M08.png, c-M09.png, interiors-M08-M09.png. Every demo camera (phi 43–58°) looks down onto the opaque cabin roof; through the vertical window you only see the table or bed. The Liebherr hob (Ø0.13 m, y≈1.65) and the Studer wheel are never visible, and M09's interior is near-black. Haas VF-4, Liebherr LC 180 and Studer S33 share the same silhouette: sliding doors, swivel HMI, mist collector, tower. A machinist could not name M08 or M09.",
+   "fix": "(1) In cabin(), add opt.roofGlass: build the roof shell over the work area (zi..zf) from M.glass framed by 0.06 m Pm edges, or fade the roof to 0.3 opacity when the camera is above 60° and within 35 m.\n(2) Brighten interiors: lighten M.glass (color 0x9fb4c4, opacity 0.18, envMapIntensity 0.8) and add an emissive LED strip inside the top front edge (MeshBasic #fff6e8 ×2, 0.03 m).\n(3) Silhouette cues per machine:\n- Hobber: hob head on a 30° swivel with the hob scaled ×1.6, a visible counter column, and a ring loader on the +x side.\n- Studer: dark-grey lower base band with a white upper hood, plus a wheelhead hood bulge on the back roof.\n- Haas VMC: a Z-column hump rising 0.35 m through the roof.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Every worker wears a construction hard hat and hi-vis vest; role colours reuse machine-state colours",
+   "evidence": "/tmp/rv-hall3d/e-person.png, c-M06.png, c-M09.png, e-fork.png. personGeos() gives every role a helmet (hemisphere, brim and peak) and a full vest. Hard hats are not worn in a Viennese machining job shop, and machinists do not wear hi-vis. The vest hues also collide with state hues in the legend (h-legend.png): Logistik green vs Produktion, Einrichter yellow vs Wartet, Montage purple vs Werkzeugwechsel, QS blue vs Rüsten.",
+   "fix": "Replace the hat with hair (dark/brown hemisphere scaled 1, 0.7, 1) and give the shift lead a cap. Dress everyone in navy or anthracite workwear and show the role as a 0.06 m shoulder yoke plus chest stripe. Keep a full hi-vis vest only for 'log' and the forklift driver, and add safety glasses as two thin dark boxes. Choose role hues outside the STATE palette (for example teal, coral, sand, slate, white) and update ROLES and the legend.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Floor area names are chopped by machines and columns, and appear upside-down in the Fräserei preset",
+   "evidence": "/tmp/rv-hall3d/l-none-crop-areas.png: 'SONDERBEARB[M07]UNG VER[M08]HNUNG' reads as one garbled line. Back-row names (z 12.2–13.4) lie behind the machines from every front camera, and Sonderbearbeitung (about x 39–51) overlaps Verzahnung (about 50–57). l-none-crop-front.png: 'SCHL|IFEREI' is split by a hall column. p-fraeserei.png (th=194°): all floor stencils read upside-down.",
+   "fix": "Replace the big floor area names with suspended zone signs: double-sided 3.2×0.7 m panels at y≈5.3 m on two rods from the roof, using texSign-style canvases, fixed facing +z and also readable from -z. This is what real halls use and it stays legible from every preset. If floor text stays: move back-row names to z=11.0, rename 'Sonderbearbeitung' to 'Tiefbohren', reduce the font to 0.75 m, and shift 'Schleiferei' +2 m in x off the column.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Cable tray cuts across every back-row close-up as a heavy grey beam",
+   "evidence": "/tmp/rv-hall3d/c-M01.png, c-M04.png, c-M05.png, p-dreherei.png, e-aisle-low.png. The 0.4 m tray at TRAY_Y=6.2 runs along z=22 and passes between the camera and the machines in all close and mid views, including the 'Dreherei' preset. OrbitControls (minDistance 6, maxPolar 76°) easily reach camera heights at tray level.",
+   "fix": "Fade the tray like the walls. Each frame compute k = clamp((camY - 7)/5, 0, 1) · clamp((distToTrayLine - 4)/8, 0, 1) and set the tray material opacity to 0.12 + 0.88·k (transparent, depthWrite off when k < 1), always keeping the cyan glow line and pulses. Alternatively raise TRAY_Y to 7.6 m, just under the lamps, and thin the side rails to 0.05 m.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "medium",
+   "file": "src/30_hall3d.js",
+   "title": "Only the back and left walls exist, so close-ups facing east or south end in a dark void",
+   "evidence": "/tmp/rv-hall3d/c-M13.png (top right: navy void where the east wall should be), c-QS.png, p-messraum.png (bottom right). buildHall() builds the right and front walls only to plinth height (1.2 m). R.walls contains only back and left, with outside() fade.",
+   "fix": "Build the east and front walls with mkWall() as well, with door openings as roller-door panels in M.paint and a window band. Register them in R.walls with outside: c => c.x > HW+0.6 and c => c.z > HD+0.6. The overview camera is outside both planes, so the dollhouse look stays, while interior close-ups get a real hall backdrop.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "low",
+   "file": "src/30_hall3d.js",
+   "title": "People at the break table hop seats whenever someone else starts a break",
+   "evidence": "Simulated 16 h with the hall's seat rule (BREAK_SLOTS[bi++] in iteration order): 58 seat reassignments, for example at 09:00 P09 seat 1→2→3→5→6 and P10 4→6→7. They are not 'walking' (pe.moving is false), so they slide sideways around or through the table without stepping.",
+   "fix": "Keep a stable map R.breakSeat (personId → index). Assign the lowest free index the first time a person is sampled on break without a route, and free it when p.state !== 'break'. Also add the engine's break slot as the walk-to target so arrival does not slide.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "low",
+   "file": "src/30_hall3d.js",
+   "title": "Long hard sun shadows inside a closed hall create diagonal stripe clutter",
+   "evidence": "/tmp/rv-hall3d/c-M10.png, c-M09.png, l-none.png: 8.6 m columns and the tray drops cast 5–6 m diagonal shadows across aisles and machines. buildLights() puts the sun at (cx-26, 58, cz+30), about 56° elevation, which is implausible under a roof and adds noise at overview.",
+   "fix": "Raise the key light to about 72° elevation (position cx-12, 70, cz+16), lower its intensity from 1.22 to 0.95, and raise the hemisphere light from 0.5 to 0.75. Grounding then comes from the existing batch-shader AO and floor AO texture. Optionally give columns castShadow=false. Keep shadows for machines and racks.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "low",
+   "file": "src/10_sim.js",
+   "title": "Forklift parks wherever its last task ended, in the main aisle between machines",
+   "evidence": "/tmp/rv-hall3d/p-dreherei.png, l-flow-mid.png, c-M03.png: during the break the forklift stands in the Dreherei aisle next to M02/M03 inside machine frames. parkForklift(p) sets f.pos = driver position.",
+   "fix": "After the last task, route the driver to a fixed Stapler bay (for example node near RAW, around x 9.5 / z 8, with a charger) before parking. In 30_hall3d.js, paint the bay ('STAPLER', yellow box) and add a small charger cabinet.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "low",
+   "file": "src/30_hall3d.js",
+   "title": "Shadows of moving parts update at only 4 Hz, and every refresh redraws the full 4096² soft shadow map",
+   "evidence": "Code: renderer.shadowMap.autoUpdate=false, and needsUpdate is set every 0.25 s. Builder.build() defaults castShadow=true, so animated groups cast shadows: M01 saw bow, M02 gantry carriage, M05 pallet changer, M04 parts. Their shadows move in steps, and every 15th frame at 60 fps re-renders 141 casters into a 4096² soft shadow map, a periodic spike on laptop GPUs. Measured: 414–424 draw calls, about 155k triangles.",
+   "fix": "Build animated sub-groups with build(group, false) so they cast no shadow; their contact AO is enough. Use a 2048² map whenever adaptPerf has lowered R.dpr below R.dprMax, or on integrated GPUs (renderer.capabilities.maxTextureSize < 16384 is a crude heuristic). Then shadows only need updating when walls fade or the machine state changes.",
+   "lens": "hall3d"
+  },
+  {
+   "severity": "low",
+   "file": "src/30_hall3d.js",
+   "title": "Parts in KLT bins and Gitterboxes look like white eggs",
+   "evidence": "/tmp/rv-hall3d/c-M06.png, c-M01.png, e-fork.png: Gitterboxes and KLTs are filled with white spheres (texParts()), which does not read as machined steel parts.",
+   "fix": "Redraw texParts as steel parts seen from the top: base #8e979f, highlight #c9d0d6, a 1 px dark outline and a centre bore for turned parts. Tint per material using MAT_COL at 15% so material families are visible, and lower the fill plane brightness.",
+   "lens": "hall3d"
   }
  ]
 }
