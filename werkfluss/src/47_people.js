@@ -1091,6 +1091,15 @@
   }
 
   // ---------------- Schichtkopf
+  /** Geisterschicht in einem Satz aus der Engine (kpis().ghost) – nie pauschal „autonome Maschinen laufen“ */
+  function ghostLine() {
+    let g = null; try { const k = WF.sim.kpis(); g = k && k.ghost; } catch (e) { g = null; }
+    if (!g) return 'autonome Maschinen laufen weiter';
+    if (!g.autonomous) return 'keine Maschine für die Geisterschicht freigegeben';
+    const st = g.stoppedIds ? g.stoppedIds.length : 0;
+    return g.running ? `${g.running} von ${g.autonomous} autonomen Maschinen laufen${st ? ` · ${st} gestoppt` : ''}`
+      : `alle ${g.autonomous} autonomen Maschinen stehen${st ? ` (${st} warten)` : ''}`;
+  }
   function updateHead(now) {
     const sh = WF.sim.shift(), def = sh.id ? shiftDef(sh.id) : null;
     const dow = Math.floor(now / DAY) % 7;
@@ -1102,7 +1111,7 @@
     } else {
       setText(R.shEy, 'Keine Schicht');
       setText(R.shName, dow >= 5 ? 'Wochenende' : 'Geisterschicht');
-      setText(R.shSub, `autonome Maschinen laufen · nächste Schicht ${tclock(sh.endsAt, now)}`);
+      setText(R.shSub, `${ghostLine()} · nächste Schicht ${tclock(sh.endsAt, now)}`);
       setVar(R.shDot, '--c', 'var(--st-idle)');
     }
     const nx = nextShift(sh, now);

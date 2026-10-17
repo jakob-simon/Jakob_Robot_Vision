@@ -1060,6 +1060,15 @@
     if (setter) return { p: setter, label: 'Schichtverantwortung', note: setter.role + ' (keine Schichtleitung eingeteilt)' };
     return null;
   }
+  /** Geisterschicht in einem Satz aus der Engine (kpis().ghost) – nie pauschal „autonome Maschinen laufen“ */
+  function ghostLine() {
+    let g = null; try { const k = WF.sim.kpis(); g = k && k.ghost; } catch (e) { g = null; }
+    if (!g) return 'autonome Maschinen laufen weiter';
+    if (!g.autonomous) return 'keine Maschine für die Geisterschicht freigegeben';
+    const st = g.stoppedIds ? g.stoppedIds.length : 0;
+    return g.running ? `${g.running} von ${g.autonomous} autonomen Maschinen laufen${st ? ` · ${st} gestoppt` : ''}`
+      : `alle ${g.autonomous} autonomen Maschinen stehen${st ? ` (${st} warten)` : ''}`;
+  }
   function updateHead(now) {
     const sh = WF.sim.shift();
     const Sx = S();
@@ -1097,7 +1106,7 @@
       setText(R.staffSub, [inBreak ? `${inBreak} in Pause` : '', others ? `+${others} aus Vorschicht` : '', !inBreak && !others ? `Fertigung: ${WF.profile.people.length} Personen, ${WF.profile.shifts.length} Schichten` : ''].filter(Boolean).join(' · '));
     } else {
       setText(R.staff, others ? `${others} noch in der Halle` : 'Niemand im Dienst');
-      setText(R.staffSub, 'autonome Maschinen laufen weiter');
+      setText(R.staffSub, ghostLine());
     }
   }
 
