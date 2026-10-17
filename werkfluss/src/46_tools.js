@@ -580,6 +580,9 @@
   .tl-ex-tn{display:flex;align-items:center;gap:8px;min-width:0}
   .tl-ex-tn b{font-weight:600;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
   .tl-ex-tn .mono{color:var(--muted);font-size:11px;flex:none}
+  .tl-ex-tn .spacer{flex:1}
+  .tl-ex-tn .tl-idx{margin-right:0}
+  .tl-ex-name{font-weight:600;font-size:13.5px;line-height:1.3;color:var(--text);margin-top:-2px}
   .tl-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0}
   .tl-step{--c:var(--line2);display:grid;grid-template-columns:22px minmax(0,1fr);gap:0 10px;position:relative;padding-bottom:9px}
   .tl-step:last-child{padding-bottom:0}
@@ -1036,7 +1039,7 @@
       </section>
       <div class="tl-low">
         <section class="card" data-r="cribCard" aria-label="Werkzeugausgabe">
-          <div class="tl-card-h"><h3>${icon('box', 16)}Werkzeugausgabe · Aufträge</h3><span class="tl-sub" data-r="qSub"></span></div>
+          <div class="tl-card-h"><h3>${icon('box', 16)}Wechselaufträge &amp; Werkzeugausgabe</h3><span class="tl-sub" data-r="qSub"></span></div>
           <div class="tl-crib" data-r="crib"></div>
           <div class="tl-q" data-r="queue"></div>
         </section>
@@ -1609,7 +1612,8 @@
       return `<li class="tl-step ${cls}" style="--c:${sc}"><span class="tl-sn">${cls === 'done' ? icon('check', 12) : i + 1}</span><div><div class="tl-st-t">${esc(title)}${tg}</div><div class="tl-st-d">${d}</div></div></li>`;
     }).join('');
     const head = `<div class="tl-ex-tool" data-sel="tool|${esc(t.id)}" tabindex="0" role="button" title="Werkzeugdetails öffnen">
-        <div class="tl-ex-tn">${chip(stLabel(t.status), c, 'dot' + (t.status === 'changing' ? ' pulse' : ''))}<b>${esc(t.name)}</b>${eg ? `<span class="tl-idx" title="Wendeplatte: Schneide ${eg.no} von ${eg.of}">Schneide ${eg.no}/${eg.of}</span>` : ''}<span class="mono">${esc(t.machineId)}</span></div>
+        <div class="tl-ex-tn">${chip(stLabel(t.status), c, 'dot' + (t.status === 'changing' ? ' pulse' : ''))}${eg ? `<span class="tl-idx" title="Wendeplatte: Schneide ${eg.no} von ${eg.of}">Schneide ${eg.no}/${eg.of}</span>` : ''}<span class="spacer"></span><span class="mono">${esc(t.machineId)} ${esc(mx ? mx.short : '')}</span></div>
+        <b class="tl-ex-name">${esc(t.name)}</b>
         ${ladder(t, { running })}
       </div>`;
     return `<div class="tl-ex-l">${head}</div><ol class="tl-steps">${lis}</ol>`;
@@ -1734,7 +1738,7 @@
     const html = `<div class="tl-cost-v"><b>${esc(U.fmtEur(c.total))}</b><span>${perPart != null ? `≈ ${esc(U.fmtNum(perPart, 2))} € je Gutteil · ${esc(U.fmtNum(m.goodToday))} Gutteile heute` : 'noch keine Gutteile heute'}</span></div>
       ${c.total > 0 ? `<div class="tl-cost-bar">${order.filter(k => c.byCat[k] && c.byCat[k].eur > 0).map(k => `<i style="--c:${CATS[k].c};width:${(c.byCat[k].eur / totBar * 100).toFixed(1)}%" title="${esc(CATS[k].label)}: ${esc(U.fmtEur(c.byCat[k].eur))}"></i>`).join('')}</div>
       <div class="tl-cost-l">${order.filter(k => c.byCat[k] && c.byCat[k].n > 0).map(k => `<span><i style="--c:${CATS[k].c}"></i>${esc(CATS[k].label)} <b>${esc(U.fmtEur(c.byCat[k].eur))}</b></span>`).join('')}${Math.abs(other) > 1 ? `<span>ohne Einzelnachweis <b>${esc(U.fmtEur(other))}</b></span>` : ''}</div>
-      <div class="tl-cost-s">davon verschrottet <b>${esc(U.fmtEur(c.scrap))}</b> · Nachschliff <b>${esc(U.fmtEur(c.regrind))}</b> (25 % des Neupreises)${c.indexed > 0 ? ` · Schneiden gewendet <b>${esc(U.fmtEur(c.indexed))}</b> (Plattenpreis ÷ Schneiden)` : ''}</div>
+      <div class="tl-cost-s">davon verschrottet <b>${esc(U.fmtEur(c.scrap))}</b> · Nachschliff <b>${esc(U.fmtEur(c.regrind))}</b> (25 % des Neupreises)${c.indexed > 0 ? ` · Schneiden gewendet <b>${esc(U.fmtEur(c.indexed))}</b>` : ''}</div>
       <div class="tl-cost-t"><div class="tl-cost-th"><span>Teuerste Werkzeugtypen</span></div>${types.map(([id, v]) => `<div class="tl-cost-r" data-sel="tool|${esc(id)}" role="button" tabindex="0"><span>${esc((TT(id) || {}).name || id)}<small>${v.n}×</small></span>${WF.ui.bar(v.eur / maxE, { color: 'var(--mat)' })}<b>${esc(U.fmtEur(v.eur))}</b></div>`).join('')}</div>
       <div class="tl-cost-t"><div class="tl-cost-th"><span>Je Maschine</span></div>${mach.map(([id, v]) => `<div class="tl-cost-r" data-sel="machine|${esc(id)}" role="button" tabindex="0"><span>${esc(stShort(id))} <small style="margin-left:2px">${esc(id)} · ${v.n} ${v.n === 1 ? 'Werkzeug' : 'Werkzeuge'}</small></span>${WF.ui.bar(v.eur / maxM, { color: 'var(--mat)' })}<b>${esc(U.fmtEur(v.eur))}</b></div>`).join('')}</div>`
       : '<div class="tl-empty" style="padding:6px 0 0;text-align:left">Heute wurde noch kein Werkzeug ausgebaut.</div>'}`;

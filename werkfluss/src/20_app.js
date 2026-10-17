@@ -353,7 +353,10 @@
        .nav-item .badge.pill-crit{background:var(--st-fault);color:#1b0606}
        .t-tour{height:36px;padding:0 11px;gap:6px}
        .notif .n-sev{font:700 10.5px/1 var(--f-ui);letter-spacing:.1em;text-transform:uppercase}
-       @media (max-width:1180px){.t-tour span{display:none}.t-tour{width:36px;padding:0}}`, 'app-badges');
+       @media (max-width:1180px){.t-tour span{display:none}.t-tour{width:36px;padding:0}}
+       @media (min-width:901px) and (max-width:1280px){.nav-item .badge.ratio{display:none!important}.nav-item .badge.pill-warn,.nav-item .badge.pill-crit{min-width:0;width:8px;height:8px;padding:0;font-size:0;top:7px;right:12px;box-shadow:0 0 0 2px var(--panel)}}
+       @media (max-width:900px){.nav-item .badge.ratio{display:none!important}
+         .nav-item .badge.pill-warn,.nav-item .badge.pill-crit{position:static;min-width:16px;height:16px;padding:0 4px;font:700 10px/16px var(--f-ui);margin-left:2px;width:auto;border-radius:8px}}`, 'app-badges');
 
   // ------------------------------------------------------------ TV-Modus (Leitstand an der Hallenwand)
   css(`.tv-exit{position:fixed;z-index:35;bottom:max(16px,env(safe-area-inset-bottom,0px));left:max(16px,env(safe-area-inset-left,0px));display:none;box-shadow:var(--shadow);opacity:.85}.tv-exit:hover{opacity:1}

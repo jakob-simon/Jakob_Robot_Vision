@@ -239,10 +239,10 @@
     const oo = range === 'ks' ? { oee: k.oeeShift } : k;
     root.querySelector('.an-body').innerHTML = `
       <div class="kpis an-kpis">
-        <div class="kpi"><div class="l">Verlust ${range === 'ks' ? 'Schicht' : 'heute'}</div><div class="v">${U.fmtNum(lossTotal)}<small>€</small></div><div class="s">Maschinenstundensatz × Stillstand bei eingeplantem Auftrag</div></div>
+        <div class="kpi"><div class="l">Verlust ${range === 'ks' ? 'Schicht' : 'heute'}</div><div class="v">${U.fmtNum(lossTotal)}<small>€</small></div><div class="s" title="Maschinenstundensatz × Stillstand bei eingeplantem Auftrag">Stundensatz × Stillstand mit Auftrag</div></div>
         <div class="kpi"><div class="l">Größte Ursache</div><div class="v" style="font-size:22px">${top ? esc(top.label) : '–'}</div><div class="s">${top ? U.fmtEur(top.eur) + ' · ' + U.fmtPct(par.total ? top.eur / par.total : 0) + ' des Verlusts' : 'keine Verluste'}</div></div>
         <div class="kpi"><div class="l">Werk-OEE</div><div class="v">${oo.oee == null ? '–' : U.fmtNum(oo.oee * 100, 1)}<small>%</small></div><div class="s">${range === 'ks' ? 'laufende Schicht' : `V ${pct0(k.availability)} × L ${pct0(k.performance)} × Q ${pct0(k.quality)}`}</div></div>
-        <div class="kpi"><div class="l">Engpass</div><div class="v" style="font-size:22px">${bott ? esc(bott.short) : '–'}</div><div class="s">${bott ? esc(bott.why) : 'kein eindeutiger Engpass'}</div></div>
+        <div class="kpi"><div class="l">Engpass</div><div class="v" style="font-size:22px">${bott ? esc(bott.short) : '–'}</div><div class="s"${bott && bott.full ? ` title="${esc(bott.full)}"` : ''}>${bott ? esc(bott.why) : 'kein eindeutiger Engpass'}</div></div>
         <div class="kpi"><div class="l">Energie je Fertigteil</div><div class="v">${energyPerPart != null ? U.fmtNum(energyPerPart, 2) : '–'}<small>kWh</small></div><div class="s">${U.fmtNum(machEnergy)} kWh Maschinen · ${U.fmtNum(k.goodFinished)} Fertigteile</div></div>
       </div>
       <div class="an-sec an-grid an-top">
@@ -263,7 +263,15 @@
   function bottleneck() {
     if (WF.sim.bottleneck) {
       let b = null; try { b = WF.sim.bottleneck(); } catch (e) { b = null; }
-      if (b && b.stationId) return { id: b.stationId, short: b.short || (WF.profile.stationById[b.stationId] || {}).short || b.stationId, why: b.why || '' };
+      if (b && b.stationId) {
+        // Kurzform für die Kachel: Vorrat + betroffene Aufträge (vollständiger Satz als Tooltip)
+        const h = b.workSec != null ? b.workSec / 3600 : null;
+        const parts = [];
+        if (h != null) parts.push('Vorrat ' + U.fmtNum(h, h < 10 ? 1 : 0) + ' h');
+        if (b.late && b.late.length) parts.push(b.late.length === 1 ? b.late[0] + ' gefährdet' : b.late.length + ' Aufträge gefährdet');
+        else if (b.orders && b.orders.length) parts.push(b.orders.length === 1 ? 'bremst ' + b.orders[0] : 'bremst ' + b.orders.length + ' Aufträge');
+        return { id: b.stationId, short: b.short || (WF.profile.stationById[b.stationId] || {}).short || b.stationId, why: parts.join(' · ') || b.why || '', full: b.why || '' };
+      }
     }
     let fc; try { fc = WF.sim.forecast(); } catch (e) { fc = null; }
     const count = {};

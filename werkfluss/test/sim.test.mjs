@@ -56,6 +56,8 @@ defTest('kpi', 9, 'KPIs numeric in [0,1], time monotonic, history consistent (§
 defTest('api', 10, 'API surface & actions: views, snapshot < 12 kB, triggerFault/repair, ack/resolve, addOrder … (§3.10)');
 defTest('realism', 11, 'Realism smoke over 24 h (warnings only)', { warnOnly: true });
 defTest('regress', 12, 'Regression: ghost-shift advice, announced/manual tool changes, tool break only while cutting, no task outlives its op, rework on last part, chronological op chain');
+defTest('week', 13, '7-day continuous run: order intake keeps every shift busy, open orders/WIP/state bounded, no deadlock, Kanban prevents permanent material blocks');
+defTest('review', 14, 'Review fixes: ghost-shift OEE, in-progress performance, waitFromT, bottleneck(), what-if, quantity risk/remake, insert indexing, texts');
 
 function fail(key, msg, dedup) {
   const t = TB[key];
@@ -1893,6 +1895,310 @@ function regressionPhase() {
   finally { offEv(); PROFILE.sim.fpiPassProb = PROFILE.sim.fpiPassProb ?? 0.94; }
 }
 
+// ------------------------------------------------------------------ Test 13: 7 Tage Dauerbetrieb (Auftragseingang)
+const WEEK_DAYS = Math.max(1, Number(ARGS.weekdays || process.env.WF_WEEK_DAYS || 7));
+function weekPhase() {
+  const st = () => S();
+  const intake = [], kanban = [], shipOut = [], intakeNotif = new Map();
+  const offE = WF.bus.on('sim:event', (e) => {
+    if (e.type === 'orderIntake') intake.push(e);
+    else if (e.type === 'reorder' && e.data && e.data.kanban) kanban.push(e);
+    else if (e.type === 'shipOut') shipOut.push(e);
+  });
+  const offN = WF.bus.on('sim:notify', (n) => { if (String(n.key).startsWith('intake:')) intakeNotif.set(n.key, { t: n.t, status: n.status, sev: n.sev, role: n.role, auto: n.autoResolveT, resolvedT: n.resolvedT }); });
+  const T = (k) => { ok('week'); return k; };
+  try {
+    SIM.init(PROFILE);
+    const t0 = st().t, profMax = Math.max(...PROFILE.orders.map((o) => parseInt(o.id.replace(/\D/g, ''), 10)));
+    const cfg = Object.assign({ openMax: 40 }, PROFILE.sim.intake || {});
+    const lim = { orders: 120, containers: 400, transports: 400, purchases: 100, meas: 600, tools: 400, notif: 400, events: 3000, wip: 4000 };
+    const max = { orders: 0, containers: 0, transports: 0, purchases: 0, meas: 0, tools: 0, wip: 0, open: 0 };
+    let openMinStaffed = Infinity, staffedN = 0, staffedRun = 0, staffedIdle = 0, wkN = 0;
+    const perM = {}, shiftWork = {}, lastProg = {}, matStarve = {};
+    for (const mid of MACHINE_IDS_LIST) { perM[mid] = { n: 0, run: 0, idle: 0 }; lastProg[mid] = { sig: null, t: t0 }; }
+    const STEP = 1800, n = Math.round(WEEK_DAYS * DAY / STEP);
+    for (let k = 0; k < n; k++) {
+      if (!simCall(`advance(${STEP}) [week]`, () => SIM.advance(STEP))) break;
+      const S0 = st(), t = S0.t, sh = SIM.shift();
+      // Speicher/Arrays begrenzt
+      max.orders = Math.max(max.orders, Object.keys(S0.orders).length); max.containers = Math.max(max.containers, Object.keys(S0.containers).length);
+      max.transports = Math.max(max.transports, Object.keys(S0.transports).length); max.purchases = Math.max(max.purchases, S0.purchases.length);
+      max.meas = Math.max(max.meas, Object.keys(S0.measurements).length); max.tools = Math.max(max.tools, Object.keys(S0.tools).length);
+      if (T(S0.events.length) > lim.events) fail('week', `${at(t)} state.events holds ${S0.events.length} entries (ring buffer ${lim.events})`, 'wev');
+      if (S0.notifications.length > lim.notif) fail('week', `${at(t)} ${S0.notifications.length} notifications kept (max ${lim.notif})`, 'wnot');
+      if ((S0.engineErrors || []).length) fail('week', `${at(t)} engine error: ${S0.engineErrors[0].where} – ${S0.engineErrors[0].msg}`, 'weng');
+      for (const k2 of Object.keys(S0.history)) if (Array.isArray(S0.history[k2]) && S0.history[k2].length > 2 * DAY / 300 + 2) fail('week', `history.${k2} grows to ${S0.history[k2].length} samples`, 'whist:' + k2);
+      const open = Object.values(S0.orders).filter((o) => !isDone(o)).length;
+      max.open = Math.max(max.open, open);
+      const kp = SIM.kpis();
+      max.wip = Math.max(max.wip, kp.wip);
+      // Fortschritt je Maschine (Zähler / Arbeitsgang / aktiver Zustand) – kein Arbeitsgang ohne Fortschritt über > 10 h Schichtzeit
+      for (const mid of MACHINE_IDS_LIST) {
+        const m = S0.machines[mid], op = opInfo(S0, m), sig = op.key + ':' + m.counter + ':' + opCount(S0, op);
+        // Warten auf Fremdbearbeitung/Material ist erklärt (eigene Prüfung unten); Stillstand ohne Erklärung = Bediener/Werkzeug/Ausgang
+        if (sig !== lastProg[mid].sig || !op.active || ACTIVE_WORK.has(m.state) || m.state === 'starved' || m.state === 'fault') lastProg[mid] = { sig, t };
+        else if (staffedOverlap(lastProg[mid].t, t) > 10 * H) { fail('week', `${at(t)} ${mid} holds ${op.key} without any progress since ${clk(lastProg[mid].t)} (state ${m.state}: ${String(m.cause).slice(0, 90)}) – deadlock`, 'wstall:' + mid); lastProg[mid] = { sig, t }; }
+        // Material eines Kanban-Materials fehlt dauerhaft?
+        const ms = m.state === 'starved' && /Rohmaterial|Stangen|Lager/.test(String(m.cause)) ? (op.step && op.step.material ? op.step.material.id : '?') : null;
+        if (ms && P_MAT[ms] && P_MAT[ms].kanban) { matStarve[mid] = matStarve[mid] || t; if (staffedOverlap(matStarve[mid], t) > 16 * H) { fail('week', `${at(t)} ${mid} starved for Kanban material ${ms} since ${clk(matStarve[mid])} – replenishment not working`, 'wkan:' + mid); matStarve[mid] = t; } }
+        else matStarve[mid] = null;
+      }
+      const day = Math.floor(t / DAY), wd = day % 7 < 5;
+      if (sh.id && !sh.inBreak && wd && t - t0 >= 6 * H) {
+        openMinStaffed = Math.min(openMinStaffed, open); wkN++;
+        const key = day + sh.id, sw = shiftWork[key] || (shiftWork[key] = { n: 0, withOp: 0, run: 0 });
+        for (const mid of MACHINE_IDS_LIST) {
+          if (STATION[mid].kind !== 'machine') continue;
+          const m = S0.machines[mid]; staffedN++; perM[mid].n++; sw.n++;
+          if (m.state === 'running') { staffedRun++; perM[mid].run++; sw.run++; }
+          if (m.state === 'idle') { staffedIdle++; perM[mid].idle++; }
+          if (m.op) sw.withOp++;
+        }
+      }
+    }
+    const S1 = st();
+    for (const [k2, v] of Object.entries(max)) if (lim[k2] != null) { ok('week'); if (v > lim[k2]) fail('week', `state grows: max ${k2} = ${v} (limit ${lim[k2]}) over ${WEEK_DAYS} days`, 'wmax:' + k2); }
+    note('week', `${WEEK_DAYS} days → ${clk(S1.t)}: max orders ${max.orders} (archived ${S1.archived || 0}), open ≤ ${max.open}, open min (staffed) ${openMinStaffed}, WIP ≤ ${max.wip}, containers ≤ ${max.containers}, transports ≤ ${max.transports}, purchases ≤ ${max.purchases}, measurement keys ≤ ${max.meas}, tools ≤ ${max.tools}, events ${S1.events.length}, notifications ${S1.notifications.length}`);
+    ok('week');
+    if (max.open > cfg.openMax + 10) fail('week', `open orders grew to ${max.open} (intake openMax ${cfg.openMax})`, 'wopen');
+    if (WEEK_DAYS >= 3 && openMinStaffed < 4) fail('week', `order book ran dry: only ${openMinStaffed} open orders during a staffed shift`, 'wdry');
+    // Auslastung: jede Werktagsschicht mit Arbeit, Leerlauf plausibel
+    const runShare = staffedN ? staffedRun / staffedN : 0, idleShare = staffedN ? staffedIdle / staffedN : 1;
+    note('week', `staffed utilisation (production machines, Mo–Fr after the first 6 h): running ${(runShare * 100).toFixed(1)} %, idle ('Bereit') ${(idleShare * 100).toFixed(1)} % – ` + MACHINE_IDS_LIST.filter((mid) => STATION[mid].kind === 'machine').map((mid) => `${mid} ${perM[mid].n ? Math.round(perM[mid].run / perM[mid].n * 100) : 0}/${perM[mid].n ? Math.round(perM[mid].idle / perM[mid].n * 100) : 0}`).join(' · ') + ' (run %/idle %)');
+    ok('week');
+    if (WEEK_DAYS >= 2 && (runShare < 0.35 || idleShare > 0.45)) fail('week', `factory not busy: staffed running ${(runShare * 100).toFixed(0)} %, idle ${(idleShare * 100).toFixed(0)} %`, 'wbusy');
+    for (const [key, sw] of Object.entries(shiftWork)) { ok('week'); if (sw.n && sw.withOp / sw.n < 0.4) fail('week', `shift ${key}: only ${Math.round(sw.withOp / sw.n * 100)} % of machine samples had an order assigned (order book empty?)`, 'wshift:' + key); }
+    // Auftragseingang: Ereignis, Meldung, Nummern, Termine
+    ok('week');
+    if (WEEK_DAYS >= 3 && intake.length < 10) fail('week', `only ${intake.length} orderIntake events in ${WEEK_DAYS} days`, 'wintake');
+    let lastNo = profMax;
+    const re = /^Auftragseingang: (FA-(\d+)) · (\d+) Stk .+ für .+, Termin (Mo|Di|Mi|Do|Fr) \d\d:\d\d/;
+    for (const e of intake) {
+      ok('week');
+      const mm = re.exec(e.msg || '');
+      if (e.sev !== 'ok' || !mm) { fail('week', `orderIntake event malformed: sev ${e.sev}, msg „${e.msg}“`, 'wimsg'); continue; }
+      const no = Number(mm[2]);
+      if (no <= lastNo) fail('week', `order intake id ${mm[1]} not increasing / collides (last ${lastNo})`, 'wiid');
+      lastNo = Math.max(lastNo, no);
+      const d = e.data || {}, due = d.due, dd = Math.floor(due / DAY) % 7, tdue = tod(due);
+      if (!num(due) || dd >= 5 || tdue < 6 * H || tdue > 22 * H) fail('week', `${mm[1]}: due ${clk(due)} not within Mo–Fr 06–22`, 'widue');
+      if (num(due) && (due - e.t < 12 * H || due - e.t > 7 * DAY)) fail('week', `${mm[1]}: due ${clk(due)} is ${dur(due - e.t)} after intake (expected 2–4 working days)`, 'widue2');
+      const nt = intakeNotif.get('intake:' + mm[1]);
+      if (!nt) fail('week', `${mm[1]}: no intake notification`, 'winot');
+      else if (nt.sev !== 'info' || nt.role !== 'Schichtleitung' || !num(nt.auto) || Math.abs(nt.auto - e.t - 30 * MIN) > 120) fail('week', `${mm[1]}: intake notification sev ${nt.sev}/role ${nt.role}/autoResolve ${nt.auto != null ? dur(nt.auto - e.t) : '–'} (expected info/Schichtleitung/~30 min)`, 'winot2');
+    }
+    const resolved = [...intakeNotif.values()].filter((x) => x.status === 'resolved' && num(x.resolvedT)).length;
+    if (intake.length > 2 && resolved < intake.length - 2) fail('week', `only ${resolved}/${intake.length} intake notifications auto-resolved`, 'wires');
+    // Auftrags-IDs eindeutig (auch nach Archivierung nie wiederverwendet)
+    const ids = intake.map((e) => e.data && e.data.orderId);
+    if (new Set(ids).size !== ids.length) fail('week', 'orderIntake reused an order id', 'widup');
+    const addId = SIM.actions.addOrder({ customer: 'Kollisionstest', part: { name: 'Prüfstück', weightKg: 1 }, qty: 2, routing: [{ op: 'Prüfen', station: 'QS', cycleMin: 1 }] });
+    ok('week');
+    if (typeof addId !== 'string' || ids.includes(addId) || Number(addId.replace(/\D/g, '')) <= lastNo) fail('week', `actions.addOrder after the intake returned ${short(addId)} – collides with intake ids (last FA-${lastNo})`, 'waddid');
+    note('week', `intake: ${intake.length} orders (${intake.slice(0, 3).map((e) => e.msg.replace('Auftragseingang: ', '')).join(' | ')} …), Kanban call-offs ${kanban.length}, Versand pickups ${shipOut.length}; addOrder afterwards → ${addId}`);
+    const fin = intake.map((e) => S1.orders[e.data.orderId]).filter((o) => o && isDone(o));
+    const archived = S1.archived || 0;
+    ok('week');
+    if (WEEK_DAYS >= 4 && fin.length + archived < 10) fail('week', `intake orders do not get finished (${fin.length} fertig, ${archived} archived)`, 'wfin');
+  } catch (e) { warn('load', `test suite error in week phase: ${errStr(e)}`); }
+  finally { offE(); offN(); }
+}
+
+// ------------------------------------------------------------------ Test 14: Review-Befunde (Geisterschicht-OEE, Leistung, waitFromT, Engpass …)
+function reviewPhase() {
+  const st = () => S(), A = SIM.actions;
+  const evs = []; const offE = WF.bus.on('sim:event', (e) => evs.push(e));
+  const R = (k) => ok('review', k || 1);
+  const scen = (name, fn) => { try { fn(); } catch (e) { warn('load', `test suite error in review scenario ${name}: ${errStr(e)}`); } };
+  try {
+    // ---- Nacht Mo → Di: Geisterschicht-OEE, waitFromT, Texte nach Schichtende, Werkzeug-Meldung aktuell
+    scen('ghost-oee', () => {
+      evs.length = 0; SIM.init(PROFILE);
+      const waitSec = {}, wrongPast = [], clamp = [], staleTxt = [], badTxt = [];
+      let ghostSamples = 0;
+      const until = DAY + 5 * H + 50 * MIN;
+      while (st().t < until) {
+        SIM.advance(60);
+        const S0 = st(), t = S0.t, x = tod(t), ghost = x >= 22 * H || x < 6 * H;   // Lauf Mo 08:40 → Di 05:50
+        for (const mid of MACHINE_IDS_LIST) {
+          const m = S0.machines[mid];
+          if (ghost && m.loading === 'auto' && m.op && m.setupDone && m.released && WAIT_GROUP.has(m.state)) waitSec[mid] = (waitSec[mid] || 0) + 60;
+          if (m.state !== 'waitTool' && !(m.op && S0.notifications.some((n) => n.key === 'tool:' + mid && n.status !== 'resolved'))) continue;
+          const v = SIM.machineView(mid);
+          for (const tl of v.tools || []) {
+            const pc = tl.plannedChange; if (!pc || pc.waitFromT == null) continue;
+            R();
+            if (m.state === 'waitTool' && t - m.since > 60 && tl.status === 'due') {
+              if (pc.waitFromT > m.since + 1) clamp.push(`${clk(t)} ${mid} waits since ${clk(m.since)} but waitFromT ${clk(pc.waitFromT)}`);
+              if (!/steht seit/.test(pc.text)) clamp.push(`${clk(t)} ${mid}: text „${pc.text}“ (expected 'steht seit')`);
+            } else if (m.state !== 'waitTool' && pc.waitFromT < t - 1) wrongPast.push(`${clk(t)} ${mid} not waiting but waitFromT ${clk(pc.waitFromT)} in the past`);
+          }
+        }
+        // offene Werkzeug-Meldungen: keine Uhrzeit vor „jetzt“; nach Schichtende kein „vor Schichtende wechseln“; nie „im Dienst“
+        for (const n of S0.notifications) {
+          if (n.status === 'resolved' || !String(n.key).startsWith('tool:')) continue;
+          const mm = /ca\. (?:(Mo|Di|Mi|Do|Fr|Sa|So) )?(\d\d):(\d\d)/.exec(n.body || '');
+          if (mm && !mm[1]) { const tt = Math.floor(t / DAY) * DAY + Number(mm[2]) * H + Number(mm[3]) * MIN; if (tt < t - 120 && t - tt < 12 * H) staleTxt.push(`${clk(t)} ${n.key}: „${n.body.slice(0, 90)}“`); }
+          if (ghost && /vor Schichtende vorbeugend wechseln/.test(n.suggestion || '')) badTxt.push(`${clk(t)} ${n.key} after shift end: „${n.suggestion.slice(0, 90)}“`);
+          if (/im Dienst/.test((n.suggestion || '') + (n.body || ''))) badTxt.push(`${clk(t)} ${n.key}: says 'im Dienst' („${n.suggestion.slice(0, 60)}“)`);
+        }
+        if (ghost) ghostSamples++;
+      }
+      R(3);
+      if (clamp.length) fail('review', `waitFromT clamped / wrong tense: ${clamp[0]}${clamp.length > 1 ? ' (+' + (clamp.length - 1) + ')' : ''}`, 'wft');
+      if (wrongPast.length) fail('review', `plannedChange.waitFromT in the past for a running machine: ${wrongPast[0]}`, 'wftpast');
+      if (staleTxt.length) fail('review', `tool notification shows a time before now: ${staleTxt[0]}${staleTxt.length > 1 ? ' (+' + (staleTxt.length - 1) + ')' : ''}`, 'stale');
+      if (badTxt.length) fail('review', `wrong staffing text: ${badTxt[0]}${badTxt.length > 1 ? ' (+' + (badTxt.length - 1) + ')' : ''}`, 'stafftxt');
+      const S0 = st(), k = SIM.kpis();
+      const waited = Object.entries(waitSec).filter(([, sec]) => sec >= 20 * MIN);
+      for (const [mid, sec] of waited) {
+        const v = SIM.machineView(mid), os = v.oeeShift;
+        R();
+        if (!(os.plannedSec > os.runSec) || !(os.availability < 1)) fail('review', `${mid} waited ${dur(sec)} in the ghost shift (auto, released) but oeeShift = availability ${os.availability} (planned ${os.plannedSec} s, run ${os.runSec} s) – ghost shift must count as planned time`, 'goee:' + mid);
+        if (!(v.lossEurToday > 0)) fail('review', `${mid} waited ${dur(sec)} in the ghost shift but lossEurToday = ${v.lossEurToday}`, 'gloss:' + mid);
+      }
+      if (waited.length) { R(); if (!(k.oeeShift < 1)) fail('review', `kpis().oeeShift = ${k.oeeShift} although ${waited.map((x) => x[0]).join(', ')} stood in the ghost shift`, 'goeek'); }
+      for (const mid of MACHINE_IDS_LIST) { const m = S0.machines[mid]; if (!m.op && m.state === 'idle' && m.ks.planned > m.ks.run + 1) { R(); fail('review', `${mid} without order shows planned ${m.ks.planned} s > run ${m.ks.run} s in the ghost shift`, 'gidle:' + mid); } }
+      note('review', `ghost shift Mo→Di: ${waited.length ? waited.map(([mid, sec]) => `${mid} stood ${dur(sec)} → shift availability ${U3(SIM.machineView(mid).oeeShift.availability)}`).join(', ') : 'no autonomous machine stood'}; plant oeeShift ${U3(k.oeeShift)} (${ghostSamples} samples)`);
+      // Rüst-Texte: Waschanlage/Messraum/Montage ohne „vermessene Werkzeuge“
+      for (const e of evs) if (e.type === 'setupStart' && e.entity && ['M11', 'QS', 'M13'].includes(e.entity.id)) { R(); if (/vermessene Werkzeuge/.test(e.msg)) fail('review', `setup text at ${e.entity.id}: „${e.msg}“`, 'setuptxt'); }
+    });
+    // ---- Leistung während des ersten langen Teils der Schicht; stetige Werk-OEE am Teilende
+    scen('performance', () => {
+      SIM.init(PROFILE);
+      while (tod(st().t) !== 14 * H + 25 * MIN) SIM.step();
+      let checked = 0;
+      for (const mid of MACHINE_IDS_LIST) {
+        const m = st().machines[mid];
+        if (!m.part || m.part.sub !== 'cut' || m.ks.ideal > 0 || m.ks.run < 600) continue;
+        const raw = m.ks.ideal, v = SIM.machineView(mid);
+        R(); checked++;
+        if (!(v.oeeShift.performance > 0 && v.oeeShift.performance <= 1)) fail('review', `${mid}: ${dur(m.ks.run)} running in the shift on its first part (${m.op ? S().orders[m.op.oid].routing[m.op.idx].cycleMin + ' min cycle' : ''}) but oeeShift.performance = ${v.oeeShift.performance}`, 'perf0:' + mid);
+        if (m.ks.ideal !== raw) fail('review', `${mid}: reading machineView changed ks.ideal (${raw} → ${m.ks.ideal}) – must be computed on read`, 'perfmut');
+      }
+      note('review', `in-progress performance credit checked on ${checked} machine(s) at Mo 14:25 (first long part of the shift)`);
+      // stetig: Werk-Leistung springt am Teilende eines langen Teils nicht
+      const lm = MACHINE_IDS_LIST.map((id) => st().machines[id]).find((m) => m.kind === 'machine' && m.part && m.part.sub === 'cut' && m.part.dur >= 20 * MIN && m.part.rem > 60 && m.part.rem < 40 * MIN);
+      if (lm) {
+        let prev = SIM.kpis().performance, maxJump = 0, ended = false;
+        for (let k = 0; k < 45 * MIN && !ended; k++) { const pt = lm.part; SIM.step(); const p = SIM.kpis().performance; if (num(prev) && num(p)) maxJump = Math.max(maxJump, Math.abs(p - prev)); prev = p; if (lm.part !== pt) ended = true; }
+        R();
+        if (maxJump > 0.02) fail('review', `plant performance jumps by ${(maxJump * 100).toFixed(1)} points within one second around the part end on ${lm.id} – should move continuously`, 'perfjump');
+        note('review', `continuity: largest 1-s change of plant performance across a ${lm.id} part end = ${(maxJump * 100).toFixed(2)} points`);
+      }
+    });
+    // ---- Engpass, Was-wäre-wenn, Mengenrisiko, Belegung (Mo 08:40 und im Lauf)
+    scen('bottleneck', () => {
+      SIM.init(PROFILE);
+      for (let k = 0; k < 6; k++) {
+        if (k) SIM.advance(3 * H);
+        const b = SIM.bottleneck(), fc = SIM.forecast(), wc = SIM.workContent();
+        R();
+        if (!b) { fail('review', `${at(st().t)} bottleneck() = null with ${Object.keys(st().orders).length} orders`, 'bnnull'); continue; }
+        if (!MACHINE_IDS.has(b.stationId) || typeof b.why !== 'string' || !/^Arbeitsvorrat [\d,]+ h · /.test(b.why) || !(b.workSec > 0)) fail('review', `${at(st().t)} bottleneck() malformed: ${short(b)}`, 'bnshape');
+        const lim = Object.keys(fc.orders).filter((id) => !fc.orders[id].done && fc.orders[id].bottleneckStation === b.stationId).sort();
+        if (JSON.stringify(lim) !== JSON.stringify(b.orders.slice().sort())) fail('review', `${at(st().t)} bottleneck().orders ${short(b.orders)} ≠ forecast orders with bottleneckStation ${b.stationId} ${short(lim)}`, 'bnorders');
+        for (const id of Object.keys(fc.orders)) { const f = fc.orders[id]; if (f.bottleneckStation && !(typeof f.bottleneck === 'string' && f.bottleneck.startsWith(f.bottleneckStation + ' '))) fail('review', `forecast().orders.${id}: bottleneckStation ${f.bottleneckStation} vs label „${f.bottleneck}“`, 'bnlabel'); }
+        const risky = Object.keys(fc.orders).filter((id) => { const v = SIM.orderView(id); return v && v.status !== 'fertig' && (v.risk === 'spät' || v.risk === 'knapp') && fc.orders[id].bottleneckStation; });
+        for (const id of b.late) { const v = SIM.orderView(id); if (!b.orders.includes(id) || !v || !['spät', 'knapp'].includes(v.risk)) fail('review', `${at(st().t)} bottleneck().late contains ${id} (risk ${v && v.risk})`, 'bnlate'); }
+        const rs = [...new Set(risky.map((id) => fc.orders[id].bottleneckStation))].filter((sid) => (wc[sid] || 0) > 0);
+        const cand = rs.length ? rs : MACHINE_IDS_LIST;
+        const best = Math.max(...cand.map((sid) => wc[sid] || 0));
+        if (!cand.includes(b.stationId) || Math.abs((wc[b.stationId] || 0) - best) > 1) fail('review', `${at(st().t)} bottleneck ${b.stationId} (${Math.round(wc[b.stationId] / 60)} min) is not the largest work content among ${risky.length ? 'at-risk bottleneck stations' : 'all stations'} ${short(cand)}`, 'bnpick');
+        for (const id of Object.keys(st().orders)) { const v = SIM.orderView(id); if (v && v.status !== 'fertig' && (fc.orders[id] || {}).bottleneckStation !== v.bottleneckStation) { fail('review', `orderView('${id}').bottleneckStation ≠ forecast`, 'bnov'); break; } }
+        const oc = SIM.kpis().occupancy;
+        if (!oc || !num(oc.backlogDays) || !(oc.machinesWithWork >= 0 && oc.machinesWithWork <= oc.total)) fail('review', `kpis().occupancy malformed: ${short(oc)}`, 'occ');
+        if (k === 0) note('review', `bottleneck() Mo 08:40: ${b.stationId} – ${b.why}; occupancy ${oc.machinesWithWork}/${oc.total} machines with order, backlog ${oc.backlogDays} days (max ${oc.backlogDaysMax} at ${oc.backlogMaxMachine})`);
+      }
+      // jede Maschine hat beim Start 1–2 Tage Vorrat (Auftragsvorrat im Profil)
+      SIM.init(PROFILE);
+      const oc0 = SIM.kpis().occupancy;
+      for (const mid of MACHINE_IDS_LIST) { if (STATION[mid].kind !== 'machine' || mid === 'M11') continue; R(); if (!(oc0.byMachine[mid] >= 0.5)) fail('review', `${mid} starts with only ${oc0.byMachine[mid]} days of work (expected ≥ 0.5)`, 'occ0:' + mid); }
+      // Was-wäre-wenn: rein lesend, Empfehlung „Eilauftrag“ nur ohne neue Verspätungen
+      const h0 = hashOf(projection(st()));
+      let n = 0;
+      for (const id of Object.keys(st().orders)) {
+        const o = st().orders[id]; if (isDone(o) || o.priority === 'eil') continue;
+        const w = SIM.whatIfPriority(id); n++;
+        R();
+        if (!w || !w.ok || !w.target || !Array.isArray(w.affected) || typeof w.text !== 'string') { fail('review', `whatIfPriority('${id}') → ${short(w)}`, 'wishape'); continue; }
+        if (w.recommend && (w.newlyLate.length || w.gainSec < 900)) fail('review', `whatIfPriority('${id}') recommends although ${w.newlyLate.join(', ')} become late / gain ${w.gainSec} s`, 'wirec');
+      }
+      R();
+      if (hashOf(projection(st())) !== h0) fail('review', 'whatIfPriority() changed the simulation state', 'wipure');
+      const wm = SIM.whatIf({ type: 'moveOp', orderId: 'FA-24122', seq: 20, stationId: 'M04' });
+      R(); if (!wm || wm.ok !== false || !/WFL|kg|Welle/.test(String(wm.msg))) fail('review', `whatIf moveOp to an incapable machine should be refused with the capability text, got ${short(wm)}`, 'wimove');
+      let lateChecked = 0;
+      for (let k = 0; k < 8; k++) {
+        SIM.advance(H);
+        for (const nn of st().notifications) {
+          if (nn.status === 'resolved' || !String(nn.key).startsWith('late:')) continue;
+          const eil = (nn.actions || []).find((a) => a.action && a.action.type === 'setPriority');
+          lateChecked++; R();
+          if (eil && !(nn.whatIf && nn.whatIf.recommend && !nn.whatIf.newlyLate.length)) fail('review', `${nn.key} offers 'Als Eilauftrag' although the what-if says ${short(nn.whatIf)}`, 'lateeil');
+          if (!eil && !/Überstunden|Teillieferung|Eilauftrag/.test(nn.suggestion || '')) fail('review', `${nn.key}: recommendation without alternative („${(nn.suggestion || '').slice(0, 80)}“)`, 'latealt');
+        }
+      }
+      note('review', `what-if: ${n} orders evaluated read-only at Mo 08:40; ${lateChecked} 'Termin gefährdet' samples checked (Eilauftrag only when no other order becomes late)`);
+    });
+    scen('qty-risk', () => {
+      // Ausschuss nach AG 10 → sofort „Menge gefährdet“ mit Nachfertigung
+      SIM.init(PROFILE);
+      let cm = null;
+      for (let k = 0; k < 8 * H && !cm; k++) { SIM.step(); cm = MACHINE_IDS_LIST.map((id) => st().machines[id]).find((m) => m.kind === 'machine' && m.op && m.op.idx > 0 && m.part && m.part.sub === 'cut' && !m.fault && m.part.rem > 60 && ['lathe', 'biglathe', 'mill3', 'mill5', 'deephole', 'hobber'].includes(m.type)); }
+      if (!cm) { note('review', 'qty-risk: no machine cutting a downstream op found – skipped'); return; }
+      const oid = cm.op.oid, o = st().orders[oid];
+      const r = A.triggerFault(cm.id, 'ALM 4410');
+      R();
+      if (!r || !r.ok) { fail('review', `triggerFault('${cm.id}', 'ALM 4410') while cutting: ${r && r.msg}`, 'qtyfault'); return; }
+      const n = st().notifications.find((x) => x.key === 'qty:' + oid && x.status !== 'resolved');
+      const ov = SIM.orderView(oid), down = o.ops.slice(1).reduce((a, x) => a + x.scrap, 0);
+      R(3);
+      if (!n || n.sev !== 'warn' || !/Menge gefährdet/.test(n.title) || !(n.actions || []).some((a) => a.action.type === 'planRemake')) fail('review', `no 'Menge gefährdet' warning with planRemake after downstream scrap on ${oid}: ${short(n && n.title)}`, 'qtynot');
+      if (!(down >= 1) || ov.expectedQty !== o.qty - down || !ov.qtyRisk || ov.qtyRisk.missing !== down) fail('review', `orderView('${oid}') expectedQty ${ov.expectedQty} / qtyRisk ${short(ov.qtyRisk)} (expected ${o.qty - down}, missing ${down})`, 'qtyov');
+      const res = n ? SIM.runAction(n.actions.find((a) => a.action.type === 'planRemake').action) : A.planRemake(oid);
+      const ro = res && res.id && st().orders[res.id];
+      R(2);
+      if (!ro || ro.qty !== down || ro.priority !== 'eil' || ro.remakeOf !== oid || ro.routing[0].station !== o.routing[0].station) fail('review', `planRemake('${oid}') → ${short(res)} / order ${short(ro && { qty: ro.qty, prio: ro.priority, remakeOf: ro.remakeOf })}`, 'remake');
+      const ov2 = SIM.orderView(oid);
+      if (!ov2.qtyRisk || ov2.qtyRisk.missing !== 0 || !ov2.remakes.includes(res.id) || st().notifications.some((x) => x.key === 'qty:' + oid && x.status !== 'resolved')) fail('review', `after planRemake: qtyRisk ${short(ov2.qtyRisk)}, notification still open?`, 'remake2');
+      note('review', `quantity risk: ${oid} → „${n ? n.title : '–'}“ → ${res && res.msg}`);
+    });
+    scen('indexing', () => {
+      // Wendeplatten: Schneide wenden durch den Bediener (kurz, ohne Werkzeugausgabe), Tausch erst nach der letzten Schneide
+      evs.length = 0; SIM.init(PROFILE);
+      const idx = [], repl = [], txt = { idx: 0, repl: 0, insertsSeen: 0 };
+      for (let k = 0; k < 12 * 6; k++) {
+        SIM.advance(600);
+        for (const mid of MACHINE_IDS_LIST) {
+          const m = st().machines[mid]; if (!m.op || !m.setupDone) continue;
+          for (const tl of SIM.machineView(mid).tools) {
+            if (tl.kind !== 'insert' || !(tl.edges > 1) || tl.status === 'idle' || tl.broken) continue;
+            txt.insertsSeen++;
+            if (!/Schneide wenden|Werkzeug tauschen|Wendeplatte|kein Wechsel nötig|gewendet|gewechselt/.test(tl.explain || '')) { fail('review', `${mid} ${tl.typeId} (${tl.edgeText}) explain does not say Schneide wenden / Werkzeug tauschen: „${tl.explain}“`, 'idxexpl'); }
+            if (tl.plannedChange && tl.plannedChange.action !== (tl.edge < tl.edges ? 'index' : 'replace')) fail('review', `${mid} ${tl.typeId} ${tl.edgeText}: plannedChange.action ${tl.plannedChange.action}`, 'idxact');
+          }
+        }
+      }
+      for (const e of evs) {
+        if (e.type !== 'toolChanged' || !e.data || !Array.isArray(e.data.tools)) continue;
+        for (const x of e.data.tools) {
+          const tt = PROFILE.toolTypeById[x.typeId]; if (!tt || tt.kind !== 'insert' || !(tt.edges > 1)) continue;
+          R();
+          if (x.action === 'index') { idx.push(e); if (!(x.edgeTo === x.edgeFrom + 1 && x.edgeTo <= tt.edges)) fail('review', `index ${x.typeId}: edge ${x.edgeFrom} → ${x.edgeTo} of ${tt.edges}`, 'idxedge'); }
+          else if (x.reason !== 'Werkzeugbruch' && !/Rüsten/.test(String(x.reason))) { repl.push(e); const old = st().tools[x.oldToolId]; if (old && (old.edge || 1) < (old.edges || 1)) fail('review', `${e.entity.id}: insert ${x.typeId} replaced on edge ${old.edge}/${old.edges} (only the last edge triggers an exchange)`, 'idxrepl'); }
+        }
+        if (e.data.index) { R(); if (!(e.data.durSec <= 3 * MIN)) fail('review', `${e.entity.id}: pure indexing took ${dur(e.data.durSec)} (expected 1–2 min)`, 'idxdur'); }
+      }
+      R();
+      if (!idx.length) fail('review', 'no insert was indexed in 12 h (Schneide wenden)', 'idxnone');
+      note('review', `inserts in 12 h: ${idx.length} edge indexes (Schneide wenden), ${repl.length} exchanges after the last edge; ${txt.insertsSeen} insert views checked`);
+    });
+  } catch (e) { warn('load', `test suite error in review phase: ${errStr(e)}`); }
+  finally { offE(); }
+}
+const U3 = (x) => (num(x) ? (x * 100).toFixed(0) + ' %' : String(x));
+
 // ------------------------------------------------------------------ Bericht
 function report(wallMs, simInfo) {
   const lines = [];
@@ -1909,7 +2215,7 @@ function report(wallMs, simInfo) {
     const wl = [...t.warns.values()];
     for (const e of wl.slice(0, MAX_MSGS)) lines.push(`        warn ${e.msg}${e.n > 1 ? `  (×${e.n})` : ''}`);
     if (wl.length > MAX_MSGS) lines.push(`        … ${wl.length - MAX_MSGS} more warnings`);
-    const showNotes = VERBOSE || t.key === 'deadlock' || t.key === 'realism' || t.key === 'api' || t.key === 'regress';
+    const showNotes = VERBOSE || t.key === 'deadlock' || t.key === 'realism' || t.key === 'api' || t.key === 'regress' || t.key === 'week' || t.key === 'review';
     if (showNotes) for (const n of t.notes.slice(0, VERBOSE ? 200 : 14)) lines.push(`        info ${n}`);
   }
   lines.push(`Totals: ${nP} PASS · ${nW} WARN · ${nF} FAIL${nS ? ` · ${nS} SKIP (not reached)` : ''}${wallMs > 20000 ? `  (suite took ${(wallMs / 1000).toFixed(1)} s > 20 s target)` : ''}`);
@@ -1988,6 +2294,8 @@ function main() {
   }
   CUR = null;
   regressionPhase();
+  reviewPhase();
+  if (!ARGS['no-week']) weekPhase(); else note('week', 'skipped (--no-week)');
   if (nonDet.random) warn('determinism', `engine called Math.random() ${nonDet.random}× during simulation/views (SPEC: seeded RNG only)`);
   if (nonDet.dateNow) note('determinism', `engine called Date.now() ${nonDet.dateNow}×`);
   CUR = null;

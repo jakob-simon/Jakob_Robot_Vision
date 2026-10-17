@@ -2477,7 +2477,7 @@
 
   // ================================================================== View registrieren
   WF.registerView({
-    id: 'material', title: 'Material & Logistik', icon: 'box', group: 'ressourcen', order: 4,
+    id: 'material', title: 'Material & Logistik', icon: 'truck', group: 'ressourcen', order: 4,
     mount, show, hide, update, frame,
     badge() {
       const s = S(); if (!s || !s.materials) return '';

@@ -2318,6 +2318,7 @@
       list: list.map(x => ({ type: x.spec.type, toolId: x.tl.id, rem: x.rem, why: x.why, at: x.at, reason: changeReason(x), action: x.action, edge: x.tl.edge || 1, edges: x.tl.edges || 1 })),
       cause: `${sn(p.name)} ${verb} ${list.map(x => TT[x.spec.type].name + (x.action === 'index' ? ' (' + edgeTxt(x.tl) + ' → ' + ((x.tl.edge || 1) + 1) + '/' + x.tl.edges + ')' : '')).join(', ')} (${brk ? 'Werkzeugbruch' : ex ? changeReason(list.find(x => x.rem < 1)) : list.every(x => x.why === 'manual') ? 'vorbeugend, manuell beauftragt' : changeReason(list.find(x => x.why === 'rule') || list[0])}${list.some(x => x.why === 'bundle') ? '; mitgewechselt: ' + list.filter(x => x.why === 'bundle').map(x => TT[x.spec.type].name).join(', ') : ''}, ca. ${U.fmtDur(sec)})` };
     tk.steps[tk.si + 1].sec = sec;
+    if (hasOpen('tool:' + m.id)) { const n = NIDX['tool:' + m.id]; n.body = `${allIdx ? 'Schneide wenden' : 'Werkzeugwechsel'} läuft seit ${U.fmtClock(S.t)}: ${list.map(x => TT[x.spec.type].name).join(', ')} (${sn(p.name)}, ca. ${U.fmtDur(sec)}) – ${o.id} AG ${o.routing[i].seq}.`; n.sev = 'info'; n.suggestion = 'Nach dem Wechsel läuft die Serie an der Teilegrenze weiter.'; n.updatedT = S.t; WF.bus.emit('sim:notify', n); }
     advanceTask(p);
   }
   function onToolChanged(m) {
@@ -3308,13 +3309,13 @@
         const d = f.eta - o.due;
         // Empfehlung aus der Was-wäre-wenn-Rechnung (höchstens alle 30 min neu, bzw. nach Prioritätswechsel)
         const n0 = open ? NIDX[key] : null;
-        const adv = n0 && n0.advice && S.t - n0.advice.t < 1800 && n0.advice.prio === o.priority ? n0.advice : Object.assign(lateAdvice(o, f), { t: S.t, prio: o.priority });
+        let adv = n0 && n0.advice && S.t - n0.advice.t < 1800 && n0.advice.prio === o.priority ? n0.advice : null;
+        if (!adv) { const a = orderAdvice(id); adv = { t: S.t, prio: o.priority, suggestion: a.text, actions: a.actions, wi: a.whatIf }; }
         const n = notify({ key, sev: 'warn', role: 'Schichtleitung', entity: { kind: 'order', id },
           title: `Termin gefährdet: ${id} (${o.customer})`,
           body: `Prognose fertig ${U.fmtDayClock(f.eta)}, Termin ${U.fmtDayClock(o.due)} – ${d > 0 ? 'ca. ' + U.fmtDur(d) + ' Verzug' : 'sehr knapp (nur ' + U.fmtDur(-d) + ' Puffer)'}.${bn}`,
           suggestion: adv.suggestion, actions: adv.actions });
-        n.whatIf = adv.whatIf ? adv.whatIf.summary || { recommend: adv.whatIf.recommend, gainSec: adv.whatIf.gainSec, newlyLate: adv.whatIf.newlyLate, text: adv.whatIf.text } : (adv.wi || null);
-        n.advice = { t: adv.t, prio: adv.prio, suggestion: adv.suggestion, actions: adv.actions, wi: n.whatIf };
+        n.whatIf = adv.wi || null; n.advice = adv;
       } else if (open && !late) resolveKey(key, 'Prognose wieder im Termin');
     }
   }
@@ -3609,7 +3610,7 @@
     const others = rows.filter(r => r.orderId !== o.id);
     const affected = others.filter(r => Math.abs(r.deltaSec) >= 300).sort((p, q) => q.deltaSec - p.deltaSec);
     const newlyLate = others.filter(r => r.lateAfter && !r.lateBefore);
-    const laterLate = others.filter(r => r.lateBefore && r.deltaSec > 1800);
+    const laterLate = others.filter(r => r.lateBefore && r.deltaSec > 300);   // schon späte Aufträge dürfen nicht noch später werden
     const gainSec = target ? target.before - target.after : 0;
     const recommend = !!target && gainSec >= 900 && !newlyLate.length && !laterLate.length;
     const hh = (t) => U.fmtDayClock(t);
@@ -3621,31 +3622,86 @@
     return { ok: true, spec: Object.assign({}, spec), orderId: o.id, target, affected, newlyLate: newlyLate.map(r => r.orderId), laterLate: laterLate.map(r => r.orderId), gainSec, recommend, text };
   }
   const whatIfPriority = (orderId, priority) => whatIf({ type: 'setPriority', orderId, priority: priority || 'eil' });
-  /** Empfehlung für „Termin gefährdet“ – aus derselben Was-wäre-wenn-Rechnung: Eilauftrag nur, wenn kein anderer Auftrag
-      dadurch spät wird; sonst Verlagerung (wenn sie hilft), Überstunden am Engpass oder Teillieferung */
-  function lateAdvice(o, f) {
+  /** Empfehlung zu einem Auftrag – EINE Quelle für „Termin gefährdet“, Leitstand und KI (WF.sim.orderAdvice):
+      Ursache aus der Prognose (Engpass-Arbeitsgang, Fremdbearbeitung, Rohmaterial); „Als Eilauftrag“ nur, wenn die
+      Was-wäre-wenn-Rechnung einen Gewinn zeigt und kein anderer Auftrag dadurch spät (bzw. noch später) wird; sonst
+      Verlagern (nur wenn eine gleichwertige Maschine existiert, frei von Störung und nicht selbst der Engpass), Überstunden
+      am Engpass, Expressdurchlauf beim Fremdbearbeiter, Teillieferung. Ohne erkennbare Ursache: neutraler Text. */
+  function orderAdvice(orderId) {
+    const o = S.orders[orderId]; if (!o) return null;
     const open = { label: 'Auftrag öffnen', action: { type: 'select', kind: 'order', id: o.id } };
-    const bn = f && f.bottleneckStation ? `${f.bottleneckStation} ${stShort(f.bottleneckStation)}` : 'am Engpass';
-    if (o.priority === 'eil') return { suggestion: `Auftrag ist bereits Eilauftrag: Überstunden/Zusatzschicht am Engpass ${bn} prüfen, Kunde informieren oder Teillieferung abstimmen.`, actions: [open], whatIf: null };
-    const w = whatIfPriority(o.id, 'eil');
-    if (w.ok && w.recommend) return { suggestion: `${w.text}. Als Eilauftrag kennzeichnen – die Maschinen ziehen ihn beim nächsten Auftragswechsel vor (laufende Teile werden nicht unterbrochen).`,
-      actions: [{ label: 'Als Eilauftrag', action: { type: 'setPriority', orderId: o.id, priority: 'eil' } }, open], whatIf: w };
-    // Alternative: Engpass-Arbeitsgang auf eine kompatible Maschine verlagern – nur wenn die Prognose es bestätigt
-    let alt = null;
-    if (f && f.bottleneckStation && f.bottleneckSeq != null) {
-      const fromM = S.machines[f.bottleneckStation];
-      for (const m2 of MA) {
-        if (!fromM || m2.id === fromM.id || m2.kind !== 'machine' || !compatible(fromM.type, m2.type)) continue;
-        const wm = whatIf({ type: 'moveOp', orderId: o.id, seq: f.bottleneckSeq, stationId: m2.id });
-        if (wm.ok && wm.recommend) { alt = { to: m2.id, w: wm }; break; }
+    if (o.status === 'fertig') return { orderId: o.id, cause: 'Auftrag fertig', text: `${o.id} ist fertig (${o.shippedQty}/${o.qty} Stk).`, action: null, actions: [open], alternatives: [], sideEffects: [], whatIf: null };
+    const fc = forecast(), f = fc.orders[o.id] || {}, eta = f.eta != null ? f.eta : null;
+    const lateSec = eta != null ? eta - o.due : null, risk = riskOf(o, eta);
+    // Ursache: Rohmaterial fehlt im 1. Arbeitsgang, längster Abschnitt in der Fremdbearbeitung, sonst Engpass-Arbeitsgang
+    let cause = null, causeKind = null, ext = null;
+    const r0 = o.routing[0], op0 = o.ops[0], m0 = S.machines[r0.station];
+    if (!op0.complete && r0.material && m0 && m0.op && m0.op.oid === o.id && m0.state === 'starved' && /Rohmaterial|Lager|Stangen/.test(m0.cause)) {
+      causeKind = 'material'; cause = `Rohmaterial fehlt an ${r0.station} (${m0.cause})`;
+    }
+    if (!cause) {
+      let worst = null;
+      (f.ops || []).forEach((x, i) => { if (x && x.end != null && x.start != null) { const d = x.end - Math.max(S.t, x.start); if (!worst || d > worst.d) worst = { d, i, x }; } });
+      if (worst && o.routing[worst.i].station === 'EXT' && worst.d > (f.bottleneckSec || 0)) {
+        const r = o.routing[worst.i]; ext = r;
+        causeKind = 'ext'; cause = `Fremdbearbeitung ${(r.ext && r.ext.process) || r.op} bei ${(r.ext && r.ext.partner) || 'Partner'} (Rückkehr ca. ${worst.x.lastReturn != null ? U.fmtDayClock(worst.x.lastReturn) : U.fmtDayClock(worst.x.end)})`;
       }
     }
-    const why = !w.ok ? '' : w.newlyLate.length || w.laterLate.length ? `Ein Eilauftrag würde nur verschieben – ${w.text.split('; ').slice(1).join('; ')}. ` : w.gainSec < 900 ? `Ein Eilauftrag bringt hier ${w.gainSec < 60 ? 'nichts – vor ' + o.id + ' liegt nur bereits laufende bzw. ohnehin früher fertige Arbeit' : 'kaum etwas (nur ' + U.fmtDur(w.gainSec) + ' früher)'}. ` : '';
-    const acts = [];
-    if (alt) acts.push({ label: `AG ${f.bottleneckSeq} auf ${alt.to} verlagern`, action: { type: 'moveOp', orderId: o.id, seq: f.bottleneckSeq, stationId: alt.to } });
-    acts.push(open);
-    return { suggestion: `${why}Besser: ${alt ? alt.w.text + '; ' : ''}Überstunden am Engpass ${bn} oder Teillieferung mit ${o.customer} abstimmen.`, actions: acts, whatIf: w, alt: alt ? alt.w : null };
+    const bnId = f.bottleneckStation || null, bnTxt = bnId ? `${bnId} ${stShort(bnId)}` : null;
+    if (!cause && bnId) { causeKind = 'bottleneck'; cause = `Engpass ${f.bottleneck}${f.bottleneckSec ? ', ca. ' + U.fmtDur(f.bottleneckSec) + ' Durchlauf' : ''}`; }
+    const lateTxt = lateSec == null ? 'keine Prognose' : lateSec > 0 ? `Prognose ${U.fmtDayClock(eta)}, ${U.fmtDur(lateSec)} nach Termin ${U.fmtDayClock(o.due)}` : `Prognose ${U.fmtDayClock(eta)}, Puffer ${U.fmtDur(-lateSec)} bis Termin ${U.fmtDayClock(o.due)}`;
+    const alternatives = [];
+    // 1) Eilauftrag (Was-wäre-wenn)
+    let w = null, prioOk = false;
+    if (o.priority !== 'eil') {
+      w = whatIfPriority(o.id, 'eil');
+      prioOk = !!(w.ok && w.recommend);
+      alternatives.push({ kind: 'priority', label: 'Als Eilauftrag', ok: prioOk, gainSec: w.ok ? w.gainSec : 0, text: w.ok ? w.text : w.msg,
+        action: prioOk ? { type: 'setPriority', orderId: o.id, priority: 'eil' } : null });
+    }
+    const sideEffects = w && w.ok ? w.affected.filter(r => r.deltaSec >= 300).map(r => ({ orderId: r.orderId, beforeT: r.before, afterT: r.after, lateBy: Math.max(0, r.after - r.due) })) : [];
+    // 2) Verlagern – nur auf eine gleichwertige Maschine (gleiche Gruppe + Leistungsgrenzen), die nicht selbst gestört bzw. der Engpass ist
+    let move = null;
+    if (bnId && f.bottleneckSeq != null && S.machines[bnId] && S.machines[bnId].kind === 'machine') {
+      const fromM = S.machines[bnId];
+      for (const m2 of MA) {
+        if (m2.id === bnId || m2.kind !== 'machine' || !compatible(fromM.type, m2.type) || m2.fault) continue;
+        if (moveOpCheck(o.id, f.bottleneckSeq, m2.id).msg) continue;
+        const wm = whatIf({ type: 'moveOp', orderId: o.id, seq: f.bottleneckSeq, stationId: m2.id });
+        const okM = !!(wm.ok && wm.recommend);
+        alternatives.push({ kind: 'moveOp', label: `AG ${f.bottleneckSeq} auf ${m2.id} verlagern`, ok: okM, gainSec: wm.ok ? wm.gainSec : 0, text: wm.ok ? wm.text : wm.msg,
+          action: okM ? { type: 'moveOp', orderId: o.id, seq: f.bottleneckSeq, stationId: m2.id } : null });
+        if (okM && (!move || wm.gainSec > move.gainSec)) move = { to: m2.id, gainSec: wm.gainSec, text: wm.text };
+      }
+    }
+    // 3) Überstunden am Engpass, Expressdurchlauf (Fremdbearbeitung), Teillieferung – immer konkret benannt
+    if (bnTxt && causeKind !== 'ext') alternatives.push({ kind: 'overtime', label: `Überstunden an ${bnId}`, ok: true, text: `Überstunden/Zusatzschicht am Engpass ${bnTxt}${lateSec > 0 ? ' (ca. ' + U.fmtDur(lateSec) + ' fehlen)' : ''}`, action: null });
+    if (ext) alternatives.push({ kind: 'express', label: 'Expressdurchlauf anfragen', ok: true, text: `Expressdurchlauf bei ${(ext.ext && ext.ext.partner) || 'dem Fremdbearbeiter'} anfragen (${(ext.ext && ext.ext.process) || ext.op})`, action: null });
+    if (causeKind === 'material') alternatives.push({ kind: 'material', label: 'Liefertermin klären', ok: true, text: `Liefertermin ${S.materials[r0.material.id].name} beim Lieferanten beschleunigen`, action: null });
+    alternatives.push({ kind: 'partial', label: 'Teillieferung abstimmen', ok: true, text: `Teillieferung mit ${o.customer} abstimmen`, action: null });
+    // Hauptaktion und Text
+    let action = null, text;
+    const sideTxt = w && w.ok && (w.newlyLate.length || w.laterLate.length) ? w.text.split('; ').slice(1).join('; ') : '';
+    if (prioOk) {
+      action = { type: 'setPriority', orderId: o.id, priority: 'eil' };
+      text = `${w.text}. Als Eilauftrag kennzeichnen – die Maschinen ziehen ${o.id} beim nächsten Auftragswechsel vor (laufende Teile werden nicht unterbrochen); kein anderer Auftrag wird dadurch spät.`;
+    } else if (!cause) {
+      text = `Ursache: ${lateTxt} – Optionen im Copilot prüfen.`;
+    } else {
+      const why = o.priority === 'eil' ? 'Auftrag ist bereits Eilauftrag. ' : !w || !w.ok ? '' : sideTxt ? `Ein Eilauftrag würde den Verzug nur verschieben (${sideTxt}). `
+        : w.gainSec < 60 ? `Ein Eilauftrag bringt nichts – vor ${o.id} liegt nur bereits laufende bzw. ohnehin früher fertige Arbeit. ` : w.gainSec < 900 ? `Ein Eilauftrag bringt kaum etwas (nur ${U.fmtDur(w.gainSec)} früher). ` : '';
+      const opts = [];
+      if (move) { action = { type: 'moveOp', orderId: o.id, seq: f.bottleneckSeq, stationId: move.to }; opts.push(`AG ${f.bottleneckSeq} auf ${move.to} ${stShort(move.to)} verlagern (${move.text.replace(/^AG \d+ auf \S+: /, '')})`); }
+      for (const a of alternatives) if (a.kind === 'express' || a.kind === 'overtime' || a.kind === 'material') opts.push(a.text);
+      opts.push(`Teillieferung mit ${o.customer} abstimmen`);
+      text = `Ursache: ${cause}. ${why}Empfehlung: ${opts.join(', ')}.`;
+    }
+    const label = action ? (action.type === 'setPriority' ? 'Als Eilauftrag' : `AG ${action.seq} auf ${action.stationId} verlagern`) : null;
+    return { orderId: o.id, risk, lateSec, eta, due: o.due, cause: cause || lateTxt, causeKind, bottleneckStation: bnId, text, action, actionLabel: label,
+      actions: action ? [{ label, action }, open] : [open], alternatives, sideEffects,
+      whatIf: w && w.ok ? { recommend: w.recommend, gainSec: w.gainSec, newlyLate: w.newlyLate, laterLate: w.laterLate, text: w.text } : null };
   }
+
   /** stabile (veröffentlichte) Prognose eintragen – eine Wahrheit für Auftragsliste, KPI, KI und Terminwarnung */
   function applyPub(res) {
     for (const id in res.orders) {
@@ -3667,6 +3723,82 @@
       else if (pub.cand != null && Math.abs(raw - pub.cand) <= 1800) S.etaPub[id] = { eta: raw, cand: null, t: S.t };
       else pub.cand = raw;
     }
+  }
+
+  /** Terminrisiko – eine Definition für Auftragsliste, KI und Engpass: spät (Prognose nach Termin bzw. fertig mit
+      Fehlmenge), knapp (< 4 h Puffer), ok, unbekannt (keine Prognose) */
+  function riskOf(o, eta) {
+    if (eta == null) return 'unbekannt';
+    const slack = o.due - eta;
+    if (o.status === 'fertig') return slack < 0 || o.shippedQty < o.qty ? 'spät' : 'ok';
+    return slack < 0 ? 'spät' : slack < 4 * 3600 ? 'knapp' : 'ok';
+  }
+  /** Arbeitsvorrat je Station in Sekunden: Rüsten + Bearbeitung (inkl. Einlegen, Werkzeugwechsel-Zuschlag) + Rest des
+      laufenden Teils bzw. der Störung – für alle offenen Arbeitsgänge (auch solche, deren Teile noch beim Vorgänger sind) */
+  let WCC = null;
+  function workContent() {
+    if (WCC && WCC.t === S.t && WCC.v === PV) return WCC;
+    const w = {}, n = {};
+    for (let j = 0; j < MA.length; j++) { w[MA[j].id] = 0; n[MA[j].id] = 0; }
+    for (const oid in S.orders) {
+      const o = S.orders[oid]; if (o.status === 'fertig') continue;
+      for (let i = 0; i < o.routing.length; i++) {
+        const m = S.machines[o.routing[i].station];
+        if (!m || o.ops[i].complete) continue;
+        const active = !!(m.op && m.op.oid === oid && m.op.idx === i);
+        const x = workFor(m, o, i, active);
+        if (!active && x.n <= 0) continue;
+        w[m.id] += x.setup + x.run + x.partRem; n[m.id]++;
+      }
+    }
+    WCC = { t: S.t, v: PV, w, n };
+    return WCC;
+  }
+  /** Schichtzeit (ohne Pausen) eines Werktags in Sekunden – Maßstab für „Vorrat in Tagen“ */
+  const dayCapSec = () => SH.reduce((a, sh) => a + sh.wins.reduce((b, x) => b + x[1] - x[0], 0), 0) || 14.5 * 3600;
+  /** Belegung: Maschinen mit eingeplantem Auftrag und Arbeitsvorrat in Schichttagen (Mittel der Bearbeitungsmaschinen) */
+  function occupancy() {
+    const wc = workContent(), cap = dayCapSec(), byMachine = {};
+    let withWork = 0, withBacklog = 0, sum = 0, nM = 0, max = 0, maxId = null;
+    for (let j = 0; j < MA.length; j++) {
+      const m = MA[j], d = Math.round(wc.w[m.id] / cap * 100) / 100;
+      byMachine[m.id] = d;
+      if (m.op) withWork++;
+      if (wc.w[m.id] > 0) withBacklog++;
+      if (m.kind === 'machine') { sum += d; nM++; if (d > max) { max = d; maxId = m.id; } }
+    }
+    return { machinesWithWork: withWork, machinesWithBacklog: withBacklog, total: MA.length, backlogDays: nM ? Math.round(sum / nM * 100) / 100 : 0,
+      backlogDaysMax: max, backlogMaxMachine: maxId, byMachine };
+  }
+  /** Engpass – eine Definition für alle Ansichten: unter den Stationen, die laut Prognose den Durchlauf gefährdeter
+      (spät/knapp) Aufträge begrenzen, die mit dem größten Arbeitsvorrat; sonst die mit dem größten Arbeitsvorrat. */
+  function bottleneck() {
+    const fc = forecast(), wc = workContent().w;
+    const limits = {}, risky = {};
+    for (const id in fc.orders) {
+      const f = fc.orders[id], o = S.orders[id];
+      if (!o || f.done || o.status === 'fertig' || !f.bottleneckStation) continue;
+      const sid = f.bottleneckStation;
+      (limits[sid] || (limits[sid] = [])).push(o);
+      const rk = riskOf(o, f.eta);
+      if (rk === 'spät' || rk === 'knapp') (risky[sid] || (risky[sid] = [])).push({ o, rk });
+    }
+    let best = null;
+    const pick = (ids) => { for (const sid of ids) if (S.machines[sid] && wc[sid] > 0 && (best == null || wc[sid] > wc[best])) best = sid; };
+    pick(Object.keys(risky));
+    const atRisk = best != null;
+    if (!atRisk) pick(MA.map(m => m.id));
+    if (best == null) return null;
+    const lim = (limits[best] || []).slice().sort((a, b) => a.due - b.due || (a.id < b.id ? -1 : 1));
+    const late = (risky[best] || []).slice().sort((a, b) => (a.rk === 'spät' ? 0 : 1) - (b.rk === 'spät' ? 0 : 1) || a.o.due - b.o.due);
+    const h = wc[best] / 3600, hTxt = U.fmtNum(h, h < 10 ? 1 : 0) + ' h';
+    const tag = (x) => x.o.id + (x.rk === 'spät' ? ' (verspätet)' : ' (knapp)');
+    let what;
+    if (late.length) what = 'begrenzt ' + late.slice(0, 3).map(tag).join(', ') + (late.length > 3 ? ` u. ${late.length - 3} weitere` : '');
+    else if (lim.length) what = 'begrenzt ' + lim.slice(0, 3).map(o => o.id).join(', ') + (lim.length > 3 ? ` u. ${lim.length - 3} weitere` : '') + ' (im Plan)';
+    else what = 'größter Arbeitsvorrat im Werk';
+    return { stationId: best, short: ST[best].short || best, name: ST[best].name, workSec: Math.round(wc[best]), workDays: Math.round(wc[best] / dayCapSec() * 100) / 100,
+      atRisk, orders: lim.map(o => o.id), late: late.map(x => x.o.id), why: `Arbeitsvorrat ${hTxt} · ${what}` };
   }
 
   /** Terminrisiko – eine Definition für Auftragsliste, KI und Engpass: spät (Prognose nach Termin bzw. fertig mit
@@ -4368,7 +4500,7 @@
     get history() { return S ? S.history : null; },
     get t() { return S ? S.t : 0; },
     get speedHint() { return (P || WF.profile || { sim: {} }).sim.defaultSpeed || 30; },
-    clock, shift, machineView, orderView, forecast, kpis, snapshot, actions, runAction, bottleneck, occupancy, whatIf, whatIfPriority,
+    clock, shift, machineView, orderView, forecast, kpis, snapshot, actions, runAction, bottleneck, occupancy, whatIf, whatIfPriority, orderAdvice,
     workContent: () => Object.assign({}, workContent().w),
     // Hilfen für Ansichten / Tests
     stationName: stShort, partsLeft: (orderId, seq) => { const o = S.orders[orderId]; const i = o ? o.routing.findIndex(r => r.seq === seq) : -1; return i >= 0 ? partsLeft(o, i) : null; },

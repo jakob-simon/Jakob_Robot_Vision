@@ -146,7 +146,7 @@
         return `<b>${esc(ov.id)}</b> · ${esc(ov.part.name)} für ${esc(ov.customer)}: ${esc(chain)}. Prognose fertig <b>${ov.eta ? U.fmtDue(ov.eta, sim().state.t) : '–'}</b>, Termin ${U.fmtDue(ov.due, sim().state.t)} – <b>${esc(ov.riskLabel || ov.risk || '')}</b>. Auch die externe Härterei ist eingeplant, inklusive Rückkehrzeit.`;
       } },
     { id: 'tools', view: 'werkzeuge', run: () => WF.app.closeDrawer(), title: 'Werkzeuge: eine Regel, die jeder versteht',
-      body: () => `Verschleiß wächst nur am Teilende und nie über 100 %. Gewechselt wird <b>nur zwischen zwei Teilen</b>, angekündigt mit Uhrzeit und Person; der Einrichter holt das vermessene Werkzeug vorher aus der Ausgabe. Kein „plötzlich getauscht“, kein Bruch durch Überziehen.` },
+      body: () => `Verschleiß wächst nur am Teilende und nie über 100 %. Gewechselt wird <b>nur zwischen zwei Teilen</b>, angekündigt mit Uhrzeit und Person. Wendeplatten wendet der Bediener direkt an der Maschine (Schneide 2 von 4); erst nach der letzten Schneide holt der Einrichter ein vermessenes Werkzeug aus der Ausgabe. Kein „plötzlich getauscht“, kein Bruch durch Überziehen.` },
     { id: 'fault', view: 'leitstand', compact: true, run: (prev) => {
         const orderId = ctxs.order || null;
         const id = pickFaultMachine(orderId);
