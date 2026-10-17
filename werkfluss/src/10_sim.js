@@ -872,9 +872,13 @@
     const bal = materialBalance();
     for (const id in bal) {
       const mt = S.materials[id], b = bal[id];
-      if (!mt.kanban || b.free >= -1e-9) continue;
-      const q = mt.reorderQty * Math.max(1, Math.ceil(-b.free / mt.reorderQty - 1e-9));
-      reorder(id, q, { kanban: true, need: b.need, have: b.have });
+      // Abruf, wenn der offene Bedarf nicht gedeckt ist ODER Bestand + Bestellungen unter den Meldebestand (min) fallen –
+      // min deckt den Verbrauch während der Lieferzeit, so läuft die Maschine nicht leer, bevor die Lieferung kommt
+      const avail = mt.onHand + mt.onOrder, shortMin = mt.min - avail;
+      if (!mt.kanban || (b.free >= -1e-9 && shortMin <= 1e-9)) continue;
+      const need = Math.max(-b.free, shortMin);
+      const q = mt.reorderQty * Math.max(1, Math.ceil(need / mt.reorderQty - 1e-9));
+      reorder(id, q, { kanban: true, need: b.need, have: b.have, min: shortMin > 1e-9 });
     }
     return bal;
   }
@@ -1542,7 +1546,7 @@
     if (!m.missing) return;
     for (const matId in m.missing) {
       const key = m.missing[matId], mt = S.materials[matId];
-      if (hasOpen(key)) resolveKey(key, note || (mt && mt.onHand + 1e-9 >= missingNeed(m, matId) ? `Material wieder verfügbar (Bestand ${nm(mt.onHand, mt.unit === 'm' ? 1 : 0)} ${mt.unit})` : `Arbeitsgang gewechselt – ${mt ? mt.name : matId} fehlt weiterhin${mt && mt.onOrder ? ' (Lieferung unterwegs)' : ''}`));
+      if (hasOpen(key)) resolveMissingKey(key, note || (mt && mt.onHand + 1e-9 >= missingNeed(m, matId) ? `Material wieder verfügbar (Bestand ${nm(mt.onHand, mt.unit === 'm' ? 1 : 0)} ${mt.unit})` : `Arbeitsgang gewechselt – ${mt ? mt.name : matId} fehlt weiterhin${mt && mt.onOrder ? ' (Lieferung unterwegs)' : ''}`));
     }
     m.missing = null;
   }
@@ -1556,20 +1560,31 @@
       const m = MA[j], key = m.missing && m.missing[mt.id];
       if (!key) continue;
       const c = curOf(m), uses = !!(c && c.r.material && c.r.material.id === mt.id);
-      if (!uses) { if (hasOpen(key)) resolveKey(key, 'Arbeitsgang gewechselt – Material wird an dieser Maschine nicht mehr benötigt'); delete m.missing[mt.id]; }
-      else if (mt.onHand + 1e-9 >= c.r.material.perPart) { if (hasOpen(key)) resolveKey(key, `Material wieder verfügbar (Bestand ${nm(mt.onHand, mt.unit === 'm' ? 1 : 0)} ${mt.unit})`); delete m.missing[mt.id]; }
+      if (!uses) { if (hasOpen(key)) resolveMissingKey(key, 'Arbeitsgang gewechselt – Material hier nicht mehr benötigt'); delete m.missing[mt.id]; }
+      else if (mt.onHand + 1e-9 >= c.r.material.perPart) { if (hasOpen(key)) resolveMissingKey(key, `Material wieder verfügbar (Bestand ${nm(mt.onHand, mt.unit === 'm' ? 1 : 0)} ${mt.unit})`); delete m.missing[mt.id]; }
       else if (!hasOpen(key)) delete m.missing[mt.id];
     }
   }
+  /** nächste offene Lieferung eines Materials – Text immer aktuell: 'Lieferung ca. Mo 14:10' bzw. überfällig */
+  function nextPurchase(matId) { let best = null; for (const x of S.purchases) if (x.status === 'bestellt' && x.materialId === matId && (!best || x.etaT < best.etaT)) best = x; return best; }
+  const deliveryTxt = (pu) => !pu ? '' : pu.etaT > S.t ? `Lieferung ca. ${tclock(pu.etaT)}` : `Lieferung überfällig seit ${tclock(pu.etaT)} – beim Lieferanten nachfragen`;
   function notifyMissing(m, mt, r) {
     const key = 'missing:' + mt.id + ':' + m.id;
     (m.missing || (m.missing = {}))[mt.id] = key;
-    if (hasOpen(key)) return;
-    const pu = S.purchases.filter(x => x.status === 'bestellt' && x.materialId === mt.id).sort((a, b) => a.etaT - b.etaT)[0];
+    // bei offener Meldung nur aktualisieren (Liefertermin live, nie eine vergangene Zeit als Prognose)
+    const pu = nextPurchase(mt.id), due = pu && pu.etaT <= S.t;
     notify({ key, sev: 'crit', role: 'Einkauf', entity: { kind: 'machine', id: m.id }, title: `Material fehlt: ${mt.name} für ${m.id}`,
-      body: `${m.id} steht · Bestand ${nm(mt.onHand, 2)} ${mt.unit} < ${nm(r.material.perPart, 3)} ${mt.unit} je Teil${pu ? ' · Lieferung ca. ' + U.fmtDayClock(pu.etaT) : ''}`,
-      suggestion: brief(`${mt.name} aufgebraucht`, mt.onOrder ? 'Liefertermin bestätigen; bis dahin anderen Auftrag vorziehen' : `sofort nachbestellen (${nm(mt.reorderQty, 1)} ${mt.unit} bei ${shortName(mt.supplier)})`),
+      body: `${m.id} steht · Bestand ${nm(mt.onHand, 2)} ${mt.unit} < ${nm(r.material.perPart, 3)} ${mt.unit} je Teil${pu ? ' · ' + deliveryTxt(pu) : ''}`,
+      suggestion: brief(`${mt.name} aufgebraucht${pu && !due ? ', ' + deliveryTxt(pu) : ''}`, due ? `beim Lieferanten ${shortName(mt.supplier)} nachfragen; bis dahin anderen Auftrag vorziehen` : mt.onOrder ? 'Liefertermin bestätigen; bis dahin anderen Auftrag vorziehen' : `sofort nachbestellen (${nm(mt.reorderQty, 1)} ${mt.unit} bei ${shortName(mt.supplier)})`),
       actions: mt.onOrder ? [] : [{ label: 'Nachbestellen', action: { type: 'reorder', materialId: mt.id, qty: mt.reorderQty } }] });
+  }
+  /** Material-Meldung abschließen: Titel/Body auf die abgeschlossene Episode umstellen (keine veraltete Lieferzeit) */
+  function resolveMissingKey(key, note) {
+    const n = NIDX[key]; if (!n || n.status === 'resolved') { resolveKey(key, note); return; }
+    const p = key.split(':'), mt = S.materials[p[1]], mid = p[2];
+    n.title = `Material fehlte: ${mt ? mt.name : p[1]} für ${mid} (${tclock(n.t)}–${U.fmtClock(S.t)})`;
+    n.body = `${mid} wartete ${U.fmtDur(S.t - n.t)} · ${note}`;
+    resolveKey(key, note);
   }
   /** Rohteile-Behälter für den ersten Arbeitsgang (Form 'Stk' oder ohne Materialangabe) nachliefern */
   function ensureSupply(m, o, i) {
@@ -3520,6 +3535,12 @@
       if (S.t % 600 === 0) { kanbanCheck(); archiveTick(); }
       // Werkzeug-Meldungen jede Sim-Minute aus der aktuellen Planung neu formulieren (Uhrzeit driftet sonst während langer Teile)
       if (!WARM) refreshToolNotes();
+      // Material-Meldungen: Liefertermin live (überfällig statt vergangener Uhrzeit)
+      for (let j = 0; j < MA.length; j++) {
+        const m = MA[j]; if (!m.missing) continue;
+        const c = curOf(m);
+        for (const matId in m.missing) { const mt = S.materials[matId]; if (hasOpen(m.missing[matId]) && c && c.r.material && c.r.material.id === matId) notifyMissing(m, mt, c.r); }
+      }
       // Geisterschicht-Check: ab 1 h vor Schichtende alle 10 min bzw. sofort nach einer Änderung; nachts Stillstand ergänzen
       if (cur) { if (S.t >= cur.end - 3600 && (S.t % 600 === 0 || GDIRTY || S.t === cur.end - 60)) { GDIRTY = false; ghostCheck(); } }
       else if (S.t % 600 === 0 && hasOpen('ghost:check')) ghostCompose();
@@ -4703,7 +4724,7 @@
     const dec = mt.unit === 'm' ? 1 : 0, kb = !!(opt && opt.kanban);
     if (kb) pu.kanban = true;
     ev('reorder', 'info', { kind: 'material', id: mt.id }, kb
-      ? `Kanban-Abruf ${pu.id}: ${nm(q, dec)} ${mt.unit} ${mt.name} bei ${mt.supplier} – offener Bedarf der freigegebenen Aufträge ${nm(opt.need, dec)} ${mt.unit} > Bestand + Bestellungen ${nm(opt.have, dec)} ${mt.unit}; Lieferung ca. ${U.fmtDayClock(etaT)} (${U.fmtEur(pu.costEur)})`
+      ? `Kanban-Abruf ${pu.id}: ${nm(q, dec)} ${mt.unit} ${mt.name} bei ${mt.supplier} – ${opt.min ? 'Bestand + Bestellungen ' + nm(mt.onHand + mt.onOrder - q, dec) + ' ' + mt.unit + ' unter Meldebestand ' + nm(mt.min, dec) + ' ' + mt.unit : 'offener Bedarf der freigegebenen Aufträge ' + nm(opt.need, dec) + ' ' + mt.unit + ' > Bestand + Bestellungen ' + nm(opt.have, dec) + ' ' + mt.unit}; Lieferung ca. ${U.fmtDayClock(etaT)} (${U.fmtEur(pu.costEur)})`
       : `Bestellung ${pu.id}: ${nm(q, dec)} ${mt.unit} ${mt.name} bei ${mt.supplier} – Lieferung ca. ${U.fmtDayClock(etaT)} (${U.fmtEur(pu.costEur)})`, { purchaseId: pu.id, qty: q, etaT, kanban: kb });
     checkStock(mt);
     planChanged();

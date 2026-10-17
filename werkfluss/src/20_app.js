@@ -232,7 +232,10 @@
   let npEl = null, npFilter = 'open', npSig = '';
   function toggleNotifPanel(force) {
     const show = force != null ? force : !npEl;
+    document.body.classList.toggle('np-open', !!show);
     if (!show) { if (npEl) npEl.remove(); npEl = null; return; }
+    // offene Toasts wegräumen – das Panel zeigt dieselben Meldungen
+    const tb = document.getElementById('toasts'); if (tb) tb.innerHTML = '';
     npEl = el('div', { class: 'notif-panel', role: 'dialog', 'aria-label': 'Benachrichtigungen' });
     npEl.addEventListener('click', e => e.stopPropagation());
     document.getElementById('app').append(npEl);
@@ -243,7 +246,7 @@
   function notifCard(n) {
     const S = WF.SEV[n.sev] || WF.SEV.info;
     // Kopfzeile kurz halten (wie im Leitstand): nur die ID, voller Name im Tooltip
-    const ent = n.entity && n.entity.id ? `<button class="link n-ent" data-ent="${esc(n.entity.kind)}|${esc(n.entity.id)}" title="${esc(app.entityLabel(n.entity))} öffnen">${esc(n.entity.id)}</button>` : '';
+    const ent = n.entity && n.entity.id && n.entity.kind !== 'plant' && n.entity.kind !== 'werk' && n.entity.id !== 'werk' ? `<button class="link n-ent" data-ent="${esc(n.entity.kind)}|${esc(n.entity.id)}" title="${esc(app.entityLabel(n.entity))} öffnen">${esc(n.entity.id)}</button>` : '';
     const acts = (n.actions || []).map((a, i) => `<button class="btn sm${i === 0 && n.status !== 'resolved' ? ' primary' : ''}" data-act="${i}">${esc(a.label)}</button>`).join('');
     const status = n.status === 'ack' ? 'quittiert' + (n.ackBy ? ' von ' + esc(n.ackBy) : '') + ' · Ursache besteht noch' : n.status === 'resolved' ? 'erledigt' + (n.resolvedT ? ' ' + U.fmtClock(n.resolvedT) : '') : '';
     return `<div class="notif ${esc(n.status)}" style="--c:${S.color}" data-id="${esc(n.id)}">
@@ -323,10 +326,29 @@
     toasted.set(key, rank);
     // Tour: nichts über die Karte legen – kritische Meldungen zeigt die Karte selbst als Hinweiszeile
     if (WF.tour && WF.tour.active) { if (n.sev === 'crit' && WF.tour.notify) { try { WF.tour.notify(n); } catch (e) { console.error(e); } } return; }
+    // Gesammelt ausgeben: bei hohem Tempo / Vorspulen kommen viele Meldungen in einem Tick –
+    // nur noch offene und frische zeigen, höchstens zwei, Rest als Sammelhinweis.
+    pendingToasts.push(n);
+    if (!flushTimer) flushTimer = setTimeout(flushToasts, 60);
+  }
+  let pendingToasts = [], flushTimer = null;
+  function flushToasts() {
+    flushTimer = null;
+    const list = pendingToasts; pendingToasts = [];
+    const simT = WF.sim.state ? WF.sim.state.t : 0;
+    const fresh = list.filter(n => n.status === 'open' && !(n.resolvedT != null) && simT - (n.updatedT || n.t) <= 15 * 60)
+      .sort((a, b) => (SEV_RANK[b.sev] || 0) - (SEV_RANK[a.sev] || 0) || (b.updatedT || b.t) - (a.updatedT || a.t));
+    if (!fresh.length) return;
     const now = performance.now();
-    if (now - lastToast < 2500 && n.sev !== 'crit') return;
-    lastToast = now;
-    app.toast(n.body || '', n.sev, { title: n.title, notif: true, entity: n.entity, onClick: () => { if (n.entity && n.entity.id) app.select(n.entity.kind, n.entity.id); } });
+    let shown = 0;
+    for (const n of fresh) {
+      if (shown >= 2) break;
+      if (n.sev !== 'crit' && now - lastToast < 2500) continue;
+      lastToast = now; shown++;
+      app.toast(n.body || '', n.sev, { title: n.title, notif: true, entity: n.entity, onClick: () => { if (n.entity && n.entity.id) app.select(n.entity.kind, n.entity.id); } });
+    }
+    const rest = fresh.length - shown;
+    if (rest > 0 && shown > 0) app.toast(`${rest} weitere ${rest === 1 ? 'Meldung' : 'Meldungen'} – in der Glocke`, 'info', { title: '', onClick: () => toggleNotifPanel(true) });
   }
 
   // ------------------------------------------------------------ Modal

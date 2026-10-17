@@ -484,7 +484,7 @@
           <div class="l">Termintreue</div><div class="v" data-r="kOtV">–</div><div class="s" data-r="kOtS">–</div><div class="s ls-s2" data-r="kOtS2">–</div>
         </div>
         <div class="kpi click" data-r="kLoss" title="Maschinenstundensatz × Zeit in der Schicht, in der ein Auftrag eingeplant ist, die Maschine aber nicht produziert (Rüsten, Warten, Störung)">
-          <div class="l">Stillstandkosten</div><div class="v" data-r="kLossV">–</div><div class="s" data-r="kLossS">–</div><div class="s ls-s2" data-r="kLossS2">–</div>
+          <div class="l">Stillstandskosten</div><div class="v" data-r="kLossV">–</div><div class="s" data-r="kLossS">–</div><div class="s ls-s2" data-r="kLossS2">–</div>
         </div>
         <div class="kpi" data-r="kEn" title="Elektrische Leistung der Halle (Maschinen, AGVs, Grundlast) – gemessen bzw. aus Zustand geschätzt">
           <div class="l">Energie</div>
@@ -1205,7 +1205,7 @@
     setHTML(R.kOtS, rc.late ? `<b>${rc.late}</b> verspätet${rc.tight ? ` · ${rc.tight} knapp` : ''}` : rc.tight ? `${rc.tight} knapp · keiner verspätet` : 'alle offenen Aufträge im Plan');
     setText(R.kOtS2, rc.worst ? `${rc.worst.id}: ${U.fmtDur(-rc.worst.slackSec)} Verzug` : `${rc.open} offene Aufträge`);
     setAttr(R.kOt, 'title', `Termintreue ${U.fmtPct(k.onTimePct, 0)} – ${rc.late} Auftrag/Aufträge verspätet, ${rc.tight} mit weniger als 4 h Puffer (Prognose)`);
-    // Stillstandkosten
+    // Stillstandskosten
     const eur = U.fmtEur(k.lossEur);
     setHTML(R.kLossV, valUnit(eur.replace(/\s*€$/, ''), '€'));
     const top = topLoss();

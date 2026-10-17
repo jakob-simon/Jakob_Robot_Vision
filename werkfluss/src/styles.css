@@ -265,6 +265,10 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .notif-panel .np-h { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .notif-panel .np-h strong { font: 600 var(--fs-xl)/1 var(--f-cond); }
 @media (max-width: 560px) {
+  /* Telefon: Blatt unter der Kopfzeile mit abgedunkeltem Hintergrund, nie höher als der Bildschirm */
+  .notif-panel { position: fixed; top: calc(var(--top-h) + env(safe-area-inset-top, 0px) + 4px); left: max(8px, env(safe-area-inset-left, 0px)); right: max(8px, env(safe-area-inset-right, 0px));
+    width: auto; max-height: calc(100dvh - var(--top-h) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px);
+    box-shadow: var(--shadow), 0 0 0 100vmax rgba(3, 7, 15, .55); }
   .notif-panel .np-h { flex-wrap: wrap; row-gap: 10px; }
   .notif-panel .np-h .seg { order: 3; width: 100%; }
   .notif-panel .np-h .seg button { flex: 1; }
@@ -374,7 +378,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
   button.chip, a.chip, .chip[data-sel], .chip[role="button"], .seg button, [role="tab"], .icon-btn { min-height: 40px; }
   .icon-btn { min-width: 40px; }
   input, select, textarea, .input { font-size: 16px !important; }
-  .seg button { min-height: 36px; padding: 8px 12px; }
+  .seg button { min-height: 40px; padding: 8px 12px; }
   .icon-btn { width: 40px; height: 40px; }
   .speed button { min-width: 38px; min-height: 34px; }
   .link { padding: 6px 0; margin: -6px 0; }
@@ -434,3 +438,8 @@ body.tv-on .toast .tb { font-size: 14.5px; margin-top: 4px; }
 
 /* ------------------------------------------------------------ Demo-Tour: Inhalte lassen sich über die Tour-Karte hinaus scrollen */
 body.tour-on .view:not(.full)::after { content: ""; display: block; height: var(--tour-pad, 0px); pointer-events: none; }
+/* Telefon/Tablet mit offenem Copilot: Meldungen unten, Kopf des Copilot bleibt frei */
+@media (max-width: 900px) {
+  body.ai-open #toasts { top: auto; bottom: max(84px, calc(env(safe-area-inset-bottom, 0px) + 84px)); }
+}
+body.np-open #toasts { display: none; }
