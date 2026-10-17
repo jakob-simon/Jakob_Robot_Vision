@@ -56,14 +56,15 @@
     }
     return off;
   }
-  /** Zustandszeiten im Fenster [t0, now] aus dem Zustandsverlauf – „Bereit“ ohne Schicht heißt „Keine Schicht“
-      (wie die Pill): bei nicht autonomen Maschinen immer, bei autonomen nur im laufenden Abschnitt mit „Keine Schicht“ */
+  /** Zustandszeiten im Fenster [t0, now] aus dem Zustandsverlauf – „Bereit“ außerhalb der Schichtzeit heißt
+      „Keine Schicht“ (wie die Pill). Ausnahme: der laufende Abschnitt, wenn die Pill jetzt „Bereit“ zeigt
+      (z. B. Säge „Zuschnitt auf Vorrat“) – Legende und Pill nennen den aktuellen Zustand gleich. */
   function stateSecs(mv, t0, now) {
-    const secs = {}, segs = mv.segments || [], auto = mv.loading === 'auto', cur = segs[segs.length - 1];
+    const secs = {}, segs = mv.segments || [], cur = segs[segs.length - 1], curNoShift = isNoShift(mv);
     for (const sg of segs) {
       const a = Math.max(t0, sg.t0), b = Math.min(now, sg.t1 == null ? now : sg.t1);
       if (b <= a) continue;
-      if (sg.state === 'idle' && (!auto || (sg === cur && isNoShift(mv)))) {
+      if (sg.state === 'idle' && (sg !== cur || mv.state !== 'idle' || curNoShift)) {
         const off = offShiftSec(a, b);
         if (off > 0) secs.noshift = (secs.noshift || 0) + off;
         if (b - a - off > 0) secs.idle = (secs.idle || 0) + (b - a - off);
@@ -536,7 +537,7 @@
     const rows = ts.map((t, i) => {
       const key = t.id || t.typeId, c = TOOL_C[t.status] || 'var(--st-idle)', pc = t.plannedChange;
       let pcTxt = '';
-      if (pc) pcTxt = `${pc.manual ? 'Vorbeugend: ' : ''}Wechsel ${relDays(pc.text, now)}${pc.by ? ' · ' + pc.by + (pc.stage && pc.stage !== 'offen' && pc.stage !== 'später' ? ' ' + pc.stage : '') : ''}${pc.bundled ? ' · wird mitgewechselt' : ''}`;
+      if (pc) pcTxt = `${pc.manual ? 'Vorbeugend: ' : ''}${pc.action === 'index' ? 'Schneide wenden' : 'Wechsel'} ${relDays(pc.text, now)}${pc.by ? ' · ' + pc.by + (pc.stage && pc.stage !== 'offen' && pc.stage !== 'später' ? ' ' + pc.stage : '') : ''}${pc.bundled ? ' · wird mitgewechselt' : ''}`;
       else if (t.status === 'due') pcTxt = 'Standzeit reicht nicht für das nächste Teil';
       else if (t.status === 'broken') pcTxt = 'Wechsel vor dem nächsten Teil';
       const wear = t.wearPct != null ? t.wearPct : null;

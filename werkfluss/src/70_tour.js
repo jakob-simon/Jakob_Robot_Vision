@@ -69,9 +69,12 @@
   .tg-id small{font-size:var(--fs-xs);color:var(--muted);overflow:hidden;text-overflow:ellipsis}
   .tg-bar{position:relative;height:10px;border-radius:3px;background:var(--track);overflow:hidden}
   .tg-bar i{position:absolute;top:0;bottom:0}
+  .tg-bar.none{background:none;box-shadow:inset 0 0 0 1px var(--line);opacity:.7}
+  .tg-r.open .tg-id b{color:var(--text2)}
   .tg-bar .run{background:color-mix(in srgb,var(--st-run) 62%,transparent)}
   .tg-bar .halt{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--st-wait) 80%,transparent) 0 4px,color-mix(in srgb,var(--st-wait) 34%,transparent) 4px 8px)}
   .tg-bar .free{background:color-mix(in srgb,var(--st-idle) 28%,transparent)}
+  .tg-bar .gain{border:1.5px dashed color-mix(in srgb,var(--st-run) 90%,white);border-radius:2px;background:color-mix(in srgb,var(--st-run) 16%,transparent)}
   .tg-w{display:flex;flex-direction:column;min-width:0;line-height:1.25}
   .tg-w b{font-size:var(--fs-sm);font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .tg-w small{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -85,6 +88,8 @@
   .tg-gain{font-size:var(--fs-sm);color:var(--text2);font-variant-numeric:tabular-nums}.tg-gain b{color:color-mix(in srgb,var(--st-run) 85%,white);font-weight:600}
   .tg-ok{display:inline-flex;align-items:center;gap:6px;flex-basis:100%;font-size:var(--fs-sm);font-weight:600;color:color-mix(in srgb,var(--st-run) 85%,white)}
   .tg-ok .ico{flex:none}
+  .tg-rec{display:flex;align-items:flex-start;gap:8px;font-size:var(--fs-sm);line-height:1.45;color:var(--text2)}
+  .tg-rec>.ico{flex:none;margin-top:2px;color:color-mix(in srgb,var(--st-run) 85%,white)}.tg-rec b{color:var(--text);font-weight:600}
   /* Kritische Meldung während der Tour: Hinweiszeile statt Toast */
   .tour-alert{display:flex;align-items:center;gap:8px;margin-top:10px;padding:7px 10px;border-radius:8px;font-size:var(--fs-sm);min-width:0;
     background:color-mix(in srgb,var(--st-fault) 8%,var(--card));box-shadow:inset 3px 0 0 var(--st-fault);animation:tourIn .25s ease}
@@ -260,25 +265,28 @@
       if (stop) {
         when = e.waitingSince != null ? 'steht seit ' + U.fmtClock(e.waitingSince) : 'stoppt ca. ' + U.fmtClock(end);
         what = e.reason === 'tool' ? 'Standzeit ' + toolLabel(e.toolName || e.tool) : GHOST_WHAT[e.reason] || e.reason;
-        bar = seg('run', 0, p) + seg('halt', p, 100);
+        // gestrichelt: so lange liefe sie mit dem empfohlenen Handgriff vor Schichtende
+        bar = seg('run', 0, p) + seg('halt', p, 100) + (e.gainSec > 0 ? seg('gain', p, pct(end + e.gainSec)) : '');
       } else if (open) {
-        when = 'Arbeitsgang endet ' + U.fmtClock(e.stopT); what = 'Nacht hängt am Folgeauftrag'; bar = '';
+        when = 'fertig ca. ' + U.fmtClock(e.stopT); what = (e.orderId ? e.orderId + ' · ' : '') + 'vor Schichtende'; bar = '';
       } else if (done) {
         when = 'fertig ca. ' + U.fmtClock(end); what = 'Auftrag fertig – danach frei'; bar = seg('run', 0, p) + seg('free', p, 100);
       } else {
         when = 'läuft bis ' + U.fmtClock(t1); what = e.prevented ? 'vorbeugend abgesichert' : 'Standzeit, Stangen, Puffer reichen'; bar = seg('run', 0, 100);
       }
       return `<div class="tg-r${stop ? ' stop' : ''}${open ? ' open' : ''}" title="${esc(e.rec || '')}"><span class="tg-id"><b>${esc(e.machineId)}</b><small>${esc(short(e.machineId))}</small></span>
-        <span class="tg-bar">${bar}</span><span class="tg-w"><b>${esc(when)}</b><small>${esc(what)}</small></span></div>`;
+        <span class="tg-bar${open ? ' none' : ''}">${bar}</span><span class="tg-w"><b>${esc(when)}</b><small>${esc(what)}</small></span></div>`;
     }).join('');
     const act = G.stops.find(e => e.action);
+    const tip = !act && G.stops.filter(e => e.gainSec > 0 && e.rec).sort((a, b) => b.gainSec - a.gainSec)[0];
     const k = G.stops.length, n = G.list.length;
     const head = k ? `${k} von ${n} autonomen Maschinen ${k === 1 ? 'stoppt' : 'stoppen'} in der Nacht` : `Alle ${n} autonomen Maschinen laufen durch`;
     const sub = k ? `≈ ${U.fmtEur(Math.round(G.lossEur / 10) * 10)} ungenutzte Maschinenzeit · ${U.fmtNum(G.idleH, 1)} h Stillstand bis ${U.fmtClock(t1)}` : `Standzeit, Stangen und Puffer reichen bis ${U.fmtClock(t1)}`;
     const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => `<span style="left:${(f * 100).toFixed(1)}%">${U.fmtClock(t0 + f * span)}</span>`).join('');
     const done = ghostDone ? `<span class="tg-ok">${icon('check', 14)}${esc(ghostDone)}</span>` : '';
     const btn = act ? `<button class="btn sm primary" data-gh-act="${esc(act.machineId)}">${icon('wrench', 14)}${esc(act.actionLabel || act.machineId + ': vorbeugend wechseln')}</button>
-        <span class="tg-gain">${act.gainSec ? `<b>+${esc(U.fmtDur(act.gainSec))}</b> Laufzeit` : ''}${act.tLast ? ` · Wechsel ca. ${esc(U.fmtClock(act.tLast))}` : ''}</span>` : '';
+        <span class="tg-gain">${act.gainSec ? `<b>+${esc(U.fmtDur(act.gainSec))}</b> Laufzeit` : ''}${act.tLast ? ` · Wechsel ca. ${esc(U.fmtClock(act.tLast))}` : ''}</span>`
+      : tip ? `<span class="tg-rec">${icon('wrench', 14)}<span><b>Empfehlung ${esc(tip.machineId)}:</b> ${esc(tip.rec)}</span></span>` : '';
     return `<div class="tour-gh" style="--c:${k ? 'var(--st-wait)' : 'var(--st-run)'}">
       <span class="l">${G.night ? 'Geisterschicht läuft' : 'Heute Nacht'} · unbemannt ${esc(U.fmtClock(t0))}–${esc(U.fmtClock(t1))}${G.src === 'preview' && !G.night ? ' · Prognose' : ''}</span>
       <div class="tg-hd"><b class="tg-h">${esc(head)}</b><span class="tg-s">${esc(sub)}</span></div>
@@ -286,6 +294,11 @@
       ${done || btn ? `<div class="tg-a">${done}${btn}</div>` : ''}</div>`;
   }
   let ghostDone = '';
+  /** Dieselbe Prognose im Leitstand (eigene Karte oder Zeile „Heute Nacht“ im KI-Schichtbriefing) – für den Ring */
+  function ghostRow() {
+    const v = document.getElementById('view-leitstand'); if (!v) return null;
+    return v.querySelector('[data-ghost], .ls-ghost') || [...v.querySelectorAll('.ls-bl li')].find(li => /Heute Nacht|Geisterschicht/.test((li.querySelector('.ls-bl-k') || li).textContent)) || null;
+  }
   /** Kurzname eines Werkzeugtyps wie in den Meldungen („VCGT 1103“, „Stechplatte 3 mm“) */
   function toolLabel(type) {
     const tt = (WF.profile.toolTypeById || {})[type], n = String((tt && tt.name) || type || 'Werkzeug').replace(/\s*\([^)]*\)/g, '').replace(/^WSP\s+/, '');
@@ -384,14 +397,15 @@
       } },
     { id: 'tools', view: 'werkzeuge', run: () => WF.app.closeDrawer(), title: 'Werkzeuge: eine Regel, die jeder versteht',
       body: () => `Verschleiß wächst nur am Teilende und nie über 100 %. Gewechselt wird <b>nur zwischen zwei Teilen</b>, angekündigt mit Uhrzeit und Person. Wendeplatten wendet der Bediener direkt an der Maschine (Schneide 2 von 4); erst nach der letzten Schneide holt der Einrichter ein vermessenes Werkzeug aus der Ausgabe. Kein „plötzlich getauscht“, kein Bruch durch Überziehen.` },
-    { id: 'ghost', view: 'leitstand', compact: true, ring: '#view-leitstand [data-ghost], #view-leitstand .ls-ghost',
+    { id: 'ghost', view: 'leitstand', compact: true, ring: () => ghostRow(),
       run: () => { WF.app.closeDrawer(); ghostDone = ''; },
       title: 'Heute Nacht: der Geisterschicht-Check',
       lead: () => ghostLead(), liveLead: true,
       body: () => {
         const G = ghostInfo();
         if (!G) return `Nach Schichtende laufen autonome Maschinen allein weiter. Ab 21:00 rechnet werkfluss Teil für Teil durch, welche davon in der Nacht stehen bleiben – Standzeit, Stangen, Puffer – und empfiehlt den einen Handgriff vor Schichtende, der die Nacht rettet.`;
-        return `Nach ${esc(U.fmtClock(G.staffEnd))} ist niemand mehr im Haus, die autonomen Maschinen laufen allein weiter. werkfluss rechnet schon jetzt Teil für Teil durch, <b>welche in der Nacht stehen bleiben</b> und warum – und welcher Handgriff vor Schichtende die Nacht rettet. Ein Klick plant ihn ein.`;
+        const act = G.stops.some(e => e.action);
+        return `Nach ${esc(U.fmtClock(G.staffEnd))} ist niemand mehr im Haus, die autonomen Maschinen laufen allein weiter. werkfluss rechnet schon jetzt Teil für Teil durch, <b>welche in der Nacht stehen bleiben</b> und warum – und welcher Handgriff vor Schichtende die Nacht rettet${act ? '. Ein Klick plant ihn ein.' : ` (gestrichelt). Ab ${esc(U.fmtClock(G.staffEnd - 3600))} kommt das als Meldung mit Ein-Klick-Aktion${ghostRow() ? '; im Leitstand steht es schon jetzt unter „Heute Nacht“' : ''}.`}`;
       } },
     { id: 'fault', view: 'leitstand', compact: true, run: () => {
         // Zurück und wieder vor: dieselbe Störung zeigen statt eine zweite Maschine anzuhalten
@@ -405,7 +419,9 @@
       body: (ctx) => {
         if (!ctx || !ctx.ok) return 'Fällt eine Maschine aus, alarmiert werkfluss sofort die Instandhaltung mit Ursache und Empfehlung und rechnet die Liefertermine neu.';
         const rep = ctx.repairMin ? ` (Reparatur ca. ${ctx.repairMin[0]}–${ctx.repairMin[1]} min)` : '';
-        return `An <b>${esc(short(ctx.id))} (${esc(ctx.id)})</b> meldet die Steuerung gerade „${esc(ctx.text || 'Störung')}“${esc(rep)} – Demo. werkfluss alarmiert sofort die Instandhaltung mit Ursache und Empfehlung und rechnet alle Liefertermine neu: Das Ergebnis steht oben, „Warum verspätet“ im Auftrag zeigt die Ursache.`;
+        let risk = ''; try { risk = ctx.orderId ? sim().orderView(ctx.orderId).risk : ''; } catch (e) { risk = ''; }
+        const why = risk === 'spät' ? '„Warum verspätet“' : risk === 'knapp' ? '„Warum knapp“' : '';
+        return `An <b>${esc(short(ctx.id))} (${esc(ctx.id)})</b> meldet die Steuerung gerade „${esc(ctx.text || 'Störung')}“${esc(rep)} – Demo. werkfluss alarmiert sofort die Instandhaltung mit Ursache und Empfehlung und rechnet alle Liefertermine neu – das Ergebnis steht oben${why ? `, ${why} im Auftrag zeigt Ursache und Hebel` : ''}.`;
       } },
     { id: 'copilot', view: 'leitstand', run: (prev) => {
         const id = prev && prev.id;
@@ -537,7 +553,8 @@
   /** Ring um das Ziel: einmal ins Bild scrollen, auf sichtbaren Teil zuschneiden, nie unter der Karte. */
   function trackRing() {
     if (!ringSel || !card || card.classList.contains('mini')) { if (ring) ring.classList.add('off'); return; }
-    const target = document.querySelector(ringSel);
+    let target = null;
+    try { target = typeof ringSel === 'function' ? ringSel() : document.querySelector(ringSel); } catch (e) { target = null; }
     const tr = target && target.getBoundingClientRect();
     if (!tr || !tr.width || !tr.height) { if (ring) ring.classList.add('off'); return; }
     const cont = target.closest('.drawer-b, .view');

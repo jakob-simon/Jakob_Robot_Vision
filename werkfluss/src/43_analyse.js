@@ -58,16 +58,18 @@
   /* Nacht (Geisterschicht) – getrennt von der Schichtzeit, neutral schraffiert (kein Maschinenzustand) */
   .an-hatch{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--text2) 55%,transparent) 0 1.5px,transparent 1.5px 4px)}
   .an-nt{margin-top:16px;padding:12px 14px 13px;border-radius:9px;background:var(--bg2);border:1px solid var(--line)}
-  .an-nt .h{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .an-nt .h{display:flex;align-items:center;gap:10px}
   .an-nt .h i{width:12px;height:12px;border-radius:3px;flex:none;border:1px solid var(--line2)}
-  .an-nt .h .t{font:600 var(--fs-md)/1.2 var(--f-ui);color:var(--text)}
-  .an-nt .h .t span{color:var(--muted);font-weight:500;font-size:var(--fs-xs);margin-left:6px}
-  .an-nt .h b{margin-left:auto;font:600 var(--fs-xl)/1 var(--f-cond);font-variant-numeric:tabular-nums;white-space:nowrap}
-  .an-nt .ms{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .an-nt .h .t{flex:1;min-width:0;font:600 var(--fs-md)/1.2 var(--f-ui);color:var(--text)}
+  .an-nt .h b{font:600 var(--fs-xl)/1 var(--f-cond);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .an-nt .ms{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
   .an-nt .ms button{font:inherit;font-size:var(--fs-xs);color:var(--text2);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:4px 9px;cursor:pointer;font-variant-numeric:tabular-nums;white-space:nowrap}
   .an-nt .ms button:hover{border-color:var(--line2);color:var(--text)}
   .an-nt .ms button b{color:var(--text);font-weight:600;margin-left:4px}
-  .an-nt p{margin:8px 0 0;font-size:var(--fs-xs);color:var(--muted);line-height:1.45}
+  .an-nt p{margin:5px 0 0 22px;font-size:var(--fs-xs);color:var(--muted);line-height:1.45}
+  .an-nt .ms{margin-left:22px}
+  @media (max-width:560px){.an-nt p,.an-nt .ms{margin-left:0}}
+  @media (pointer:coarse){.an-nt .ms button{min-height:40px}}
   .an-rc.night .h b{color:var(--text)}
   .an-rc.night{--c:var(--line2)}
   @media (max-width:560px){
@@ -113,6 +115,8 @@
   .an-h4{background:color-mix(in srgb,var(--st-fault) 70%,var(--card2));font-weight:600}
   .an-mx td.an-hn,.an-ml .cs span.an-hn{color:var(--text2);background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--text2) 13%,var(--card2)) 0 3px,var(--card2) 3px 7px);box-shadow:inset 0 0 0 1px var(--line2)}
   .an-mx th.n{color:var(--text2)}
+  .an-mx.n tr>:last-child{border-left:14px solid transparent;background-clip:padding-box}
+  @media (max-width:1100px){.an-mx.n th.s,.an-mx.n td.s{position:static;box-shadow:none}}
   @media (max-width:1100px){
     .an-mx th.m,.an-mx td.m{position:sticky;left:0;z-index:1;background:var(--card)}
     .an-mx th.s,.an-mx td.s{position:sticky;right:0;z-index:1;background:var(--card);box-shadow:0 0 0 3px var(--card),-1px 0 0 3px var(--line)}
@@ -681,9 +685,9 @@
   function nightHtml(T, L, nRows) {
     return `
           <div class="an-nt" title="Geisterschicht: ohne Personal sollen nur autonome Maschinen laufen – ihr Stillstand ist ungenutzte Kapazität und wird getrennt von der Schichtzeit ausgewiesen (gleiche Zahl wie im Leitstand)">
-            <div class="h"><i class="an-hatch"></i><span class="t">Nacht (Geisterschicht)${T('nt', `getrennt ausgewiesen · ${U.fmtDur(L.nightSec)} Stillstand`, 'span')}</span>${T('nv', U.fmtEur(L.night), 'b')}</div>
+            <div class="h"><i class="an-hatch"></i><span class="t">Nacht (Geisterschicht)</span>${T('nv', U.fmtEur(L.night), 'b')}</div>
+            ${T('nt', `Getrennt ausgewiesen: ${U.fmtDur(L.nightSec)} Stillstand autonomer Maschinen ohne Personal – nicht in den Ursachen oben enthalten.`, 'p')}
             <div class="ms">${nRows.map(r => `<button data-id="${esc(r.id)}" title="${esc(r.short)} öffnen">${esc(r.short)}${r.nightKey ? ' · ' + esc(stLabel(r.nightKey)) : ''}${T('nm' + r.id, U.fmtEur(r.night), 'b')}</button>`).join('')}</div>
-            <p>Autonome Maschinen mit eingeplantem Auftrag, die ohne Personal standen – nicht in den Ursachen oben enthalten.</p>
           </div>`;
   }
   const recoWorst = (it, w) => `<b>${U.fmtEur(w.cells[it.key].eur)}</b> · ${U.fmtDur(w.cells[it.key].sec)}`;
@@ -699,13 +703,14 @@
   function renderMatrix(L) {
     const cols = L.items;   // Spalten = Ursachen in Pareto-Reihenfolge (größte zuerst), Schichtzeit
     const night = L.night > 0;
-    const tot = (r) => r.eur + (night ? r.night : 0);
-    const rows = L.rows.filter(r => tot(r) >= 0.5).sort((a, b) => tot(b) - tot(a));
-    const none = L.rows.filter(r => tot(r) < 0.5).map(r => r.short);
+    // Zeilen nach Schichtzeit; Maschinen, die nur nachts standen, unten – die Nacht dominiert die Morgenansicht nicht
+    const rows = L.rows.filter(r => r.eur >= 0.5).sort((a, b) => b.eur - a.eur)
+      .concat(night ? L.rows.filter(r => r.eur < 0.5 && r.night >= 0.5).sort((a, b) => b.night - a.night) : []);
+    const none = L.rows.filter(r => r.eur < 0.5 && !(night && r.night >= 0.5)).map(r => r.short);
     const max = Math.max(1, ...rows.flatMap(r => cols.map(c => r.cells[c.key] ? r.cells[c.key].eur : 0)));
     const step = niceStep(max / 5);           // 5 Stufen, lineare €-Klassen
     const lvl = (v) => Math.min(4, Math.floor(v / step));
-    const maxRow = Math.max(1, ...rows.map(tot));
+    const maxRow = Math.max(1, ...rows.map(r => r.eur));
     const nz = rows.map(r => cols.filter(c => r.cells[c.key] && r.cells[c.key].eur >= 0.5).map(c => c.key).join('+') + (night && r.night >= 0.5 ? '+N' : '')).join(',');
     const struct = [range, cols.map(c => c.key).join(','), rows.map(r => r.id).join(','), nz, step, night ? 'N' : ''].join('|');
     const when = range === 'ks' ? 'laufende Schicht' : 'heute';
@@ -722,21 +727,21 @@
         return `<td ${C('mn' + r.id, v >= 0.5 ? 'an-hn' : 'z')} ${A('mtn' + r.id, tipTxt)}>${T('mnv' + r.id, v >= 0.5 ? U.fmtNum(v) : '·')}</td>`;
       };
       const nc = cols.length + (night ? 1 : 0);
-      const minW = 140 + nc * 92 + 160;
+      const minW = 140 + nc * 92 + 160 + (night ? 14 : 0);
       return `
       <div class="card-h an-ch"><h3>Verlustmatrix Maschine × Ursache</h3><div class="an-lg"><span class="t">€ je Zelle</span>${legend}</div></div>
       <div class="card-b">${rows.length && (cols.length || night) ? `
-        <div class="an-mx-wrap"><table class="an-mx" style="min-width:${minW}px">
-          <colgroup><col style="width:140px">${cols.map(() => '<col>').join('')}${night ? '<col>' : ''}<col style="width:160px"></colgroup>
-          <thead><tr><th class="m">Maschine</th>${cols.map(c => `<th title="${esc(c.label)}${night ? ' – Schichtzeit' : ''}">${hy(esc(c.label))}</th>`).join('')}${night ? '<th class="n" title="Nacht (Geisterschicht) – getrennt von der Schichtzeit">Nacht (Geister­schicht)</th>' : ''}<th class="s">Summe</th></tr></thead>
-          <tbody>${rows.map(r => `<tr><td class="m" data-id="${esc(r.id)}" title="${esc(r.short)} öffnen">${esc(r.short)}</td>${cols.map(c => cell(r, c)).join('')}${night ? nCell(r) : ''}
-            <td class="s"><span class="an-sb"><span class="tr"><i ${W('ms' + r.id, tot(r) / maxRow)}></i></span>${T('mS' + r.id, U.fmtEur(tot(r)), 'b')}</span></td></tr>`).join('')}</tbody>
+        <div class="an-mx-wrap"><table class="an-mx${night ? ' n' : ''}" style="min-width:${minW}px">
+          <colgroup><col style="width:140px">${cols.map(() => '<col>').join('')}<col style="width:160px">${night ? '<col style="width:120px">' : ''}</colgroup>
+          <thead><tr><th class="m">Maschine</th>${cols.map(c => `<th title="${esc(c.label)}${night ? ' – Schichtzeit' : ''}">${hy(esc(c.label))}</th>`).join('')}<th class="s">${night ? 'Summe Schicht' : 'Summe'}</th>${night ? '<th class="n" title="Nacht (Geisterschicht) – getrennt von der Schichtzeit, nicht in der Summe">Nacht (Geister­schicht)</th>' : ''}</tr></thead>
+          <tbody>${rows.map(r => `<tr><td class="m" data-id="${esc(r.id)}" title="${esc(r.short)} öffnen">${esc(r.short)}</td>${cols.map(c => cell(r, c)).join('')}
+            <td class="s"><span class="an-sb"><span class="tr"><i ${W('ms' + r.id, r.eur / maxRow)}></i></span>${T('mS' + r.id, r.eur >= 0.5 ? U.fmtEur(r.eur) : '–', 'b')}</span></td>${night ? nCell(r) : ''}</tr>`).join('')}</tbody>
         </table></div>
         <div class="an-ml">${rows.map(r => `<div class="r" data-id="${esc(r.id)}">
-            <div class="t"><span>${esc(r.short)}</span><span class="an-sb"><span class="tr"><i ${W('ls' + r.id, tot(r) / maxRow)}></i></span>${T('lS' + r.id, U.fmtEur(tot(r)), 'b')}</span></div>
+            <div class="t"><span>${esc(r.short)}</span><span class="an-sb"><span class="tr"><i ${W('ls' + r.id, r.eur / maxRow)}></i></span>${T('lS' + r.id, r.eur >= 0.5 ? U.fmtEur(r.eur) : '–', 'b')}</span></div>
             <div class="cs">${cols.filter(c => r.cells[c.key] && r.cells[c.key].eur >= 0.5).map(c => { const v = r.cells[c.key].eur; return `<span ${C('lc' + r.id + c.key, 'an-h' + lvl(v))}>${esc(c.label)} ${T('lv' + r.id + c.key, U.fmtEur(v), 'b')}</span>`; }).join('')}${night && r.night >= 0.5 ? `<span class="an-hn">Nacht ${T('lvN' + r.id, U.fmtEur(r.night), 'b')}</span>` : ''}</div>
           </div>`).join('')}</div>
-        <div class="an-mfoot">${night ? `Ursachen = Schichtzeit · Nacht (Geisterschicht) getrennt · Summe = ganzer Tag (${U.fmtEur(L.staffed + L.night)})` : ''}${none.length ? `${night ? ' · ' : ''}Ohne Stillstandskosten ${when}: ${esc(none.join(', '))}` : ''}</div>`
+        <div class="an-mfoot">${night ? `Ursachen und Summe = Schichtzeit (${U.fmtEur(L.staffed)}) · Nacht (Geisterschicht) getrennt (${U.fmtEur(L.night)})` : ''}${none.length ? `${night ? ' · ' : ''}Ohne Stillstandskosten ${when}: ${esc(none.join(', '))}` : ''}</div>`
         : `<div class="empty">Noch keine Stillstandskosten ${when}.</div>`}</div>`;
     });
   }
@@ -882,21 +887,44 @@
   }
 
   // ------------------------------------------------------------ OEE je Maschine
+  /** OEE einer Maschine in den besetzten Schichten heute (Tageswerte kd minus Nachtanteil kn, gleiche Formel wie die
+      Engine für kpis().oeeStaffedToday; laufendes Teil anteilig aus machineView) – null, wenn es keinen Nachtanteil gibt */
+  function staffedOeeOf(m, o) {
+    const d = m && m.kd, n = nightStats(m);
+    if (!d || !n || !(n.planned > 0)) return null;
+    const planned = d.planned - n.planned, run = d.run - n.run;
+    const idealD = o && o.performance != null && o.performance < 1 && o.runSec > 0 ? o.performance * o.runSec : d.ideal;
+    const ideal = idealD - (n.ideal || 0), good = d.good - (n.good || 0), scrap = d.scrap - (n.scrap || 0);
+    const a = planned > 0 ? Math.min(1, run / planned) : null, p = run > 0 ? Math.min(1, Math.max(0, ideal) / run) : null, q = good + scrap > 0 ? good / (good + scrap) : 1;
+    return { oee: a != null && p != null ? a * p * q : null, availability: a, performance: p, quality: q, nightPlanned: n.planned, nightRun: n.run };
+  }
   function renderOee(k) {
+    const staffedMode = range === 'kd' && oeeModel(k).staffed;
     const rows = machines().filter(id => S().machines[id].kind === 'machine').map(id => {
-      const mv = WF.sim.machineView(id), o = (range === 'ks' ? mv.oeeShift : mv.oeeToday) || {};
-      return { id, short: mv.short, oee: o.oee, a: o.availability, p: o.performance, q: o.quality };
-    }).sort((a, b) => (a.oee == null ? -1 : a.oee) - (b.oee == null ? -1 : b.oee) || (a.id < b.id ? -1 : 1));
+      const mv = WF.sim.machineView(id), o0 = (range === 'ks' ? mv.oeeShift : mv.oeeToday) || {};
+      const so = staffedMode ? staffedOeeOf(S().machines[id], o0) : null, o = so || o0;
+      return { id, short: mv.short, oee: o.oee, a: o.availability, p: o.performance, q: o.quality, night: so ? so : null };
+    }).sort((a, b) => (a.oee == null ? 9 : a.oee) - (b.oee == null ? 9 : b.oee) || (a.id < b.id ? -1 : 1));
     const cls = (v) => v == null ? 'n' : v >= TARGET_OEE ? 'g' : v >= 0.55 ? 'y' : 'r';
     const below = rows.filter(r => r.oee != null && r.oee < TARGET_OEE).length;
     const struct = range + '|' + rows.map(r => r.id).join(',');
     // je Maschine liefert die Engine den Tageswert – mit Nachtanteil ehrlich als „inkl. Geisterschicht“ bezeichnen
-    const incl = range === 'kd' && oeeModel(k).staffed;
+    const incl = staffedMode;
+    // Aussage: wer liegt am weitesten unter dem Ziel und woran liegt es (schwächster Faktor)
+    const worst = rows.find(r => r.oee != null), best = rows.slice().reverse().find(r => r.oee != null);
+    const FAC = [['a', 'Verfügbarkeit'], ['p', 'Leistung'], ['q', 'Qualität']];
+    let ins = 'Noch keine Planzeit – die OEE erscheint, sobald Maschinen mit Auftrag laufen.';
+    if (worst && worst.oee < TARGET_OEE) {
+      const f = FAC.filter(([x]) => worst[x] != null).sort((x, y) => worst[x[0]] - worst[y[0]])[0];
+      ins = `<b>${esc(worst.short)}</b> liegt mit ${pct0(worst.oee)} am weitesten unter dem Ziel${f ? ` – schwächster Faktor: ${f[1]} ${pct0(worst[f[0]])}` : ''}.` +
+        (below > 1 ? ` Insgesamt ${below} Maschinen unter ${pct0(TARGET_OEE)}.` : '');
+    } else if (best) ins = `Alle Maschinen mit Planzeit im Ziel – vorn <b>${esc(best.short)}</b> mit ${pct0(best.oee)}.`;
     paint('oee', q('[data-s="oee"]'), struct, (T, W, C, A) => `
-      <div class="card-h an-ch"><h3>OEE je Maschine</h3>${T('osub', `${range === 'ks' ? 'laufende Schicht' : incl ? 'heute inkl. Geisterschicht' : 'heute'} · ${below ? below + ' unter Ziel' : 'alle im Ziel'}`, 'span', 'class="muted"')}</div>
+      <div class="card-h an-ch"><h3>OEE je Maschine</h3>${T('osub', `${range === 'ks' ? 'laufende Schicht' : incl ? 'heute · Schichten (Nacht getrennt)' : 'heute'} · ${below ? below + ' unter Ziel' : 'alle im Ziel'}`, 'span', 'class="muted"')}</div>
       <div class="card-b">
+        ${T('oins', nb(ins), 'p', 'class="an-eins"')}
         <div class="an-bars">
-          ${rows.map(r => `<div class="an-row click" data-id="${esc(r.id)}" ${A('or' + r.id, `${r.short}: OEE ${r.oee == null ? '–' : pct1(r.oee)} = Verfügbarkeit ${pct0(r.a)} × Leistung ${pct0(r.p)} × Qualität ${pct0(r.q)}`)}>
+          ${rows.map(r => `<div class="an-row click" data-id="${esc(r.id)}" ${A('or' + r.id, `${r.short}: OEE ${r.oee == null ? '–' : pct1(r.oee)} = Verfügbarkeit ${pct0(r.a)} × Leistung ${pct0(r.p)} × Qualität ${pct0(r.q)}${r.night ? ` · besetzte Schichten; Nacht (Geisterschicht): ${U.fmtDur(r.night.nightRun)} von ${U.fmtDur(r.night.nightPlanned)} gelaufen` : ''}`)}>
             <span class="an-l">${esc(r.short)}</span>
             <span class="an-track"><i ${C('oc' + r.id, cls(r.oee))} ${W('ow' + r.id, r.oee == null ? 0.004 : Math.max(0.004, r.oee))}></i><b class="an-tg" style="left:${TARGET_OEE * 100}%"></b></span>
             ${T('ov' + r.id, r.oee == null ? '–' : pct0(r.oee), 'span', 'class="an-v"')}
@@ -914,12 +942,12 @@
     const struct = rows.map(r => r.id).join(',') + '|' + (pr ? 'p' : '');
     const mShare = E.plant > 0 ? Math.min(1, E.machines / E.plant) : 0;
     const ins = E.plant > 0
-      ? `Werk heute <strong style="color:var(--text)">${U.fmtNum(E.plant)} kWh</strong>${pr ? ` ≈ ${U.fmtEur(E.plant * pr)}` : ''} – wie im Leitstand.` +
+      ? `Werk heute <strong style="color:var(--text)">${U.fmtNum(E.plant)} kWh</strong>${pr ? ` ≈ ${U.fmtEur(E.plant * pr)} (${U.fmtNum(pr, 2)} €/kWh)` : ''}.` +
         (topR ? ` Am meisten braucht <b>${esc(topR.short)}</b>: ${U.fmtNum(topR.kwh)} kWh${topR.pp != null ? `, ${kwh(topR.pp)} kWh je Teil` : ''}.` : '')
       : 'Noch kein Energieverbrauch erfasst.';
     const hist = (S().history.powerKw || []).slice(-96);
     paint('energy', q('[data-s="energy"]'), struct, (T, W, C, A) => `
-      <div class="card-h an-ch"><h3>Energie je Maschine heute</h3>${T('pw', `${WF.ui.spark(hist, { w: 96, h: 22, color: 'var(--text2)' })}<b>${U.fmtNum(k.powerKw)} kW</b><span>jetzt</span>`, 'span', 'class="an-pw" title="Leistungsaufnahme des Werks (letzte 8 h)"')}</div>
+      <div class="card-h an-ch"><h3 title="Werk heute = kpis().energyKwh wie im Leitstand; davon Maschinen, Rest Hallen-Grundlast und AGVs">Energie je Maschine heute</h3>${T('pw', `${WF.ui.spark(hist, { w: 96, h: 22, color: 'var(--text2)' })}<b>${U.fmtNum(k.powerKw)} kW</b><span>jetzt</span>`, 'span', 'class="an-pw" title="Leistungsaufnahme des Werks (letzte 8 h)"')}</div>
       <div class="card-b">
         ${T('ins', nb(ins), 'p', 'class="an-eins"')}
         <div class="an-es" role="img" aria-label="Werksenergie heute: Maschinen und Grundlast/AGVs"><i class="m" ${W('esm', mShare)}></i><i class="b an-hatch" ${W('esb', 1 - mShare)}></i></div>

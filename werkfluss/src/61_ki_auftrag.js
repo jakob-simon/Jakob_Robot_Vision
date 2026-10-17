@@ -1528,7 +1528,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-esteps li .who.c{color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent)}
   .ka-esteps li .who.w{color:var(--st-run);background:color-mix(in srgb,var(--st-run) 10%,transparent)}
   .ka-esteps li .who.p{color:var(--text2);background:var(--card2);border:1px solid var(--line2)}
-  .ka-tag{position:absolute;top:5px;right:5px;padding:2px 6px;border-radius:4px;font:600 var(--fs-2xs)/1.2 var(--f-ui);color:var(--text2);background:var(--card2);border:1px solid var(--line2);white-space:nowrap}
+  .ka-tag{padding:1px 6px;border-radius:4px;font:600 var(--fs-2xs)/1.3 var(--f-ui);color:var(--text2);background:var(--card2);border:1px solid var(--line2);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
   .ka-goff{flex:0 1 auto;color:var(--muted)}
   .ka-gorow .ka-goff + .btn{flex:1 1 auto}
   @media (max-width:560px){.ka-gorow{flex-wrap:wrap}.ka-gorow .ka-goff{flex:1 1 100%}}
@@ -1543,7 +1543,8 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-nex small{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ka-nex > .ico{color:var(--accent)}
   .ka-offsteps{padding:4px 18px 16px}
-  .ka-offsteps .eyebrow{display:flex;justify-content:space-between;gap:10px;margin-top:6px}
+  .ka-offsteps .eyebrow{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-top:6px}
+  .ka-offsteps .eyebrow span:last-child{white-space:nowrap;flex:none}
   .ka-offsteps .ka-esteps{margin-top:8px}
   @media (pointer:coarse){.ka-nex{min-height:48px}}
   .ka-cap{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
@@ -1894,7 +1895,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     const s = ui.src;
     R.exs.innerHTML = EXAMPLES.map(ex => `<button type="button" class="ka-ex${s.kind === 'example' && s.id === ex.id ? ' on' : ''}" data-act="ex" data-id="${ex.id}" title="${esc(ex.title + ' – ' + ex.sub)}">
         <span class="th">${ex.draw(' aria-hidden="true" preserveAspectRatio="xMidYMid slice"', ex.thumb)}</span><b>${esc(ex.title)}</b></button>`).join('') +
-      `<button type="button" class="ka-ex up${s.kind === 'upload' ? ' on' : ''}" data-act="up" title="${ai.state === 'off' ? 'Eigene Zeichnungen wertet Claude aus – verfügbar, wenn werkfluss auf claude.ai läuft' : 'Eigene Zeichnung als Bild oder PDF hochladen'}"><span class="th">${icon('upload', 18)}<span style="font-size:10.5px">Bild / PDF</span></span><b>${ui.upload ? esc(ui.upload.name) : 'Eigene Zeichnung'}</b>${ai.state === 'off' ? '<span class="ka-tag">nur mit Claude</span>' : ''}</button>`;
+      `<button type="button" class="ka-ex up${s.kind === 'upload' ? ' on' : ''}" data-act="up" title="${ai.state === 'off' ? 'Eigene Zeichnungen wertet Claude aus – verfügbar, wenn werkfluss auf claude.ai läuft' : 'Eigene Zeichnung als Bild oder PDF hochladen'}"><span class="th">${icon('upload', 18)}${ai.state === 'off' ? '<span class="ka-tag">nur mit Claude</span>' : '<span style="font-size:10.5px">Bild / PDF</span>'}</span><b>${ui.upload ? esc(ui.upload.name) : 'Eigene Zeichnung'}</b></button>`;
   }
   function selectExample(id, first) {
     const ex = exById(id); if (!ex) return;
@@ -2655,7 +2656,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     let v = null; try { v = WF.sim.orderView(id); } catch (e) { v = null; }
     const op1 = v && v.ops && v.ops[0];
     const now = S().t;
-    const startTxt = op1 ? (op1.state === 'active' ? `Start jetzt an ${op1.stationName || op1.station}` : op1.plannedStart != null ? `Start ${op1.stationName || op1.station} (AG ${op1.seq}) ${op1.plannedStart <= now + 300 ? 'sofort' : 'ca. ' + fRel(op1.plannedStart)}` : '') : '';
+    const startTxt = op1 ? (op1.state === 'active' ? `Start jetzt an ${op1.stationName || op1.station}` : op1.plannedStart != null ? `Start ${op1.stationName || op1.station} (AG ${op1.seq}): ${op1.plannedStart <= now + 300 ? 'sofort' : fRel(op1.plannedStart)}` : '') : '';
     const body = [startTxt, etaPlan != null ? `Prognose ${fDay(etaPlan)} (Termin ${fDay(spec.due)})` : `Termin ${fDay(spec.due)}`,
       shifted.length ? `${shifted.length} ${shifted.length === 1 ? 'Auftrag verschiebt' : 'Aufträge verschieben'} sich` : 'kein anderer Auftrag verschiebt sich'].filter(Boolean).join(' · ');
     WF.app.toast(body, 'ok', { title: `${id} eingelastet · ${nf(spec.qty)} Stk ${spec.part.name}`, onClick: () => WF.app.select('order', id), ms: 9000 });

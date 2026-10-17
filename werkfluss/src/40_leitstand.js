@@ -745,13 +745,15 @@
     const pc = t.plannedChange;
     const when = pc ? (pc.etaT != null ? 'ca. ' + tclock(pc.etaT, now) : 'nach Teil ' + pc.afterPart) : '';
     const base = { name: toolShort(t.name), wear: t.wearPct, title: all + '\n\n' + t.explain };
+    // Wendeschneidplatte: Bediener wendet die Schneide an der Maschine (kein Werkzeugwechsel durch den Einrichter)
+    const verb = (pc && pc.action === 'index') || (!pc && t.nextAction === 'index') ? 'Wenden' : 'Wechsel';
     switch (t.status) {
       case 'broken': return Object.assign(base, { status: 'gebrochen – Wechsel nötig', u: 'crit', c: 'var(--st-fault)' });
-      case 'due': return Object.assign(base, { status: `Standzeit erschöpft · ${pc && pc.by ? pc.by + ' ' + (pc.stage || 'kommt') : pc && pc.etaT != null ? 'Wechsel ' + when : 'Wechsel angefordert'}`, u: 'warn', c: 'var(--st-wait)' });
+      case 'due': return Object.assign(base, { status: `Standzeit erschöpft · ${pc && pc.by ? pc.by + ' ' + (pc.stage || 'kommt') : pc && pc.etaT != null ? verb + ' ' + when : verb + ' angefordert'}`, u: 'warn', c: 'var(--st-wait)' });
       case 'changing': return Object.assign(base, { status: 'wird gerade gewechselt', u: 'tool', c: 'var(--st-tool)' });
       case 'planned': {
         const stop = pc && pc.waitFromT != null;
-        return Object.assign(base, { status: `noch ${teile(t.remainingParts)} · ${pc && pc.manual ? 'vorbeugender ' : ''}Wechsel ${when}${stop ? ' · Stopp ab ' + tclock(pc.waitFromT, now) : ''}`, u: stop ? 'warn' : 'tool', c: stop ? 'var(--st-wait)' : 'var(--st-tool)' });
+        return Object.assign(base, { status: `noch ${teile(t.remainingParts)} · ${pc && pc.manual && verb === 'Wechsel' ? 'vorbeugender ' : ''}${verb} ${when}${stop ? ' · Stopp ab ' + tclock(pc.waitFromT, now) : ''}`, u: stop ? 'warn' : 'tool', c: stop ? 'var(--st-wait)' : 'var(--st-tool)' });
       }
       default: {
         const enough = ts.every(x => x.remainingParts == null || x.neededParts == null || x.remainingParts >= x.neededParts);
@@ -1075,7 +1077,7 @@
         if (t.status !== 'planned' && t.status !== 'due') continue;
         seen.add(pc.afterPart);
         const names = [toolShort(t.name)].concat((pc.withTools || []).map(toolShort));
-        items.push({ t: pc.etaT, ic: 'wrench', c: pc.waitFromT != null ? 'var(--st-wait)' : 'var(--st-tool)', text: `${id} Werkzeugwechsel ${names.join(', ')}${pc.by ? ' · ' + pc.by : ''}`, ent: 'machine|' + id });
+        items.push({ t: pc.etaT, ic: 'wrench', c: pc.waitFromT != null ? 'var(--st-wait)' : 'var(--st-tool)', text: `${id} ${pc.action === 'index' ? 'Schneide wenden' : 'Werkzeugwechsel'} ${names.join(', ')}${pc.by ? ' · ' + pc.by : ''}`, ent: 'machine|' + id });
       }
       if (mv.order && mv.etaOpEnd != null && mv.etaOpEnd <= H2 && mv.etaOpEnd > now) items.push({ t: mv.etaOpEnd, ic: 'check', c: 'var(--st-run)', text: `${id} fertig mit ${mv.order.id} AG ${mv.order.seq}${mv.queue[0] && mv.queue[0].level === 2 ? ' · danach ' + mv.queue[0].orderId : ''}`, ent: 'machine|' + id });
     }
@@ -1344,8 +1346,9 @@
     setHTML(R.kOeeS2, `V <b>${U.fmtPct(k.availability, 1)}</b> × L <b>${U.fmtPct(k.performance, 1)}</b> × Q <b>${U.fmtPct(k.quality, 1)}</b>`);
     setAttr(R.kOeeS2, 'title', 'Verfügbarkeit × Leistung × Qualität');
     const apq = `V ${U.fmtPct(k.availability, 1)} × L ${U.fmtPct(k.performance, 1)} × Q ${U.fmtPct(k.quality, 1)}`;
+    const sd = k.staffedToday;
     setAttr(R.kOee, 'title', M.staffed
-      ? `OEE der besetzten Schichten heute ${U.fmtPct(M.value, 1)} · ganzer Tag inkl. Geisterschicht ${U.fmtPct(k.oee, 1)} (${apq})`
+      ? `OEE der besetzten Schichten heute ${U.fmtPct(M.value, 1)}${sd ? ` (V ${U.fmtPct(sd.availability, 1)} × L ${U.fmtPct(sd.performance, 1)} × Q ${U.fmtPct(sd.quality, 1)})` : ''} · ganzer Tag inkl. Geisterschicht ${U.fmtPct(k.oee, 1)}`
       : `Gesamtanlageneffektivität der Bearbeitungsmaschinen seit 00:00 – ${apq}${k.oeeShift != null ? ' · ' + (g ? 'Geisterschicht' : 'laufende Schicht') + ' ' + U.fmtPct(k.oeeShift, 1) : ''}`);
     // Verlauf: Tageskurve (history.oee) passt nur, wenn der Wert der ganze Tag ist; sonst Schichten gegen Nacht als Balken
     const hs = M.staffed && Array.isArray(H.oeeStaffed) && H.oeeStaffed.length === H.oee.length ? H.oeeStaffed : null;
@@ -1571,6 +1574,17 @@
     }
     todo.sort((a, b) => a.r - b.r || (a.t || 0) - (b.t || 0));
     if (todo[0]) out.push(Object.assign({ k: 'Jetzt tun' }, todo[0], todo.length > 1 ? { sub: todo[0].sub + ` · +${todo.length - 1} weitere` } : {}));
+    // 1b · Letzte Nacht (morgens, bis 4 h nach Schichtbeginn): welche autonomen Maschinen standen, wie lange, was es kostete
+    const gn = sh.id ? WF.sim.kpis().ghostLastNight : null;
+    if (gn && gn.to != null && Math.floor(gn.to / 86400) === Math.floor(now / 86400) && now - gn.to < 4 * 3600) {
+      const st = Array.isArray(gn.stopped) ? gn.stopped.slice().sort((a, b) => (b.lossEur || 0) - (a.lossEur || 0)) : [];
+      const pv = num(gn.prevented), n = gn.autonomous || null;
+      // Dauer statt € – der Nacht-Betrag des Tages steht in „Stillstandskosten“ (ab 00:00), hier zählt die ganze Nacht
+      const parts = st.slice(0, 2).map(x => `${x.machineId} stand ${U.fmtDur(Math.floor((x.stoodSec || 0) / 60) * 60)}${x.since != null ? ' (ab ' + tclock(x.since, now) + ')' : ''}`);
+      out.push({ k: 'Letzte Nacht', sev: st.length ? 'warn' : 'ok', ent: st[0] ? 'machine|' + st[0].machineId : null,
+        main: st.length ? `${st.length}${n ? ' von ' + n : ''} autonomen Maschinen ${st.length === 1 ? 'stand' : 'standen'} still` : `${n ? 'Alle ' + n + ' autonomen' : 'Die autonomen'} Maschinen liefen durch`,
+        sub: [parts.join(' · '), pv ? `${pv} Stopp${pv === 1 ? '' : 's'} vorbeugend abgesichert` : ''].filter(Boolean).join(' · ') || `OEE der Nacht ${U.fmtPct(gn.oee, 1)}` });
+    }
     // 2 · Engpass – nur der Werks-Engpass (WF.sim.bottleneck, Regel 18)
     const bn = bottleneck(now).raw;
     if (bn && bn.stationId && tiles[bn.stationId]) {
@@ -1600,15 +1614,7 @@
         }
       }
     }
-    // 4 · Termine – knappe Aufträge (verspätete stehen als Meldung oben)
-    const rc = riskCounts(now);
-    const tight = Object.keys(rc.map).filter(id => rc.map[id] === 'knapp' && !C.has('order', id));
-    if (tight.length) {
-      const ovs = tight.map(id => WF.sim.orderView(id)).filter(Boolean).sort((a, b) => a.slackSec - b.slackSec);
-      if (ovs.length) out.push({ k: 'Termine', sev: 'warn', main: `${ovs.length} ${ovs.length === 1 ? 'Auftrag' : 'Aufträge'} knapp: ${ovs.slice(0, 3).map(o => entLink('order', o.id)).join(', ')}`,
-        sub: `${ovs[0].id} hat nur ${U.fmtDur(Math.max(0, ovs[0].slackSec))} Puffer bis ${tclock(ovs[0].due, now)}` });
-    }
-    // 5 · Material
+    // 4 · Material
     const mats = Object.values(S().materials || {});
     const low = mats.filter(m => m.onHand < m.min && !C.has('material', m.id)).sort((a, b) => a.onHand / a.min - b.onHand / b.min);
     const pur = (S().purchases || []).filter(p => p.status === 'bestellt').sort((a, b) => a.etaT - b.etaT);
@@ -1626,6 +1632,14 @@
       const starved = mvs.filter(mv => mv.state === 'starved' && /material|rohteil|stange/i.test(mv.cause || '') && !C.has('machine', mv.id));
       if (starved.length) out.push({ k: 'Material', sev: 'warn', main: `${entLink('machine', starved[0].id)} wartet auf Material`, sub: relDays(starved[0].cause, now) });
       else out.push({ k: 'Material', sev: 'ok', main: 'Alle Bestände über Mindestbestand', sub: pur[0] && S().materials[pur[0].materialId] ? `nächste Lieferung ${matName(S().materials[pur[0].materialId])} ${tclock(pur[0].etaT, now)}` : 'keine Lieferung offen' });
+    }
+    // 5 · Termine – knappe Aufträge (verspätete stehen als Meldung oben)
+    const rc = riskCounts(now);
+    const tight = Object.keys(rc.map).filter(id => rc.map[id] === 'knapp' && !C.has('order', id));
+    if (tight.length) {
+      const ovs = tight.map(id => WF.sim.orderView(id)).filter(Boolean).sort((a, b) => a.slackSec - b.slackSec);
+      if (ovs.length) out.push({ k: 'Termine', sev: 'warn', main: `${ovs.length} ${ovs.length === 1 ? 'Auftrag' : 'Aufträge'} knapp: ${ovs.slice(0, 3).map(o => entLink('order', o.id)).join(', ')}`,
+        sub: `${ovs[0].id} hat nur ${U.fmtDur(Math.max(0, ovs[0].slackSec))} Puffer bis ${tclock(ovs[0].due, now)}` });
     }
     // Auffüllen auf mindestens 3 Punkte: der nächste fertige Auftrag
     if (out.length < 3) {

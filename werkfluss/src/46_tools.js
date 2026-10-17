@@ -956,6 +956,7 @@
     .tl-he-t{display:flex;align-items:baseline;gap:8px;margin-bottom:3px}
     .tl-he-t small{display:inline;margin:0}
     .tl-pipe-l{display:none}
+    .tl-qi.idx .tl-pipe-l{display:grid}
     .tl-crib{grid-template-columns:repeat(3,minmax(0,1fr))}
     .tl-crib > div{padding:9px 10px 9px 14px}
     .tl-crib .l{white-space:normal;line-height:1.25}
@@ -1730,7 +1731,7 @@
     if (t.status === 'changing') d5 = esc(planText(t, now).sub || 'Wird gerade gewechselt.');
     else if (t.status === 'due') d5 = 'Standzeit erschöpft – gewechselt wird, sobald das Werkzeug da ist.';
     else if (pc && t.status === 'broken') d5 = `Nach der Reparatur an der nächsten Teilegrenze: <b>${esc(pc.text.replace(/ – Maschine steht.*$/, ''))}</b>${pc.waitFromT != null ? `. <b style="color:var(--st-wait)">Maschine wartet ab ca. ${tclock(pc.waitFromT, now)}</b>` : ''}.`;
-    else if (pc) d5 = `<b>${esc(pc.text.replace(/ – Maschine steht.*$/, ''))}</b> · ${at === 0 ? 'Wechselgrenze 0 Teile: lange Schnitte werden erst getauscht, wenn kein ganzes Teil mehr geht' : `Wechselgrenze ≤ ${teilen(at)} Rest`}${pc.waitFromT != null ? `. <b style="color:var(--st-wait)">Stopp ab ca. ${tclock(pc.waitFromT, now)}</b>` : ''}.`;
+    else if (pc) d5 = `<b>${esc(pc.text.replace(/ – Maschine steht.*$/, ''))}</b> · ${at === 0 ? `Wechselgrenze 0 Teile: lange Schnitte werden erst ${idxNext ? 'gewendet' : 'getauscht'}, wenn kein ganzes Teil mehr geht` : `Wechselgrenze ≤ ${teilen(at)} Rest`}${pc.waitFromT != null ? `. <b style="color:var(--st-wait)">Stopp ab ca. ${tclock(pc.waitFromT, now)}</b>` : ''}.`;
     else if (t.need) { const p = t.proj[0]; d5 = p && p.t != null ? (p.waitFromT != null ? `Voraussichtlich <b>${afterTxt(p.afterPart)} · ca. ${tclock(p.t, now)}</b> – <b style="color:var(--st-wait)">Stillstand ab ca. ${tclock(p.waitFromT, now)}</b>, weil vorher niemand im Dienst ist.` : `Voraussichtlich <b>${afterTxt(p.afterPart)} · ca. ${tclock(p.t, now)}</b> – letzte Teilegrenze vor dem Stopp.`) : 'An der letzten Teilegrenze vor dem Stopp.'; }
     else d5 = `Entfällt – Arbeitsgang endet ${mv && mv.etaOpEnd ? 'ca. ' + tclock(mv.etaOpEnd, now) : 'vorher'}, danach wird neu gerüstet.`;
     steps.push(['Wechsel nur zwischen zwei Teilen', d5]);
@@ -1856,7 +1857,7 @@
         <div class="tl-pipe" style="grid-template-columns:repeat(${PP.length},minmax(0,1fr))">${pipe}</div><div class="tl-pipe-l" style="grid-template-columns:repeat(${PP.length},minmax(0,1fr))">${lbls}</div>
         ${it.notif ? `<div class="tl-qi-n" style="--c:${it.notif.sev === 'warn' ? 'var(--st-wait)' : 'var(--info)'}">${icon('bell', 12)}<span>Meldung an ${esc(roleTxt(it.notif.role))} ${esc(tclock(it.notif.t, now))}${it.notif.ack ? ' · quittiert' + (it.notif.ackBy ? ' von ' + esc(it.notif.ackBy) : '') : ''}</span></div>` : ''}
         <div class="tl-qi-d">${who ? `<span class="avatar${it.person ? '' : ' pred'}" title="${it.person ? 'zugeteilt' : 'Bediener:in der Maschine – wird gerufen'}">${esc(WF.ui.initials(who.replace('.', '')))}</span><span><b style="font-weight:600">${esc(who)}</b></span><span class="m">${esc(it.detail)}</span>` : `<span class="m">${esc(it.detail)}</span>`}</div>`;
-      return { key: it.id, cls: 'tl-qi' + (it.urgent ? ' urgent' : ''), attrs: { tabindex: '0', role: 'button', 'data-sel': 'machine|' + it.machineId }, html, sig: html };
+      return { key: it.id, cls: 'tl-qi' + (it.urgent ? ' urgent' : '') + (it.index ? ' idx' : ''), attrs: { tabindex: '0', role: 'button', 'data-sel': 'machine|' + it.machineId }, html, sig: html };
     }));
   }
 

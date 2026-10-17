@@ -839,6 +839,10 @@
   .or-lv-c{color:var(--text2)}
   .or-lv-c .ico,.or-lv-ok .ico{flex:none}
   .or-lv-n{font-size:var(--fs-xs);line-height:1.4;color:var(--muted)}
+  .or-lv-s{display:flex;align-items:flex-start;gap:5px;font-size:var(--fs-xs);line-height:1.4;color:var(--muted)}
+  .or-lv-s .ico{flex:none;margin-top:2px;color:var(--st-run)}
+  .or-lv-s.bad{color:color-mix(in srgb,var(--st-wait) 85%,var(--text))}
+  .or-lv-s.bad .ico{color:var(--st-wait)}
   .or-lv > .btn{align-self:center}
   @media (max-width:440px){.or-lv{grid-template-columns:30px minmax(0,1fr)}.or-lv > .btn{grid-column:2;justify-self:start;margin-top:3px}}
   .or-lv-cost{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border-radius:8px;font-size:var(--fs-sm);line-height:1.45;color:var(--text2);background:var(--bg2);border:1px solid var(--line)}
@@ -1909,7 +1913,7 @@
     /** Bediener-Arbeitsplatz: Nacht/Wochenende als Lücke „keine Schicht“ (schraffiert, ohne Kontur), kurze Pausen dunkel im Block */
     const gapHtml = (sp, yy) => sp ? sp.gaps.map(([p, q]) => {
       const gx = X(p), gw = X(q) - gx; if (gw < 2) return '';
-      return `<rect class="ns" x="${gx.toFixed(1)}" y="${yy + 4}" width="${gw.toFixed(1)}" height="${BLK_H - 8}" rx="2"/><line class="nsl" x1="${gx.toFixed(1)}" x2="${(gx + gw).toFixed(1)}" y1="${yy + BLK_H / 2}" y2="${yy + BLK_H / 2}"/>`;
+      return `<rect class="ns" x="${gx.toFixed(1)}" y="${yy + 5}" width="${gw.toFixed(1)}" height="${BLK_H - 10}" rx="2"/><line class="nsl" x1="${gx.toFixed(1)}" x2="${(gx + gw).toFixed(1)}" y1="${yy + BLK_H / 2}" y2="${yy + BLK_H / 2}"/>`;
     }).join('') : '';
     const brkHtml = (sp, yy) => sp ? sp.brk.map(([p, q]) => {
       const ox = X(p), ow = X(q) - ox; if (ow < 1.5) return '';
@@ -1960,18 +1964,31 @@
         if (e - a < 30) continue;
         const x0 = X(a), x1 = X(e), w = x1 - x0; if (w < 0.8) continue;
         const i = tips.length;
-        const sp0 = staffed ? staffedSplit(a, e) : null, sp = sp0 && sp0.work.length ? sp0 : null;
+        // Rüsten braucht immer Personal (auch an autonomen Maschinen): Nacht im Rüstabschnitt ebenfalls als „keine Schicht“
+        const suEnd = b.setupEnd != null ? Math.min(Math.max(b.setupEnd, a), e) : a;
+        let sp0 = null;
+        if (staffed) sp0 = staffedSplit(a, e);
+        else if (suEnd > a + 30) {
+          const s1 = staffedSplit(a, suEnd), w = s1.work.slice();
+          if (e > suEnd + 30) { const last = w[w.length - 1]; if (last && last[1] >= suEnd - 30) last[1] = e; else w.push([suEnd, e]); }
+          sp0 = { work: w, gaps: s1.gaps, brk: s1.brk };
+        }
+        const sp = sp0 && sp0.work.length ? sp0 : null;
         const segs = sp ? sp.work : [[a, e]];
         const workSec = sp ? segs.reduce((acc, [p, q]) => acc + (q - p), 0) - sp.brk.reduce((acc, [p, q]) => acc + (q - p), 0) : e - a;
         tips.push({ kind: 'fc', o: b.orderId, seq: b.seq, op: b.op, mid: l.id, start: b.start, end: b.end, opEnd: b.opEnd, setupEnd: b.setupEnd, active: b.active,
-          staffed: !!(sp && (sp.brk.length || sp.gaps.length)), night: !!(sp && sp.gaps.length), workSec });
+          staffed: staffed && !!(sp && (sp.brk.length || sp.gaps.length)), night: !!(sp && sp.gaps.length), setupNight: !staffed && !!(sp && sp.gaps.length), workSec });
         const v = vById[b.orderId];
         const fv = blkLabels(b.orderId, b.seq);
         const yy = l.y + BLK_Y;
         const eil = v && v.priority === 'eil';
         const sx0 = X(segs[0][0]), fx1 = X(segs[0][1]);
+        // Rüstanteil schraffiert – nur in den Arbeitsabschnitten bis Rüstende
         let su = '';
-        if (b.setupEnd != null && b.setupEnd > a + 30) { const sw = Math.min(X(b.setupEnd), fx1) - sx0; if (sw > 1) su = rr(sx0 + 0.5, yy, sw - 0.5, BLK_H, 'su'); }
+        if (suEnd > a + 30) for (const [p, q] of segs) {
+          const ra = Math.max(p, a), rb = Math.min(q, suEnd); if (rb - ra < 30) continue;
+          const sw = X(rb) - X(ra); if (sw > 1) su += rr(X(ra) + 0.5, yy, sw - 0.5, BLK_H, 'su');
+        }
         // Arbeitsplätze, die je Behälter freigeben (Messraum, Waschen, Montage): Arbeitsgang bleibt bis opEnd offen
         let tail = '';
         if (b.opEnd != null && b.opEnd > e + 600) {
@@ -2207,11 +2224,12 @@
       if (info.kind === 'fc') {
         const a = Math.max(info.start, now);
         body += row(info.active ? 'Läuft bis ca.' : 'Geplant', info.active ? tShort(info.end, now) : `${tShort(a, now)} – ${tShort(info.end, now)}`);
-        if (info.night || info.staffed) { body += row('Arbeitszeit', U.fmtDur(info.workSec)); if (info.night) body += row('Belegt (inkl. ohne Schicht)', U.fmtDur(info.end - a)); }
+        if (info.night || info.staffed) { body += row(info.staffed ? 'Arbeitszeit in der Schicht' : 'Dauer ohne Nachtpause', U.fmtDur(info.workSec)); if (info.night) body += row('Belegt (inkl. ohne Schicht)', U.fmtDur(info.end - a)); }
         else body += row('Dauer', U.fmtDur(info.end - a));
         if (info.setupEnd != null && info.setupEnd > a + 30) body += row('davon Rüsten', `${U.fmtDur(info.setupEnd - a)} (bis ${tShort(info.setupEnd, now)})`);
         if (info.opEnd != null && info.opEnd > info.end + 600) { body += row('Arbeitsgang fertig ca.', tShort(info.opEnd, now)); body += `<div class="or-tip-n">Belegt nur, solange Teile da sind – weitere Behälter folgen vom Vorgänger (gestrichelt bis Arbeitsgang-Ende)</div>`; }
         if (info.staffed) body += `<div class="or-tip-n">${info.night ? 'Bediener-Arbeitsplatz – in der Nacht ohne Schicht (schraffiert) steht er geplant, weiter mit Schichtbeginn; dunkel: Pausen' : 'Bediener legt jedes Teil ein – gearbeitet wird nur in der Schichtzeit (dunkel: Pausen)'}</div>`;
+        else if (info.setupNight) body += `<div class="or-tip-n">Rüsten braucht einen Einrichter – nachts ohne Schicht wartet die Maschine (schraffiert), danach läuft die Serie autonom</div>`;
       } else {
         body += row('Ist-Belegung', `${tAct(info.t0, now)} – ${info.live ? 'jetzt' : tShort(info.t1, now)}`);
         const sh = (info.shares || []).slice(0, 3).map(x => `${(WF.STATE[x.k] || {}).label || x.k} ${U.fmtDur(x.sec)}`);
@@ -2449,6 +2467,15 @@
     if (cost != null) out.push(`<span class="or-lv-c">${icon('euro', 12)}${cost > 0 ? 'ca. ' + esc(U.fmtEur(cost)) : 'ohne Mehrkosten'}</span>`);
     return out.join('');
   }
+  /** Engine-Satz eines Hebels zerlegen: Maßnahme · (Wirkung steht in der Kurzzeile) · Nebenwirkung auf andere Aufträge */
+  function leverDesc(a) {
+    let t = String(a.text || '').trim();
+    // „…: FA-24119 fertig ca. Mi 09:49 statt Do 07:12 (−21 h 23 min)“ – Wirkung zeigt die Kurzzeile
+    t = t.replace(/:\s*[A-Z]{2,3}-\d+ fertig ca\. [^;(]*\([^)]*\)/, '');
+    const k = t.indexOf('; ');
+    const desc = (k >= 0 ? t.slice(0, k) : t).trim(), side = k >= 0 ? t.slice(k + 2).trim() : '';
+    return { desc, side, sideBad: /zu spät|später/.test(side) };
+  }
   /** Hebel-Liste im Abschnitt „Warum verspätet/knapp“ */
   function leversHtml(v, adv, now) {
     const L = leversOf(adv);
@@ -2456,10 +2483,11 @@
     return `<div class="or-lvs"><span class="or-why-l">Hebel · Wirkung auf den Liefertermin</span>` + L.slice(0, 4).map((a, i) => {
       const meta = LEVER[a.kind] || LEVER[a.action.type] || { ic: 'arrowRight' };
       const title = a.label || meta.t || a.kind;
-      const txt = a.text && a.text !== title ? a.text : '';
+      const d = leverDesc(a), txt = d.desc && d.desc !== title ? d.desc : '';
+      const side = d.side ? `<div class="or-lv-s${d.sideBad ? ' bad' : ''}">${icon(d.sideBad ? 'alert' : 'check', 12)}<span>${esc(d.side.charAt(0).toUpperCase() + d.side.slice(1))}</span></div>` : '';
       return `<div class="or-lv${a.primary ? ' prim' : ''}"><span class="or-lv-ic">${icon(meta.ic || 'arrowRight', 16)}</span>` +
         `<div class="or-lv-b"><div class="or-lv-h"><b>${esc(title)}</b>${a.primary ? '<span class="or-lv-tag">Empfohlen</span>' : ''}</div>` +
-        (txt ? `<div class="or-lv-t">${esc(txt)}</div>` : '') + `<div class="or-lv-m">${leverMeta(v, a, now)}</div>${a.note ? `<div class="or-lv-n">${esc(a.note)}</div>` : ''}</div>` +
+        (txt ? `<div class="or-lv-t">${esc(txt)}</div>` : '') + `<div class="or-lv-m">${leverMeta(v, a, now)}</div>${side}${a.note ? `<div class="or-lv-n">${esc(a.note)}</div>` : ''}</div>` +
         `<button type="button" class="btn sm${a.primary ? ' primary' : ''}" data-lever="${i}">Prüfen</button></div>`;
     }).join('') + `</div>`;
   }
@@ -2484,7 +2512,8 @@
     }
     const late = wi ? (wi.newlyLate || []).concat((wi.laterLate || []).filter(x => !(wi.newlyLate || []).includes(x))) : [];
     const cost = leverCost(a), draft = leverDraft(a);
-    let h = `<p class="or-pm-lead"><b>${esc(id)}</b> · ${esc(v.part.name)}: ${esc(a.text || a.label || meta.t || '')}</p>`;
+    const dd = leverDesc(a);
+    let h = `<p class="or-pm-lead"><b>${esc(id)}</b> · ${esc(v.part.name)}: ${esc(dd.desc || a.label || meta.t || '')}.</p>`.replace('..</p>', '.</p>');
     if (rows.length) h += `<div class="or-pm-h"><span>Liefertermin-Prognose</span><span>vorher → nachher</span></div><div class="or-pm-t">${rows.slice(0, 8).map(x => pmRow(x.id, x.before, x.after, x.id === id, x.risk)).join('')}</div>`;
     if (late.length) h += `<div class="or-pm-w">${icon('alert', 15)}<span>Dadurch ${late.length === 1 ? 'wird' : 'werden'} <b>${late.map(esc).join(', ')}</b> ${(wi.newlyLate || []).length ? 'zu spät' : 'noch später'}.</span></div>`;
     if (cost != null || a.costText) h += `<div class="or-lv-cost">${icon('euro', 15)}<span>${cost === 0 ? '<b>Keine Mehrkosten</b>' : `Mehrkosten ca. <b>${cost != null ? esc(U.fmtEur(cost)) : '–'}</b>`}${a.costText || a.costNote ? ' · ' + esc(a.costText || a.costNote) : ''}</span></div>`;

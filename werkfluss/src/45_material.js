@@ -43,6 +43,10 @@
   // Behälter: Lebenszyklus in der Material-Familie (UI_GUIDE Regel 15) – nie Maschinenzustandsfarben; Fremdbearbeitung = --ext
   const CT_C = { filling: 'var(--mat)', ready: 'var(--mat)', transit: 'var(--mat)', input: 'var(--muted)', external: 'var(--ext)', shipped: 'var(--faint)', scrap: 'var(--st-fault)' };
   const ctMark = (state) => `<i class="mt-mk k-${esc(state)}" aria-hidden="true"></i>`;
+  /** Behälter steht bereit, sein Transport ist vorgemerkt (Ziel voll) – Lebenszyklus „vorgemerkt“ statt „abholbereit“ */
+  const ctPlanned = (c) => { const s = S(); const t = c && c.state === 'ready' && c.transportId && s ? s.transports[c.transportId] : null; return !!t && t.status === 'open' && phaseOf(t) === 'geplant'; };
+  const ctKey = (c) => (ctPlanned(c) ? 'planned' : c.state);
+  const ctLabel = (c) => (ctPlanned(c) ? 'Vorgemerkt (Ziel voll)' : lbl('container', c.state));
   // Mengenbalken neutral, Warnfarbe nur für die Aussage (unter Mindestbestand ohne Bestellung)
   const STOCK_C = 'color-mix(in srgb,var(--text2) 60%,transparent)';
   const FORM = { Stange: 'Stange', Platte: 'Platte', Stk: 'Rohteile' };
@@ -628,6 +632,7 @@
   .mt-node .pip{fill:var(--track);stroke:color-mix(in srgb,var(--line2) 90%,transparent);stroke-width:.8}
   .mt-node .pip.on{fill:color-mix(in srgb,var(--text2) 70%,transparent);stroke:none}
   .mt-node .pip.rd{fill:var(--mat);stroke:none}
+  .mt-node .pip.pl{fill:color-mix(in srgb,var(--mat) 30%,transparent);stroke:color-mix(in srgb,var(--mat) 70%,transparent);stroke-width:.9}
   .mt-node .pip.fl{fill:transparent;stroke:var(--mat);stroke-width:1}
   .mt-node .pip.full{fill:var(--st-wait);stroke:none}
   .mt-node .pipt{font:600 var(--fs-xs) var(--f-ui);fill:var(--faint);letter-spacing:.06em}
@@ -982,6 +987,7 @@
     .mt-trt td{display:block;padding:0;border:0;min-width:0}
     .mt-trt td.st{position:absolute;left:0;top:0;bottom:0;width:3px;box-shadow:none;background:var(--c)}
     .mt-trt tr.sep,.mt-trt tr.sep td{display:block}
+    .mt-trt tr.sep{padding:0}
     .mt-trt tr:has(> td[colspan]){display:block}
     .mt-trt td:nth-child(2){grid-area:o}.mt-trt td:nth-child(3){grid-area:c}.mt-trt td:nth-child(4){grid-area:r}.mt-trt td:nth-child(5){grid-area:w;text-align:right;align-self:center}
     .mt-trt td:nth-child(6){grid-area:m}.mt-trt td:nth-child(7){grid-area:s;justify-self:end}.mt-trt td:nth-child(8){grid-area:t}.mt-trt td:nth-child(9){grid-area:y}
@@ -1037,6 +1043,7 @@
   .mt-mk{display:inline-block;position:relative;width:10px;height:10px;border-radius:3px;flex:none;box-sizing:border-box;vertical-align:-1px}
   .mt-mk.k-filling{border:1.6px solid var(--mat);background:transparent}
   .mt-mk.k-ready{background:var(--mat)}
+  .mt-mk.k-planned{background:color-mix(in srgb,var(--mat) 30%,transparent);border:1.4px solid color-mix(in srgb,var(--mat) 70%,transparent)}
   .mt-mk.k-transit{width:18px;border-radius:5px;background:color-mix(in srgb,var(--mat) 22%,transparent);overflow:hidden}
   .mt-mk.k-transit::after{content:"";position:absolute;top:2px;left:2px;width:6px;height:6px;border-radius:50%;background:var(--mat);animation:mtMk 1.3s ease-in-out infinite alternate}
   @keyframes mtMk{to{transform:translateX(8px)}}
@@ -1546,7 +1553,7 @@
       [sw('<path style="stroke:var(--mat)" d="M2,7 H24" stroke-width="2.4" stroke-dasharray="1.5 4" stroke-linecap="round" opacity=".8"/>'), 'Direktentnahme Säge (ohne Transport)'],
       [sw('<g transform="translate(13,7)" class="mt-veh" style="--c:var(--mat)"><rect class="vb" x="-9" y="-5" width="18" height="10" rx="3"/><rect class="vl" x="-3" y="-3" width="6" height="6" rx="1.2"/></g>'), 'AGV (mit Ladung)'],
       [sw('<g transform="translate(11,7)" class="mt-veh" style="--c:var(--info)"><rect class="vb" x="-7.5" y="-5" width="12" height="10" rx="2.5"/><path class="vk" d="M4.5,-3 h5 M4.5,3 h5"/></g>'), 'Stapler'],
-      [sw('<rect style="fill:color-mix(in srgb,var(--text2) 70%,transparent)" x="1" y="4" width="5" height="5" rx="1"/><rect style="fill:var(--track);stroke:var(--line2)" x="8" y="4" width="5" height="5" rx="1" stroke-width=".8"/><path style="stroke:var(--line2)" d="M15.5,3.5 v6"/><rect style="fill:none;stroke:var(--mat)" x="18.5" y="4.5" width="4" height="4" rx="1" stroke-width="1"/><rect style="fill:var(--mat)" x="25" y="4" width="5" height="5" rx="1"/>', 32), 'Puffer Eingang | Ausgang (Kontur = wird befüllt, voll = abholbereit)'],
+      [sw('<rect style="fill:color-mix(in srgb,var(--text2) 70%,transparent)" x="1" y="4" width="5" height="5" rx="1"/><rect style="fill:var(--track);stroke:var(--line2)" x="8" y="4" width="5" height="5" rx="1" stroke-width=".8"/><path style="stroke:var(--line2)" d="M15.5,3.5 v6"/><rect style="fill:none;stroke:var(--mat)" x="18.5" y="4.5" width="4" height="4" rx="1" stroke-width="1"/><rect style="fill:var(--mat)" x="25" y="4" width="5" height="5" rx="1"/><rect style="fill:color-mix(in srgb,var(--mat) 30%,transparent);stroke:color-mix(in srgb,var(--mat) 70%,transparent)" x="31.5" y="4.5" width="4" height="4" rx="1" stroke-width=".9"/>', 38), 'Puffer Eingang | Ausgang (Kontur = wird befüllt, voll = abholbereit, blass = vorgemerkt)'],
     ];
     V.r.legend.innerHTML = items.map(([g, t]) => `<span>${g}${esc(t)}</span>`).join('');
   }
@@ -1712,8 +1719,9 @@
       const low = Object.values(s.materials).filter(m => m.onHand < m.min);
       h += `<dt>Materialien</dt><dd>${Object.keys(s.materials).length}</dd><dt>Unter Mindestbestand</dt><dd>${low.length ? low.map(m => esc(m.name)).join(', ') : 'keine'}</dd>`;
     }
-    if (inn.length) h += `<dt>Zugang heute</dt><dd>${sumN(inn)} Fahrten von ${inn.map(e => esc(stName(e.from))).join(', ')}</dd>`;
-    if (out.length) h += `<dt>Abgang heute</dt><dd>${sumN(out)} Fahrten nach ${out.map(e => esc(stName(e.to))).join(', ')}</dd>`;
+    const fz = (n) => n + (n === 1 ? ' Fahrt' : ' Fahrten');
+    if (inn.length) h += `<dt>Zugang heute</dt><dd>${fz(sumN(inn))} von ${inn.map(e => esc(stName(e.from))).join(', ')}</dd>`;
+    if (out.length) h += `<dt>Abgang heute</dt><dd>${fz(sumN(out))} nach ${out.map(e => esc(stName(e.to))).join(', ')}</dd>`;
     const wAll = waitingAt(id), wait = wAll.filter(x => !x.planned), plan = wAll.filter(x => x.planned);
     if (wait.length) h += `<dt>Abholbereit</dt><dd>${wait.length} Behälter · ${esc(whyShort(wait[0].waitReason || (wait[0].carrier ? wait[0].carrier + ' ist unterwegs' : 'wartet auf Zuteilung')))}</dd>`;
     if (plan.length) h += `<dt>Vorgemerkt</dt><dd>${plan.length} Behälter · ${esc(planReason(plan[0].waitReason))}</dd>`;
@@ -1961,7 +1969,7 @@
             if (po) {
               const c = s.containers[sto.out[i]];
               const full = sto.out.length >= co && co > 0 && m && m.state === 'blocked';
-              setAttr(po, 'class', 'pip' + (c ? (full ? ' full' : c.state === 'ready' ? ' rd' : c.state === 'filling' ? ' fl' : ' on') : ''));
+              setAttr(po, 'class', 'pip' + (c ? (full ? ' full' : c.state === 'ready' ? (ctPlanned(c) ? ' pl' : ' rd') : c.state === 'filling' ? ' fl' : ' on') : ''));
             }
           }
         }
@@ -2715,7 +2723,7 @@
         const dest = esc(tr ? stName(tr.finalTo || tr.to.station) : toR ? stName(toR.station) : 'Versand');
         if (tr && tr.status === 'open' && phaseOf(tr) === 'geplant') {
           // Ziel voll: bereitgestellt und vorgemerkt – keine Wartezeit-Uhr, keine Warnfarbe
-          return { html: `<span>bereitgestellt seit ${tclock(c.readyT != null ? c.readyT : tr.createdT, now)} → ${dest} · vorgemerkt, Ziel voll${tr.roomEtaT != null ? ' · Abruf ca. ' + tclock(tr.roomEtaT, now) : ''}</span>`, sort: 1.5, planned: true };
+          return { html: `<span>bereitgestellt seit ${tclock(c.readyT != null ? c.readyT : tr.createdT, now)} → ${dest} · ${tr.roomEtaT != null ? 'Abruf ca. ' + tclock(tr.roomEtaT, now) : 'Ziel voll'}</span>`, sort: 1.5, planned: true };
         }
         const w = tr ? (tr.pickupT != null ? null : waitOf(recOf(tr), now)) : c.readyT != null ? now - c.readyT : null;
         const why = tr ? (tr.assignee ? (s.agvs[tr.assignee] ? s.agvs[tr.assignee].name : shortName(personName(tr.assignee))) + ' unterwegs' : tr.waitReason || 'wartet auf Zuteilung') : 'wartet';
@@ -2777,7 +2785,7 @@
         const q = g.items.reduce((a, c) => a + c.qty, 0);
         const rowHtml = (x) => {
           const c = x.c;
-          return `<button class="mt-ct" style="--c:${CT_C[c.state] || 'var(--muted)'}" data-row="container|${esc(c.id)}" title="${esc(lbl('container', c.state))} · ${esc(c.id)}">${ctMark(c.state)}
+          return `<button class="mt-ct" style="--c:${CT_C[c.state] || 'var(--muted)'}" data-row="container|${esc(c.id)}" title="${esc(ctLabel(c))} · ${esc(c.id)}">${ctMark(ctKey(c))}
             <span class="l1"><span class="mono">${esc(c.orderId)}</span><span>${esc(c.partName)}</span></span><span class="q">${esc(stk(c.qty))}</span>
             <span class="l2">${x.ln.html}</span></button>`;
         };
@@ -2808,7 +2816,7 @@
     setHTML(r.ctSub, `<b>${total}</b> Behälter · <b>${U.fmtNum(qty)}</b> Teile · ${trn ? trn.items.length : 0} unterwegs · ${ext ? ext.items.length : 0} extern<span class="x"> · gruppiert nach Ort in Flussrichtung</span>`);
     if (!r.ctLegend._done) {
       r.ctLegend._done = true;
-      r.ctLegend.innerHTML = ['filling', 'ready', 'transit', 'input', 'external'].map(k => `<span>${ctMark(k)}${esc(lbl('container', k))}</span>`).join('');
+      r.ctLegend.innerHTML = ['filling', 'ready', 'planned', 'transit', 'input', 'external'].map(k => `<span>${ctMark(k)}${esc(k === 'planned' ? 'Vorgemerkt (Ziel voll)' : lbl('container', k))}</span>`).join('');
     }
   }
 
@@ -3077,14 +3085,14 @@
           // Kopf: Zustand + genau eine Ortszeile; Detailzeile nur, wenn sie etwas Neues sagt (kein „Im Versand / Versand / Im Versand“)
           const whereTxt = c.state === 'shipped' ? (STN('VERSAND') ? STN('VERSAND').name : 'Versand') : c.state === 'scrap' ? (STN('SPERR') ? STN('SPERR').name : 'Sperrlager') : (cv.where || '');
           const detail = c.state === 'shipped' ? '' : c.state === 'external' ? esc((c.location && c.location.process) || '') : ctLine(c, s2, now).html.replace(/<span class="fb">.*?<\/span><\/span>/, '');
-          setHTML(X.hero, `<div class="mt-d-hero"><div class="mt-d-st">${pill(col, lbl('container', c.state))}<span class="mt-d-since">${esc(whereTxt)}</span></div>${detail ? `<div class="mt-d-cause" style="font-size:var(--fs-md);color:var(--text2)">${detail}</div>` : ''}</div>`);
+          setHTML(X.hero, `<div class="mt-d-hero"><div class="mt-d-st">${ctPlanned(c) ? `<span class="mt-planpill">${esc(ctLabel(c))}</span>` : pill(col, lbl('container', c.state))}<span class="mt-d-since">${esc(whereTxt)}</span></div>${detail ? `<div class="mt-d-cause" style="font-size:var(--fs-md);color:var(--text2)">${detail}</div>` : ''}</div>`);
           const tr = c.transportId ? s2.transports[c.transportId] : null;
           setHTML(X.content, `<h4>Inhalt</h4><dl class="dl"><dt>Teile</dt><dd><b>${esc(stk(c.qty))}</b> ${esc(c.partName)}${o ? ' <span class="muted">(' + esc(o.part.no) + ')</span>' : ''}</dd>
             <dt>Auftrag</dt><dd>${o ? `<button class="link" data-sel="order|${esc(o.id)}">${esc(o.id)}</button> · ${esc(o.customer)}` : esc(c.orderId)}</dd>
             <dt>Art</dt><dd>${esc(lbl('containerKind', c.kind))}${c.supplied ? ' (Beistellteile des Kunden)' : ''}</dd>
             <dt>Gewicht</dt><dd>${esc(kg(c.weightKg))} inkl. ${c.weightKg > 60 ? 'Gitterbox' : 'Kleinladungsträger'}${c.weightKg > 250 ? ' – nur per Stapler' : ' – AGV-fähig'}</dd>
-            <dt>Erstellt</dt><dd>${esc(tclock(c.createdT, now))}${c.readyT ? ' · abholbereit ' + esc(tclock(c.readyT, now)) : ''}</dd>
-            ${tr && tr.status !== 'done' ? `<dt>Transport</dt><dd><span class="mono">${esc(tr.id)}</span> · ${esc(trStatusLabel(L.tr.get(tr.id) || { status: tr.status, mode: tr.mode }))}${tr.waitReason && tr.status === 'open' ? ' – ' + esc(tr.waitReason) : ''}</dd>` : ''}
+            <dt>Erstellt</dt><dd>${esc(tclock(c.createdT, now))}${c.readyT ? ' · bereit ' + esc(tclock(c.readyT, now)) : ''}</dd>
+            ${tr && tr.status !== 'done' ? `<dt>Transport</dt><dd><span class="mono">${esc(tr.id)}</span> · ${esc(trStatusLabel(L.tr.get(tr.id) || { status: tr.status, mode: tr.mode }))}${tr.waitReason && tr.status === 'open' ? ' – ' + esc(phaseOf(tr) === 'geplant' ? planReason(tr.waitReason) : tr.waitReason) : ''}</dd>` : ''}
             ${c.location && c.location.kind === 'external' ? `<dt>Übergeben</dt><dd>${esc(tclock(c.location.sentT, now))} an ${esc(splitBsp(c.location.partner)[0])}${c.location.lotQty ? ' · Los ' + esc(stk(c.location.lotQty)) : ''}</dd>` : ''}</dl>`);
           // Arbeitsplan-Kette mit Position des Behälters
           if (o) {

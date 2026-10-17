@@ -83,8 +83,32 @@
       free.length ? free.length + ' verfügbar' : 'niemand verfügbar', brk ? brk + ' in der Pause' : ''].filter(Boolean);
     return { task, tend, lead, free: free.map(x => x.p), brk, einsatz: task + tend + lead, txt: parts.join(', ') };
   }
-  /** OEE nur der bemannten Schichten (Engine kpis().oeeStaffedToday), wenn sie spürbar von der Tages-OEE abweicht */
-  const staffedTxt = (k) => (k && k.oeeStaffedToday != null && k.oee != null && Math.abs(k.oeeStaffedToday - k.oee) >= 0.005 ? ` (bemannte Schichten ${pct(k.oeeStaffedToday, 1)}, die Geisterschicht zählt getrennt)` : '');
+  /** OEE-Kopfzahl wie Leitstand und Analyse: enthält der Tag eine Geisterschicht, gilt die OEE der besetzten Schichten
+      (kpis().oeeStaffedToday, Faktoren aus kpis().staffedToday) – der ganze Tag inkl. Nacht wird nur dazu genannt */
+  function oeeHead(k) {
+    const has = !!k && Object.prototype.hasOwnProperty.call(k, 'oeeStaffedToday'), st = has ? k.oeeStaffedToday : undefined;
+    if (!(has && k.oee != null && st != null && Math.abs(k.oee - st) >= 0.0005)) return { v: k ? k.oee : null, a: k && k.availability, p: k && k.performance, q: k && k.quality, staffed: false, label: 'OEE heute' };
+    const s2 = k.staffedToday || {};
+    return { v: st, a: s2.availability, p: s2.performance, q: s2.quality, staffed: true, label: 'OEE heute · Schichten', day: k.oee };
+  }
+  /** Stillstandskosten wie Leitstand und Analyse: Wert = Schichtzeit, die Nacht (Geisterschicht) getrennt */
+  function lossHead(k) {
+    const night = k && typeof k.lossEurNightToday === 'number' && k.lossEurNightToday >= 0.5 ? k.lossEurNightToday : 0;
+    const value = k && typeof k.lossEurStaffedToday === 'number' ? k.lossEurStaffedToday : Math.max(0, ((k && k.lossEur) || 0) - night);
+    return { value, night, split: night > 0 };
+  }
+  /** OEE einer Maschine wie die Analyse: nach einer Nacht die besetzten Schichten (Tageswerte minus Nachtanteil der Engine) */
+  function machineOee(mv, k) {
+    const o0 = (mv && mv.oeeToday) || {};
+    if (!mv || !oeeHead(k).staffed) return o0;
+    const m = S().machines[mv.id], d = m && m.kd, n = m && m.kn && typeof m.kn.lossEur === 'number' && m.kn.lossEurBy ? m.kn : null;
+    if (!d || !n || !(n.planned > 0)) return o0;
+    const planned = d.planned - n.planned, run = d.run - n.run;
+    const idealD = o0.performance != null && o0.performance < 1 && o0.runSec > 0 ? o0.performance * o0.runSec : d.ideal;
+    const ideal = idealD - (n.ideal || 0), good = d.good - (n.good || 0), scrap = d.scrap - (n.scrap || 0);
+    const a = planned > 0 ? Math.min(1, run / planned) : null, p = run > 0 ? Math.min(1, Math.max(0, ideal) / run) : null, q = good + scrap > 0 ? good / (good + scrap) : 1;
+    return { oee: a != null && p != null ? a * p * q : null, availability: a, performance: p, quality: q, plannedSec: planned, runSec: run, staffed: true, day: o0.oee };
+  }
   /** Bilanz der letzten Geisterschicht (Engine kpis().ghostLastNight) – nur in den ersten Stunden danach */
   function ghostNightTxt(k) {
     const g = k && k.ghostLastNight;
@@ -117,7 +141,7 @@
   /** Puffer bzw. Verzug eines Auftrags (Sekunden bis Termin) */
   const slackTxt = (s) => (s == null ? 'ohne Prognose' : s < 0 ? durR(-s) + ' Verzug' : s < 60 ? 'kein Puffer' : 'Puffer ' + durR(s));
   /** OEE-Kachel: nahe am Ziel (± 0,5 Pkt.) mit einer Nachkommastelle, damit Farbe und Zahl zusammenpassen (74,6 % statt „75 %“ in Gelb) */
-  const oeeStat = (oee, sub, dec) => ({ l: 'OEE heute', v: oee == null ? '–' : pct(oee, dec != null ? dec : 1), s: sub, c: oee == null ? '' : oee >= TARGET_OEE ? 'ok' : 'warn' });
+  const oeeStat = (oee, sub, dec, lbl) => ({ l: lbl || 'OEE heute', v: oee == null ? '–' : pct(oee, dec != null ? dec : 1), s: sub, c: oee == null ? '' : oee >= TARGET_OEE ? 'ok' : 'warn' });
   const oeeDec = (oee) => (oee != null && Math.abs(oee - TARGET_OEE) < 0.005 ? 1 : 0);
   /** Stückpreis: unter 100 € mit Cent (9,80 €), sonst ganze Euro */
   const eurUnit = (n) => U.fmtEur(n, n < 100 && Math.round(n) !== n ? 2 : 0);
@@ -591,6 +615,11 @@
     if (adv.action && adv.action.type === 'moveOp') {
       const ac = adv.action, alt = (adv.alternatives || []).find(x => x.kind === 'moveOp' && x.action && x.action.stationId === ac.stationId);
       acts.push({ label: `${o.id} AG ${ac.seq} auf ${ac.stationId} verlagern`, desc: `Dort wird neu gerüstet${alt && alt.gainSec >= 60 ? ' · ' + durR(alt.gainSec) + ' früher fertig' : ''}`, action: ac, icon: 'route' });
+    } else if (adv.action && adv.action.type !== 'setPriority') {
+      // weitere Hebel der Engine (Los teilen, Express, …) – Aktion wie in der Meldung „Termin gefährdet“
+      const sig = JSON.stringify(adv.action), alt = (adv.alternatives || []).find(x => x.action && JSON.stringify(x.action) === sig);
+      const ce = alt ? (alt.costEur != null ? alt.costEur : alt.cost) : null;
+      acts.push({ label: `${o.id}: ${alt ? alt.label : adv.actionLabel || 'Hebel ausführen'}`, desc: [alt && alt.gainSec >= 60 ? durR(alt.gainSec) + ' früher fertig' : '', ce != null ? (ce > 0 ? 'ca. ' + eur(ce) : 'ohne Zusatzkosten') : '', alt && alt.addedLateSec > 0 ? 'ein anderer Auftrag wird ' + durR(alt.addedLateSec) + ' später spät' : ''].filter(Boolean).join(' · '), action: adv.action, icon: adv.action.type === 'expressExt' ? 'truck' : 'route' });
     }
     let text;
     if (!late && o.slackSec != null) {
@@ -695,14 +724,23 @@
       € = machineView.lossByState[Zustand], Zeit = plannedStateTimes[Zustand] (Schichtzeit ohne Pausen, autonome Maschinen
       auch in der Geisterschicht). Σ je Maschine = lossEurToday, Σ Werk = kpis().lossEur. Ältere Engine: anteilig nach Zustandsband. */
   function lossByCause(c) {
-    const t = c.t, d0 = Math.floor(t / DAY) * DAY;
-    const byCause = {}, byMachine = [], bySec = {}, byN = {};
+    const t = c.t, d0 = Math.floor(t / DAY) * DAY, k = c.k();
+    // nach einer Nacht wie Leitstand und Analyse: Ursachen = Schichtzeit (Tag − Nachtanteil), die Nacht als eigener Posten
+    const split = lossHead(k).split;
+    const byCause = {}, byMachine = [], bySec = {}, byN = {}, nightBy = {}, nightSec = {}, nightM = [];
     for (const mv of c.mvs()) {
-      const loss = mv.lossEurToday || 0;
-      let causes;
+      let causes, nightLoss = 0;
       if (mv.lossByState) {
-        const ps = mv.plannedStateTimes || {};
-        causes = Object.keys(mv.lossByState).filter(k => k !== 'running' && k !== 'idle' && mv.lossByState[k] > 0.005).map(k => ({ state: k, eur: mv.lossByState[k], sec: ps[k] || 0 }));
+        const ps = mv.plannedStateTimes || {}, raw = S().machines[mv.id], perSec = (mv.rate || 0) / 3600;
+        const kn = split && raw && raw.kn && typeof raw.kn.lossEur === 'number' && raw.kn.lossEurBy ? raw.kn : null;
+        nightLoss = kn ? kn.lossEur : split && typeof mv.lossEurNightToday === 'number' ? mv.lossEurNightToday : 0;
+        causes = [];
+        for (const st of Object.keys(mv.lossByState)) {
+          if (st === 'running' || st === 'idle') continue;
+          const nE = kn ? kn.lossEurBy[st] || 0 : 0, e = mv.lossByState[st] - nE;
+          if (nE > 0.005) { nightBy[st] = (nightBy[st] || 0) + nE; nightSec[st] = (nightSec[st] || 0) + (perSec > 0 ? nE / perSec : 0); }
+          if (e > 0.005) causes.push({ state: st, eur: e, sec: Math.max(0, (ps[st] || 0) - (perSec > 0 ? nE / perSec : 0)) });
+        }
       } else {
         const sec = {}; let tot = 0;
         for (const sg of mv.segments || []) {
@@ -712,20 +750,23 @@
           const w = workBetween(a, b); if (w <= 0) continue;
           sec[sg.state] = (sec[sg.state] || 0) + w; tot += w;
         }
-        causes = Object.keys(sec).map(k => ({ state: k, sec: sec[k], eur: tot > 0 ? loss * sec[k] / tot : 0 }));
+        causes = Object.keys(sec).map(x => ({ state: x, sec: sec[x], eur: tot > 0 ? (mv.lossEurToday || 0) * sec[x] / tot : 0 }));
       }
+      const loss = Math.max(0, (mv.lossEurToday || 0) - nightLoss);
       causes.sort((a, b) => b.eur - a.eur);
       for (const x of causes) { byCause[x.state] = (byCause[x.state] || 0) + x.eur; bySec[x.state] = (bySec[x.state] || 0) + x.sec; byN[x.state] = (byN[x.state] || 0) + 1; }
-      byMachine.push({ mv, loss, causes, lossSec: causes.reduce((s2, x) => s2 + x.sec, 0) });
+      byMachine.push({ mv, loss, causes, lossSec: causes.reduce((s2, x) => s2 + x.sec, 0), night: nightLoss });
+      if (nightLoss >= 0.5) nightM.push({ mv, eur: nightLoss });
     }
     byMachine.sort((a, b) => b.loss - a.loss);
-    const causes = Object.keys(byCause).map(k => ({ state: k, eur: byCause[k], sec: bySec[k], machines: byN[k] })).sort((a, b) => b.eur - a.eur);
-    const total = causes.reduce((s2, x) => s2 + x.eur, 0);
-    // Selbstprüfung: Summe der Ursachen = Stillstandskosten des Werks (±1 €)
-    let kl = null; try { kl = c.k().lossEur; } catch (e) { kl = null; }
-    const check = kl == null || Math.abs(total - kl) <= 1;
-    if (!check && G.console && !lossByCause.warned) { lossByCause.warned = true; console.warn('[ai] Verlust je Ursache ≠ kpis().lossEur', Math.round(total), kl); }
-    return { byMachine, causes, total, check };
+    nightM.sort((a, b) => b.eur - a.eur);
+    const causes = Object.keys(byCause).map(x => ({ state: x, eur: byCause[x], sec: bySec[x], machines: byN[x] })).sort((a, b) => b.eur - a.eur);
+    const nightCauses = Object.keys(nightBy).map(x => ({ state: x, eur: nightBy[x], sec: nightSec[x] })).sort((a, b) => b.eur - a.eur);
+    const total = causes.reduce((s2, x) => s2 + x.eur, 0), nightTotal = nightCauses.reduce((s2, x) => s2 + x.eur, 0);
+    // Selbstprüfung: Ursachen + Nacht = Stillstandskosten des Werks (±1 €)
+    const check = k.lossEur == null || Math.abs(total + nightTotal - k.lossEur) <= 1;
+    if (!check && G.console && !lossByCause.warned) { lossByCause.warned = true; console.warn('[ai] Verlust je Ursache ≠ kpis().lossEur', Math.round(total + nightTotal), k.lossEur); }
+    return { byMachine, causes, total, check, split, nightCauses, nightTotal, nightMachines: nightM };
   }
   // dieselben Bezeichnungen wie die Analyse (Zustandsnamen der Engine)
   const CAUSE_LABEL = { setup: 'Rüsten', firstPiece: 'Erstteilprüfung', toolchange: 'Werkzeugwechsel', waitTool: 'Wartet auf Werkzeug', waitOperator: 'Wartet auf Bediener', starved: 'Wartet auf Material', blocked: 'Ausgang voll', fault: 'Störung' };
@@ -986,20 +1027,21 @@
     const open = c.open(), late = open.filter(o => o.risk === 'spät').sort((x, y) => x.slackSec - y.slackSec), tight = open.filter(o => o.risk === 'knapp').sort((x, y) => x.slackSec - y.slackSec);
     const people = Object.values(S().people).filter(p => p.state !== 'offShift');
     const shName = sh.id ? sh.name : 'Geisterschicht (unbemannt)';
-    const oeeTxt = k.oee != null ? `OEE heute **${pct(k.oee, 1)}** – ${k.oee >= TARGET_OEE ? 'über' : 'unter'} dem Ziel von ${pct(TARGET_OEE)}` : 'noch keine OEE-Bezugszeit heute';
+    const oh = oeeHead(k), lh = lossHead(k);
+    const oeeTxt = oh.v != null ? `${oh.staffed ? 'OEE der Schichten heute' : 'OEE heute'} **${pct(oh.v, 1)}** – ${oh.v >= TARGET_OEE ? 'über' : 'unter'} dem Ziel von ${pct(TARGET_OEE)}${oh.staffed ? ` (ganzer Tag inkl. Geisterschicht ${pct(oh.day, 1)})` : ''}` : 'noch keine OEE-Bezugszeit heute';
     const prodV = prod.length === 1 ? 'produziert' : 'produzieren';
     const runTxt = sh.id ? `${prod.length} von ${mvs.length} Arbeitsplätzen ${prodV}` : prod.length ? `${prod.length} von ${mvs.length} Arbeitsplätzen ${prodV} unbemannt` : 'kein Arbeitsplatz produziert';
     a.eyebrow = `Lage · ${shName} · ${WF.sim.clock()}`;
     a.sev = faults.length ? 'crit' : late.length || waits.some(m => m.sinceSec >= 600) ? 'warn' : 'ok';
     a.head = faults.length ? `Störung an ${listJoin(faults.map(m => m.id))} – ${runTxt}` : late.length ? `${uc1(runTxt)} – ${pl(late.length, 'Termin', 'Termine')} verspätet` : `${uc1(runTxt)}, Termine im Plan`;
-    a.md.push(`${oeeTxt}${staffedTxt(k)}${sh.id ? '' : '; Frühschicht ab ' + dueTxt(sh.endsAt)}.`);
+    a.md.push(`${oeeTxt}${sh.id ? '' : '; Frühschicht ab ' + dueTxt(sh.endsAt)}.`);
     const gl = ghostNightTxt(k);
     if (gl) a.md.push(gl);
     a.stats = [
-      oeeStat(k.oee, sh.id && k.oeeShift != null ? 'Schicht ' + pct(k.oeeShift, 1) : 'Ziel ' + pct(TARGET_OEE)),
+      oeeStat(oh.v, oh.staffed ? 'Tag inkl. Nacht ' + pct(oh.day, 1) : sh.id && k.oeeShift != null ? 'Schicht ' + pct(k.oeeShift, 1) : 'Ziel ' + pct(TARGET_OEE), null, oh.staffed ? 'OEE · Schichten' : null),
       { l: 'Fertige Teile', v: nm(k.goodFinished), s: nm(k.good) + ' Arbeitsgänge gut' },
       { l: 'Termintreue', v: pct(k.onTimePct), s: late.length + ' spät · ' + tight.length + ' knapp', c: late.length ? 'warn' : 'ok' },
-      { l: 'Stillstand', v: eur(k.lossEur), s: 'Kosten heute', c: 'info' },
+      { l: 'Stillstand', v: eur(lh.value), s: lh.split ? 'Schicht · Nacht ' + eur(lh.night) : 'Kosten heute', c: 'info' },
     ];
     a.md.push('');
     for (const m of faults) { const fi = faultInfo(m); a.md.push(`- **Störung ${mName(m.id)}** seit ${clk(m.since)}: ${m.fault.code} ${m.fault.text} – ${fi.who}.`); }
@@ -1009,7 +1051,7 @@
     a.md.push(...groupNoStaff(waitsNS));
     if (setups.length) a.md.push(`- ${setups.length === 1 ? 'Rüsten/Prüfen' : setups.length + ' Arbeitsplätze rüsten/prüfen'}: ${setups.map(m => `${mName(m.id)} (${msl(m)}${m.order ? ', ' + m.order.id : ''})`).join('; ')}.`);
     if (idle.length) {
-      const idleTxt = (m) => `${mName(m.id)} – ${lc1(String(m.cause).replace(/^Frei\s*[–-]\s*/i, ''))}`;
+      const idleTxt = (m) => `${mName(m.id)} – ${String(m.cause).replace(/^Frei\s*[–-]\s*/i, '')}`;
       a.md.push(idle.length <= 2 ? `- Ohne laufenden Auftrag: ${idle.map(idleTxt).join('; ')}.` : `- Ohne laufenden Auftrag: ${idle.map(m => m.id).join(', ')} – als Nächstes ${idle.filter(m => /ca\. \d/.test(m.cause)).slice(0, 2).map(idleTxt).join('; ') || 'Vorgänger noch in Arbeit bzw. nichts eingeplant'}.`);
     }
     if (late.length || tight.length) {
@@ -1102,7 +1144,7 @@
     const push = (x) => { if (!out.some(y => y.key === x.key)) out.push(x); };
     for (const m of mvs.filter(x => x.state === 'fault')) {
       const fi = faultInfo(m), hit = affectedOrders(c, m.id).filter(x => x.o.risk !== 'ok');
-      push({ key: 'fault:' + m.id, rank: 0, sev: 'crit', entity: { kind: 'machine', id: m.id },
+      push({ key: 'fault:' + m.id, rank: 0, sev: 'crit', t: fi.endT, entity: { kind: 'machine', id: m.id },
         text: `${m.id}: Störung ${m.fault.code} beheben – ${fi.working ? 'Reparatur läuft (' + sn(fi.person.name) + ')' : fi.person ? sn(fi.person.name) + ' ist unterwegs' : 'Instandhaltung hinschicken'}, Ende ca. ${clk(fi.endT)}${hit.length ? '; betroffen: ' + listJoin(hit.slice(0, 2).map(x => x.o.id)) : ''}.`,
         short: `Störung an ${m.id} beheben.`, actions: m.fault.manual ? [{ label: `Störung an ${m.id} beheben (Demo)`, desc: 'Beendet die simulierte Störung sofort.', action: { type: 'repair', machineId: m.id }, icon: 'wrench' }] : [] });
     }
@@ -1373,17 +1415,18 @@
       if (mv.inCap > 0 || mv.outCap > 0) a.md.push(`- Puffer: ${mv.inCap > 0 ? `Eingang ${mv.input.length}/${mv.inCap} Behälter (${stk(qty(mv.input))}), ` : ''}Ausgang ${mv.output.length}/${mv.outCap}${mv.inCap > 0 ? '' : ' Behälter'} (${stk(qty(mv.output))}).`);
       if (mv.barStockM != null) a.md.push(`- Stangenmagazin: ${nm(mv.barStockM, 1)} m ${mv.barMaterial || ''} (nachgeladen wird ab ${nm(mv.barReorderM, 1)} m).`);
       if (mv.queue && mv.queue.length) a.md.push(`- Als Nächstes: ${mv.queue.slice(0, 2).map(q => `${q.orderId} AG ${q.seq} „${q.op}“ (${q.why})`).join('; ')}.`);
-      const todayTxt = `- Heute: OEE ${pct(mv.oeeToday && mv.oeeToday.oee, oeeDec(mv.oeeToday && mv.oeeToday.oee))}, ${pl(mv.goodToday, 'Gutteil', 'Gutteile')}, ${nm(mv.scrapToday)} Ausschuss, Stillstandskosten ${eur(mv.lossEurToday)} (Satz ${eur(mv.rate)}/h).`;
+      const moe = machineOee(mv, c.k()), lrow = lossByCause(c).byMachine.find(x => x.mv.id === id) || { loss: mv.lossEurToday || 0, night: 0 };
+      const todayTxt = `- Heute: OEE${moe.staffed ? ' (Schichten)' : ''} ${pct(moe.oee, oeeDec(moe.oee))}, ${pl(mv.goodToday, 'Gutteil', 'Gutteile')}, ${nm(mv.scrapToday)} Ausschuss, Stillstandskosten ${eur(lrow.loss)}${lrow.night >= 0.5 ? ' zzgl. ' + eur(lrow.night) + ' nachts' : ''} (Satz ${eur(mv.rate)}/h).`;
       if (!focus || focus === 'full') {
         // Kennzahlen-Leiste statt Textzeile (im kopierten Text bleibt die Zeile erhalten)
-        const oee = mv.oeeToday && mv.oeeToday.oee;
+        const oee = moe.oee;
         a.stats = [
           (() => { const L = msl(mv), short = L === 'Werkzeugwechsel' ? 'WZ-Wechsel' : L.length > 13 && L.indexOf(' ') > 0 ? L.slice(0, L.indexOf(' ')) : L, rest = short !== L && short !== 'WZ-Wechsel' ? L.slice(short.length + 1) + ' · ' : '';
             return { l: 'Status', v: short, s: rest + 'seit ' + durR(mv.sinceSec), c: mv.state === 'fault' ? 'crit' : WAIT[mv.state] ? 'warn' : mv.state === 'running' ? 'ok' : 'info' }; })(),
           o ? { l: 'AG ' + o.seq + ' · Teile', v: nm(mv.partsDone) + '/' + nm(mv.partsTotal), s: mv.etaOpEnd ? 'fertig ca. ' + tc(mv.etaOpEnd) : o.id }
             : mv.queue && mv.queue.length ? { l: 'Als Nächstes', v: mv.queue[0].orderId, s: (mv.queue[0].why || 'AG ' + mv.queue[0].seq).replace(/^Teile\s+/, '') } : { l: 'Auftrag', v: '–', s: 'nichts eingeplant' },
-          oeeStat(oee, pl(mv.goodToday, 'Gutteil', 'Gutteile') + (mv.scrapToday ? ' · ' + nm(mv.scrapToday) + ' Ausschuss' : ''), oeeDec(oee)),
-          { l: 'Stillstand', v: eur(mv.lossEurToday), s: 'heute · ' + eur(mv.rate) + '/h', c: 'info' },
+          oeeStat(oee, pl(mv.goodToday, 'Gutteil', 'Gutteile') + (mv.scrapToday ? ' · ' + nm(mv.scrapToday) + ' Ausschuss' : ''), oeeDec(oee), moe.staffed ? 'OEE · Schichten' : null),
+          { l: 'Stillstand', v: eur(lrow.loss), s: lrow.night >= 0.5 ? 'zzgl. ' + eur(lrow.night) + ' nachts' : 'heute · ' + eur(mv.rate) + '/h', c: 'info' },
         ];
         SLOT(a, 'today', todayTxt, null);
       } else if (focus !== 'eta') a.md.push(todayTxt);
@@ -1977,20 +2020,19 @@
     const a = A('loss'), k = c.k();
     const L = lossByCause(c);
     const top = L.byMachine.filter(x => x.loss > 0).slice(0, 4);
+    const lh = lossHead(k);
     a.eyebrow = 'Kosten · heute'; a.sev = 'warn';
-    a.head = `Heute bisher ${eur(k.lossEur)} Stillstandskosten`;
+    a.head = lh.split ? `Heute ${eur(lh.value)} Stillstandskosten in der Schichtzeit – zzgl. ${eur(lh.night)} in der Nacht` : `Heute bisher ${eur(k.lossEur)} Stillstandskosten`;
     a.md.push('Maschinenstundensatz × Zeit, in der ein Auftrag eingeplant ist, die Maschine aber nicht produziert – Schichtzeit ohne Pausen, autonome Maschinen auch in der Geisterschicht. Dieselbe Aufteilung wie in der Analyse.');
-    const night = k.lossEurNightToday || 0;
-    if (night >= 1) a.md.push('', `Davon **${eur(night)} in der Geisterschicht** (autonome Maschinen standen nachts) und ${eur(k.lossEurStaffedToday != null ? k.lossEurStaffedToday : Math.max(0, k.lossEur - night))} in den bemannten Schichten.`);
     a.stats = [
-      { l: 'Stillstand', v: eur(k.lossEur), s: night >= 1 ? 'davon ' + eur(night) + ' nachts' : 'heute', c: 'warn' },
+      { l: lh.split ? 'Stillstand · Schicht' : 'Stillstand', v: eur(lh.value), s: lh.split ? 'zzgl. Nacht ' + eur(lh.night) : 'heute', c: 'warn' },
       { l: 'Werkzeuge', v: eur(k.toolCostToday), s: pl(k.toolChangesToday || 0, 'Wechsel', 'Wechsel') },
       { l: 'Ausschuss', v: nm(k.scrap) + ' Stk', s: 'FPY ' + pct(k.fpy, 1), c: k.scrap ? 'warn' : 'ok' },
       { l: 'Energie', v: nm(k.energyKwh, 0) + ' kWh', s: 'jetzt ' + nm(k.powerKw, 0) + ' kW' },
     ];
     const stCol = (st) => (WF.STATE[st] || {}).color || 'var(--st-wait)';
     if (L.causes.length) {
-      a.md.push('', '### Nach Ursache');
+      a.md.push('', lh.split ? '### Nach Ursache (Schichtzeit)' : '### Nach Ursache');
       const cs = L.causes.slice(0, 5).filter(x => x.eur >= 1);
       SLOT(a, 'bars1', cs.map(x => `- **${causeLabel(x.state)}**: ca. ${eur(x.eur)}`).join('\n'),
         { rows: cs.map(x => ({ label: causeLabel(x.state), v: x.eur, vTxt: eur(x.eur), sub: `${durR(x.sec)} an ${pl(x.machines, 'Arbeitsplatz', 'Arbeitsplätzen')} · ${pct(L.total > 0 ? x.eur / L.total : 0)} der Stillstandskosten`, c: stCol(x.state) })) });
@@ -2001,10 +2043,15 @@
       SLOT(a, 'bars2', top.map(x => `- **${mName(x.mv.id)}**: ${eur(x.loss)} (${eur(x.mv.rate)}/h) – ${txt(x)}`).join('\n'),
         { rows: top.map(x => ({ ent: { kind: 'machine', id: x.mv.id }, label: station(x.mv.id).short, v: x.loss, vTxt: eur(x.loss), sub: txt(x) + ' · ' + eur(x.mv.rate) + '/h', c: x.causes.length ? stCol(x.causes[0].state) : 'var(--st-wait)' })) });
     }
+    if (lh.split && L.nightMachines.length) {
+      a.md.push('', '### Nacht (Geisterschicht)');
+      a.md.push(`${eur(lh.night)} – ${listJoin(L.nightMachines.slice(0, 3).map(x => `${mName(x.mv.id)} ${eur(x.eur)}`))}${L.nightCauses[0] ? `; vor allem ${causeLabel(L.nightCauses[0].state)} (${durR(L.nightCauses[0].sec)})` : ''}. Autonome Maschinen, die nachts stehen, sind ungenutzte Kapazität – getrennt von der Schichtzeit wie im Leitstand.`);
+    }
     const nowLoss = c.mvs().filter(m => m.state !== 'running' && m.state !== 'idle' && WF.sim.shift().id && !WF.sim.shift().inBreak);
     if (nowLoss.length) a.md.push('', `Gerade kostet Stillstand ca. ${eur(nowLoss.reduce((s, m) => s + m.rate, 0))}/h: ${nowLoss.map(m => `${m.id} ${msl(m)}`).join(', ')}.`);
     const main = L.causes[0];
-    a.md.push('', '> **Empfehlung:** ' + (main ? `Größter Hebel ist **${causeLabel(main.state)}** (ca. ${eur(main.eur)}). ${causeAdvice(main.state, k)}` : 'Bisher kaum Stillstand – weiter so.'));
+    const nMain = L.nightCauses[0];
+    a.md.push('', '> **Empfehlung:** ' + (main ? `Größter Hebel ist **${causeLabel(main.state)}** (ca. ${eur(main.eur)}). ${CAUSE_ADVICE[main.state] || ''}${lh.split && nMain && nMain.eur > main.eur * 0.5 ? ' Nachts: ' + causeAdvice(nMain.state, k) : ''}` : lh.split && nMain ? causeAdvice(nMain.state, k) : 'Bisher kaum Stillstand – weiter so.'));
     a.sources = ['Stillstandskosten je Maschine und Zustand (Engine, wie Analyse)', 'Planzeit je Zustand', 'Kennzahlen heute', srcStand()];
     a.followups = top.length ? [`Was macht ${top[0].mv.id} gerade?`, 'Wie hoch ist der Energieverbrauch?', 'Was ist der Engpass?'] : ['Wie läuft die Schicht?'];
     return done(a);
@@ -2036,8 +2083,8 @@
     a.entity = { kind: 'machine', id };
     const row = lossByCause(c).byMachine.find(x => x.mv.id === id);
     const want = Object.keys(CAUSE_LABEL).find(k => q.indexOf(norm(CAUSE_LABEL[k]).split(' ').pop()) >= 0) || (/material/.test(q) ? 'starved' : /bediener/.test(q) ? 'waitOperator' : /werkzeug/.test(q) && /wartet/.test(q) ? 'waitTool' : /stoerung/.test(q) ? 'fault' : /erstteil/.test(q) ? 'firstPiece' : null);
-    if (!row || !(row.loss > 0)) { a.md.push(`**${mName(id)}: heute keine Stillstandskosten** – die Maschine hat in der Schichtzeit produziert oder hatte keinen Auftrag.`); a.sources = ['Stillstandskosten je Maschine', srcStand()]; return done(a); }
-    a.md.push(`**${mName(id)}: heute ${eur(row.loss)} Stillstandskosten** – ${durR(row.lossSec)} mit Auftrag ohne Produktion in der Planzeit${mv.loading === 'auto' ? ' (Schicht und Geisterschicht)' : ' (Schichtzeit)'}, Satz ${eur(mv.rate)}/h.`, '');
+    if (!row || !(row.loss > 0)) { a.md.push(row && row.night >= 0.5 ? `**${mName(id)}: in der Schichtzeit keine Stillstandskosten** – nur nachts in der Geisterschicht ${eur(row.night)}.` : `**${mName(id)}: heute keine Stillstandskosten** – die Maschine hat in der Schichtzeit produziert oder hatte keinen Auftrag.`); a.sources = ['Stillstandskosten je Maschine', srcStand()]; return done(a); }
+    a.md.push(`**${mName(id)}: heute ${eur(row.loss)} Stillstandskosten${row.night >= 0.5 ? ' in der Schichtzeit' : ''}** – ${durR(row.lossSec)} mit Auftrag ohne Produktion, Satz ${eur(mv.rate)}/h.${row.night >= 0.5 ? ` Zusätzlich ${eur(row.night)} in der Nacht (Geisterschicht).` : ''}`, '');
     for (const x of row.causes.filter(y => y.eur >= 1 || y.sec >= 300)) a.md.push(`- **${causeLabel(x.state)}**: ca. ${eur(x.eur)} (${durR(x.sec)})`);
     if (want && !row.causes.some(x => x.state === want)) {
       const allDay = (mv.stateTimes && mv.stateTimes[want]) || 0;
@@ -2298,7 +2345,8 @@
     const prod = mvs.filter(m => m.state === 'running').length;
     const ss = S().shiftStats || {};
     a.md.push('### Lage');
-    a.md.push(`- ${prod} von ${mvs.length} Arbeitsplätzen ${prod === 1 ? 'produziert' : 'produzieren'}; OEE ${sh.id ? 'Schicht ' + pct(k.oeeShift, 1) + ', ' : ''}heute ${pct(k.oee, 1)}.`);
+    const ohH = oeeHead(k);
+    a.md.push(`- ${prod} von ${mvs.length} Arbeitsplätzen ${prod === 1 ? 'produziert' : 'produzieren'}; OEE ${sh.id ? 'Schicht ' + pct(k.oeeShift, 1) + ', ' : ''}heute ${ohH.staffed ? '(Schichten) ' : ''}${pct(ohH.v, 1)}.`);
     if (sh.id) a.md.push(`- Heute ${nm(k.goodFinished)} fertige Teile, ${nm(k.shippedToday || 0)} versandt; in dieser Schicht ${nm(ss.good || 0)} Arbeitsgänge gut und ${nm(ss.scrap || 0)} Ausschuss.`);
     // Offene Punkte
     const pts = [];
@@ -2313,7 +2361,8 @@
     a.md.push('', '### Störungen und Wartezeiten');
     if (pts.length) for (const p of pts) a.md.push('- ' + p); else a.md.push('- Keine Störung, kein Arbeitsplatz wartet länger als 5 min.');
     // Termine
-    const ord = c.open().filter(o => o.risk !== 'ok' && o.eta != null).sort((x, y) => x.slackSec - y.slackSec);
+    // nur Aufträge, die über das Schichtende hinaus laufen – was vorher fertig wird, betrifft die nächste Schicht nicht
+    const ord = c.open().filter(o => o.risk !== 'ok' && o.eta != null && o.eta >= W.from).sort((x, y) => x.slackSec - y.slackSec);
     a.md.push('', '### Termine');
     if (ord.length) for (const o of ord.slice(0, 5)) { const w = o.risk !== 'ok' ? whyShort(c, o) : ''; a.md.push(`- **${o.id}** ${o.part.name} (${custShort(o.customer)}): Prognose ${dueTxt(o.eta)}${etaTag(o)}, Termin ${dueTxt(o.due)} – ${o.slackSec >= 0 ? 'Puffer ' + dur0(o.slackSec) : dur0(o.slackSec) + ' Verzug'}${w ? '; Ursache: ' + w : o.bottleneck ? '; begrenzt durch ' + o.bottleneck.split(' (')[0] : ''}.`); }
     else a.md.push('- Alle offenen Aufträge im Plan.');
@@ -2331,14 +2380,14 @@
     a.md.push('', `### Werkzeugwechsel ${W.next} (${tc(W.from)}–${clk(W.to)})`);
     for (const g of tRows.slice(0, 7)) a.md.push(`- ca. ${tc(g.t)} ${mName(g.machine)}: ${g.kind === 'est' ? (g.maybeIdx ? 'Wenden/Wechsel' : 'Werkzeugwechsel') : chgVerb(g)} ${g.tools.map(x => toolShort(x.name)).join(' + ')}${g.kind === 'plan' ? (g.manual ? ' (vorbeugend beauftragt)' : ' (angekündigt)') : ' (voraussichtlich)'}${g.index ? ' – Bediener:in' : ''}`);
     if (tRows.length > 7) a.md.push(`- … und ${tRows.length - 7} weitere.`);
-    if (tRows.length) a.md.push(`- Zusammen ${pl(tRows.length, 'Wechsel', 'Wechsel')}${nIdxH ? `, davon ${nIdxH}× Schneide wenden durch die Bediener:in` : ''} – Einrichter:in für die übrigen einplanen.`);
+    if (tRows.length) a.md.push(`- Zusammen ${pl(tRows.length, 'Wechsel', 'Wechsel')}${nIdxH ? `, davon ${nIdxH}× Schneide wenden durch die Bediener:in` : ''}${tRows.length > nIdxH ? ` – Einrichter:in für ${nIdxH ? 'die übrigen' : 'die Wechsel'} einplanen` : ''}.`);
     else a.md.push('- Kein Wechsel absehbar – die Standzeiten reichen für die laufenden Arbeitsgänge.');
     const ghost = c.notifs().filter(n => String(n.key).indexOf('ghost:') === 0 && !(n.ghost && n.ghost.stopT < t));
     for (const n of ghost) a.md.push(`- ${n.title}: ${trimTxt(n.suggestion, 150)}`);
     // Material
     a.md.push('', '### Material');
     const low = Object.values(S().materials).filter(mt => mt.onHand < mt.min);
-    const pur = openPurchases().filter(p => p.etaT <= W.to + 4 * 3600);
+    const pur = openPurchases().filter(p => p.etaT >= W.from && p.etaT <= W.to + 4 * 3600);
     for (const mt of low) a.md.push(`- ${mt.name}: ${matQty(mt, mt.onHand)} < Mindestbestand ${matQty(mt, mt.min)}${mt.onOrder ? ' – ' + matQty(mt, mt.onOrder) + ' bestellt' : ' – **nicht bestellt**'}.`);
     for (const p of pur) a.md.push(`- Lieferung erwartet: ${matQty(S().materials[p.materialId], p.qty)} ${S().materials[p.materialId].name} ca. ${dueTxt(p.etaT)} (${p.id}).`);
     const bars = mvs.filter(m => m.barStockM != null && m.order && m.barStockM < (m.barReorderM || 0) * 1.5);
@@ -2368,7 +2417,7 @@
     a.eyebrow = `Schichtübergabe · ${W.cur} → ${W.next}`;
     a.head = `Übergabe an die ${W.next}: ${todo.length ? pl(todo.length, 'offener Punkt', 'offene Punkte') : 'keine offenen Punkte'}${ord.length ? ', ' + pl(ord.length, 'Termin', 'Termine') + ' im Blick' : ''}`;
     a.sev = mvs.some(m => m.state === 'fault') ? 'crit' : todo.length || ord.length ? 'warn' : 'ok';
-    a.stats = [oeeStat(k.oee, sh.id && k.oeeShift != null ? 'Schicht ' + pct(k.oeeShift, 1) : 'Ziel ' + pct(TARGET_OEE)), { l: 'Fertige Teile heute', v: nm(k.goodFinished), s: `${nm(ss.good || 0)} Arbeitsgänge gut · ${nm(k.shippedToday || 0)} versandt` }, { l: 'Termine', v: ord.length ? nm(ord.length) : '0', s: ord.length ? 'knapp oder spät' : 'alle im Plan', c: ord.some(o => o.slackSec < 0) ? 'crit' : ord.length ? 'warn' : 'ok' }];
+    a.stats = [oeeStat(ohH.v, sh.id && k.oeeShift != null ? 'Schicht ' + pct(k.oeeShift, 1) : 'Ziel ' + pct(TARGET_OEE), null, ohH.staffed ? 'OEE · Schichten' : null), { l: 'Fertige Teile heute', v: nm(k.goodFinished), s: `${nm(ss.good || 0)} Arbeitsgänge gut · ${nm(k.shippedToday || 0)} versandt` }, { l: 'Termine', v: ord.length ? nm(ord.length) : '0', s: ord.length ? 'knapp oder spät' : 'alle im Plan', c: ord.some(o => o.slackSec < 0) ? 'crit' : ord.length ? 'warn' : 'ok' }];
     a.sources = ['Maschinenstatus', 'Meldungen', 'Prognose', 'Werkzeugplanung', 'Material & Bestellungen', 'Schichtplan', srcStand()];
     a.followups = ['Welche Aufträge sind gefährdet und warum?', 'Welche Werkzeugwechsel stehen in der Schicht an?', 'Was ist der Engpass?'];
     a.copyable = true;
@@ -2498,16 +2547,18 @@
     // Richtung: OEE „beste/schlechteste“, alle anderen Kennzahlen absteigend (höchste zuerst) – außer nach dem unteren Ende gefragt
     const lowEnd = /wenigst|geringst|niedrigst|kleinst/.test(q);
     const best = metric === 'oee' ? /\bbest|hoechst|groesst/.test(q) && !/schlecht|niedrig|wenigst|geringst/.test(q) : !lowEnd;
-    const L = lossByCause(c);
+    const L = lossByCause(c), kk = c.k();
+    // gleiche Werte wie Analyse/Leitstand: OEE und Stillstand nach einer Nacht über die besetzten Schichten
     let rows = c.mvs().map(mv => {
-      const oe = mv.oeeToday || {};
-      return { mv, v: metric === 'oee' ? oe.oee : metric === 'loss' ? mv.lossEurToday || 0 : metric === 'energy' ? mv.energyKwhToday || 0 : mv.scrapToday || 0, oe };
+      const oe = machineOee(mv, kk), lr = L.byMachine.find(x => x.mv.id === mv.id);
+      return { mv, v: metric === 'oee' ? oe.oee : metric === 'loss' ? (lr ? lr.loss : mv.lossEurToday || 0) : metric === 'energy' ? mv.energyKwhToday || 0 : mv.scrapToday || 0, oe };
     }).filter(r => r.v != null);
     const desc = metric === 'oee' ? best : !lowEnd;
     rows.sort((x, y) => (desc ? y.v - x.v : x.v - y.v));
     if (metric === 'oee' && !best) rows = rows.filter(r => r.oe.plannedSec > 0 || r.v > 0);
     const fmtV = (v) => (metric === 'oee' ? pct(v, oeeDec(v)) : metric === 'loss' ? eur(v) : metric === 'energy' ? nm(v, 0) + ' kWh' : stk(v));
-    const what = { oee: 'OEE heute', loss: 'Stillstandskosten heute', energy: 'Energieverbrauch heute', scrap: 'Ausschuss heute' }[metric];
+    const stf = metric === 'oee' ? oeeHead(kk).staffed : metric === 'loss' ? L.split : false;
+    const what = { oee: stf ? 'OEE heute (Schichten)' : 'OEE heute', loss: stf ? 'Stillstandskosten heute (Schichtzeit)' : 'Stillstandskosten heute', energy: 'Energieverbrauch heute', scrap: 'Ausschuss heute' }[metric];
     a.eyebrow = 'Rangliste · ' + what;
     const top = rows[0];
     if (!top) { a.head = 'Keine Werte für heute'; a.md.push('Heute gab es noch keine Planzeit.'); return done(a); }
@@ -2518,7 +2569,7 @@
     }
     const ADJ = { oee: best ? 'Beste OEE' : 'Schlechteste OEE', loss: lowEnd ? 'Geringste Stillstandskosten' : 'Höchste Stillstandskosten', energy: lowEnd ? 'Geringster Energieverbrauch' : 'Höchster Energieverbrauch', scrap: lowEnd ? 'Am wenigsten Ausschuss' : 'Am meisten Ausschuss' };
     a.sev = metric === 'oee' ? (top.v >= TARGET_OEE ? 'ok' : 'warn') : metric === 'energy' ? 'info' : lowEnd ? 'ok' : 'warn';
-    a.head = `${ADJ[metric]} heute: ${mName(top.mv.id)} mit ${fmtV(top.v)}`;
+    a.head = `${ADJ[metric]} heute${stf ? (metric === 'oee' ? ' (Schichten)' : ' (Schichtzeit)') : ''}: ${mName(top.mv.id)} mit ${fmtV(top.v)}`;
     const row = L.byMachine.find(x => x.mv.id === top.mv.id);
     if (metric === 'oee') {
       const oe = top.oe, comp = [['Verfügbarkeit', oe.availability], ['Leistung', oe.performance], ['Qualität', oe.quality]].filter(x => x[1] != null);
@@ -2628,6 +2679,9 @@
       const fops = (c.fc().orders[o.id] || {}).ops || [];
       o.ops.forEach((op, i) => { if (op.station === 'EXT' && !op.complete) rows.push({ o, op, fe: fops[i] || null }); });
     }
+    // genannter Partner („die Härterei“, „Hartchrom“, „Eloxal“) – sonst alle Fremdbearbeitungen
+    const PF = [[/haerter/, /härter/i], [/chrom/, /chrom/i], [/eloxal/, /eloxal/i], [/galvan|beschicht/, /galvan|beschicht/i]].find(x => x[0].test(q));
+    if (PF) { const f = rows.filter(r => PF[1].test(String(r.op.ext && r.op.ext.partner || '') + ' ' + String(r.op.ext && r.op.ext.process || ''))); if (f.length) rows.splice(0, rows.length, ...f); }
     const m = /(\d+|ein|einen|zwei|drei)\s*(tag|tage|tagen)/.exec(q);
     const days = m ? (NUMW[m[1]] || Number(m[1]) || 1) : /tag spaeter|tag verspaet/.test(q) ? 1 : 0;
     const delay = days ? days * DAY : E && E.hours && /spaeter|verzoeger|verspaet/.test(q) ? E.hours * 3600 : 0;
@@ -2787,15 +2841,15 @@
     return done(a);
   }
   function ansOee(c) {
-    const a = A('oee'), k = c.k(), L = lossByCause(c);
-    a.eyebrow = 'Kennzahl · OEE heute';
-    if (k.oee == null) { a.head = 'Heute noch keine OEE'; a.md.push('Ohne Planzeit (Nacht, Wochenende) gibt es keine Bezugszeit.'); return done(a); }
-    a.sev = k.oee >= TARGET_OEE ? 'ok' : 'warn';
-    a.head = `OEE heute ${pct(k.oee, 1)} – ${k.oee >= TARGET_OEE ? 'über' : 'unter'} dem Ziel von ${pct(TARGET_OEE)}`;
-    const comp = [['Verfügbarkeit', k.availability], ['Leistung', k.performance], ['Qualität', k.quality]];
-    const low = comp.filter(x => x[1] != null).sort((x, y) => x[1] - y[1])[0];
-    a.md.push(`${comp.map(x => x[0] + ' ' + pct(x[1], 1)).join(' × ')} = ${pct(k.oee, 1)}. Größter Verlust: **${low[0]}** (${pct(1 - low[1], 1)} gehen dort verloren).`);
-    a.stats = [{ l: 'OEE', v: pct(k.oee, 1), s: 'Ziel ' + pct(TARGET_OEE), c: a.sev }].concat(comp.map(x => ({ l: x[0], v: pct(x[1], 1), s: x === low ? 'größter Verlust' : '', c: x === low ? 'warn' : '' })));
+    const a = A('oee'), k = c.k(), L = lossByCause(c), oh = oeeHead(k);
+    a.eyebrow = 'Kennzahl · ' + oh.label;
+    if (oh.v == null) { a.head = 'Heute noch keine OEE'; a.md.push('Ohne Planzeit (Nacht, Wochenende) gibt es keine Bezugszeit.'); return done(a); }
+    a.sev = oh.v >= TARGET_OEE ? 'ok' : 'warn';
+    a.head = `${oh.staffed ? 'OEE der Schichten heute' : 'OEE heute'} ${pct(oh.v, 1)} – ${oh.v >= TARGET_OEE ? 'über' : 'unter'} dem Ziel von ${pct(TARGET_OEE)}`;
+    const comp = [['Verfügbarkeit', oh.a], ['Leistung', oh.p], ['Qualität', oh.q]].filter(x => x[1] != null);
+    const low = comp.slice().sort((x, y) => x[1] - y[1])[0];
+    a.md.push(`${comp.map(x => x[0] + ' ' + pct(x[1], 1)).join(' × ')} = ${pct(oh.v, 1)}.${low ? ` Größter Verlust: **${low[0]}** (${pct(1 - low[1], 1)} gehen dort verloren).` : ''}${oh.staffed ? ` Ganzer Tag inkl. Geisterschicht ${pct(oh.day, 1)} – die Nacht zählt getrennt wie im Leitstand.` : ''}`);
+    a.stats = [{ l: oh.staffed ? 'OEE · Schichten' : 'OEE', v: pct(oh.v, 1), s: 'Ziel ' + pct(TARGET_OEE), c: a.sev }].concat(comp.map(x => ({ l: x[0], v: pct(x[1], 1), s: x === low ? 'größter Verlust' : '', c: x === low ? 'warn' : '' })));
     if (L.causes.length) a.md.push('', `Verfügbarkeit kosten vor allem: ${L.causes.slice(0, 3).map(x => `${causeLabel(x.state)} ${durR(x.sec)}`).join(', ')}.`);
     a.md.push('', '> **Empfehlung:** ' + (L.causes[0] ? `Größter Hebel ${causeLabel(L.causes[0].state)}: ${CAUSE_ADVICE[L.causes[0].state]}` : 'Keine Maßnahme nötig.'));
     a.sources = ['Kennzahlen heute (Verfügbarkeit × Leistung × Qualität)', 'Zustandsband', srcStand()];
@@ -2875,28 +2929,35 @@
     a.followups = ['Was wird bis Schichtende noch fertig?', 'Welche Aufträge werden heute ausgeliefert?'];
     return done(a);
   }
-  /** Versand heute: ausgeliefert (Spedition), fertig und wartet auf Abholung, heute fällig */
+  /** Versand heute – dieselbe Zählung wie kpis().shippedToday (Teile, die heute in den Versand gingen), je Auftrag;
+      dazu Abholung durch die Spedition (Ereignis shipOut) und was heute noch fällig ist */
   function ansShip(c) {
     const a = A('ship'), t = c.t, d0 = Math.floor(t / DAY) * DAY, k = c.k();
-    const ev = (S().events || []).filter(e => e.type === 'shipOut' && e.t >= d0 && e.data);
     const by = {};
-    for (const e of ev) { const id = e.data.orderId; if (!id) continue; const g = by[id] || (by[id] = { id, qty: 0, t: e.t }); g.qty += e.data.qty || 0; g.t = Math.max(g.t, e.t); }
-    const shipped = Object.values(by).sort((x, y) => x.t - y.t);
-    const ready = c.ovs().filter(o => o.status === 'fertig' && o.containers.some(x => x.state !== 'shipped' && x.state !== 'scrap') && !by[o.id]);
+    for (const x of Object.values(S().containers || {})) {
+      if (x.state !== 'shipped' || x.kind === 'scrap') continue;
+      const tt = x.readyT != null ? x.readyT : x.createdT; if (!(tt >= d0)) continue;
+      const g = by[x.orderId] || (by[x.orderId] = { id: x.orderId, qty: 0, t: tt }); g.qty += x.qty || 0; g.t = Math.max(g.t, tt);
+    }
+    const out = {};
+    for (const e of (S().events || [])) if (e.type === 'shipOut' && e.t >= d0 && e.data && e.data.orderId) out[e.data.orderId] = e.t;
+    const rows = Object.values(by).sort((x, y) => x.t - y.t), sum = rows.reduce((s2, x) => s2 + x.qty, 0);
     const due = c.open().filter(o => o.due >= d0 && o.due < d0 + DAY).sort((x, y) => x.due - y.due);
     a.eyebrow = 'Versand · heute';
     a.sev = due.some(o => o.slackSec < 0) ? 'warn' : 'ok';
-    a.head = shipped.length ? `Heute ${pl(shipped.length, 'Auftrag', 'Aufträge')} ausgeliefert – ${stk(shipped.reduce((s2, x) => s2 + x.qty, 0))}` : 'Heute noch nichts ausgeliefert';
-    if (ready.length) a.head += `, ${ready.length} ${ready.length === 1 ? 'wartet' : 'warten'} auf Abholung`;
-    a.md.push(`Die Spedition holt ca. 2 h nach Fertigstellung ab (Lieferfenster 06–20 Uhr); ${nm(k.shippedToday || 0)} Teile heute versandt.`, '');
-    for (const x of shipped) { const o = c.ov(x.id); a.md.push(`- **${x.id}** ${o ? o.part.name + ' (' + custShort(o.customer) + ')' : ''}: ${stk(x.qty)} um ${clk(x.t)} ausgeliefert${o && o.onTime === false ? ' – nach dem Termin' : ''}.`); }
-    for (const o of ready) a.md.push(`- **${o.id}** ${o.part.name} (${custShort(o.customer)}): fertig ${dueTxt(o.doneT)} – wartet auf Abholung.`);
+    a.head = rows.length ? `Heute ${nm(k.shippedToday != null ? k.shippedToday : sum)} Teile versandt – ${pl(rows.length, 'Auftrag', 'Aufträge')}` : 'Heute noch nichts versandt';
+    a.md.push('Versandt = Behälter, die heute in den Versand gingen (gleiche Zahl wie „versandt“ im Leitstand); die Spedition holt ca. 2 h später ab (Lieferfenster 06–20 Uhr).', '');
+    for (const x of rows) {
+      const o = c.ov(x.id), part = o && o.status !== 'fertig';
+      a.md.push(`- **${x.id}** ${o ? o.part.name + ' (' + custShort(o.customer) + ')' : ''}: ${stk(x.qty)} um ${clk(x.t)}${out[x.id] ? ', abgeholt ' + clk(out[x.id]) : ', wartet auf Abholung'}${part ? ` – Teillieferung (${nm(o.shippedQty)}/${nm(o.qty)} gesamt)` : ''}.`);
+    }
     if (due.length) a.md.push(`- Heute noch fällig: ${due.map(o => `${o.id} Termin ${clk(o.due)}, Prognose ${dueTxt(o.eta)}${etaTag(o)} (${slackTxt(o.slackSec)})`).join('; ')}.`);
-    if (!shipped.length && !ready.length && !due.length) a.md.push('- Heute ist kein Auftrag fällig und keiner fertig geworden.');
+    if (!rows.length && !due.length) a.md.push('- Heute ist kein Auftrag fällig und noch nichts in den Versand gegangen.');
+    a.stats = [{ l: 'Versandt', v: nm(k.shippedToday != null ? k.shippedToday : sum), s: 'Teile heute' }, { l: 'Aufträge', v: nm(rows.length), s: rows.filter(x => { const o = c.ov(x.id); return o && o.status !== 'fertig'; }).length + ' als Teillieferung' }, { l: 'Heute fällig', v: nm(due.length), s: due.some(o => o.slackSec < 0) ? 'davon verspätet' : 'offen', c: due.some(o => o.slackSec < 0) ? 'warn' : '' }];
     const lateDue = due.filter(o => o.slackSec < 0);
     a.md.push('', '> **Empfehlung:** ' + (lateDue.length ? `${lateDue[0].id}: ${adviceText(c, lateDue[0]).text}` : due.length ? 'Fällige Aufträge halten – Versandpapiere vorbereiten.' : 'Keine Maßnahme nötig.'));
-    a.sources = ['Versand-Ereignisse heute', 'Aufträge und Liefertermine', srcStand()];
-    a.followups = ['Welche Aufträge sind morgen fällig?', 'Welche Aufträge sind gefährdet und warum?'];
+    a.sources = ['Behälter im Versand heute', 'Spedition (Abholung)', 'Aufträge und Liefertermine', srcStand()];
+    a.followups = ['Welche Aufträge sind morgen fällig?', 'Wie viele Teile haben wir heute gefertigt?'];
     return done(a);
   }
   /** Kosten einer Überstunde (Personal-Vollkosten + Zuschlag, Engine costs()) */
@@ -2926,19 +2987,28 @@
       a.md.push('', '> **Empfehlung:** Keine Zusatzschicht – Engpass ohne Unterbrechung laufen lassen.');
       a.sources = ['Prognose / Plantafel', srcStand()]; a.followups = ['Was ist der Engpass?', 'Welche Aufträge sind gefährdet und warum?']; return done(a);
     }
+    const costOf = (x) => (x.costEur != null ? x.costEur : x.cost != null ? x.cost : null);
     const rows = late.map(o => {
-      const L = limitOf(c, o), alt = (L.adv.alternatives || []).find(x => x.kind === 'overtime') || null;
+      // Überstunden-Hebel der Engine (Abend / Samstag mit Gewinn und Kosten), sonst eigene Schätzung
+      const L = limitOf(c, o), ots = (L.adv.alternatives || []).filter(x => x.kind === 'overtime');
+      const best = ots.filter(x => x.ok !== false && x.gainSec >= 900).sort((x, y) => y.gainSec - x.gainSec || (costOf(x) || 0) - (costOf(y) || 0))[0] || null;
       const need = -o.slackSec, hrs = Math.min(need, 8 * 3600);
-      const costE = alt && (alt.cost != null || alt.costEur != null) ? (alt.cost != null ? alt.cost : alt.costEur) : rate ? rate * hrs / 3600 : null;
-      return { o, L, alt, need, hrs, costE, helps: !L.ext && !!L.station && (alt ? alt.ok !== false : need <= 8 * 3600) };
+      const costE = best ? costOf(best) : rate ? rate * hrs / 3600 : null;
+      const other = (L.adv.alternatives || []).filter(x => x.ok && x.kind !== 'overtime' && x.kind !== 'priority' && x.kind !== 'partial' && x.gainSec >= 900).sort((x, y) => y.gainSec - x.gainSec)[0] || null;
+      return { o, L, best, ots, need, hrs, costE, other, helps: best ? true : ots.length ? false : !L.ext && !!L.station && need <= 8 * 3600 };
     });
     const help = rows.filter(r => r.helps), noHelp = rows.filter(r => !r.helps);
     a.sev = help.length ? 'warn' : 'info';
-    a.head = help.length ? `Ja, an ${listJoin([...new Set(help.map(r => r.L.station))])}: ca. ${durR(help[0].hrs)} für ${help[0].o.id}${help[0].costE != null ? ' (ca. ' + eur(help[0].costE) + ')' : ''}`
-      : `Überstunden helfen nicht – ${listJoin(noHelp.map(r => r.o.id))} ${noHelp.length === 1 ? 'hängt' : 'hängen'} an ${noHelp[0].L.ext ? 'der Fremdbearbeitung (' + noHelp[0].L.partner + ')' : 'mehr als einer Zusatzschicht'}`;
+    const h0 = help[0];
+    a.head = h0 ? (h0.best ? `Ja: ${h0.best.label} für ${h0.o.id} – ${durR(h0.best.gainSec)} früher${h0.costE != null ? ', ca. ' + eur(h0.costE) : ''}` : `Ja, an ${mName(h0.L.station)}: ca. ${durR(h0.hrs)} für ${h0.o.id}${h0.costE != null ? ' (ca. ' + eur(h0.costE) + ')' : ''}`)
+      : `Überstunden helfen nicht – ${listJoin(noHelp.map(r => r.o.id))} ${noHelp.length === 1 ? 'hängt' : 'hängen'} an ${noHelp[0].L.ext ? noHelp[0].L.partner : 'einer anderen Stelle'}`;
     a.md.push(`Überstunden bringen nur Zeit, wenn der Auftrag an einer eigenen Maschine hängt; liegt die Begrenzung bei einem Fremdbearbeiter, ändert Mehrarbeit im Werk den Liefertermin nicht.${rate ? ` Kostensatz ${eur(rate)}/h (Personal inkl. Überstundenzuschlag).` : ''}`, '');
-    for (const r of rows) a.md.push(`- **${r.o.id}** (${durR(r.need)} Verzug): ${r.L.ext ? `begrenzt durch ${r.L.partner}${r.L.process ? ' (' + r.L.process + ')' : ''} – Überstunden helfen nicht; Hebel: Expressdurchlauf anfragen` : r.helps ? `begrenzt durch ${mName(r.L.station)} – ca. ${durR(r.hrs)} Überstunden${r.alt && r.alt.gainSec ? ' bringen ' + durR(r.alt.gainSec) : ''}${r.costE != null ? ', ca. ' + eur(r.costE) : ''}${r.need > 8 * 3600 ? ' (holen allein nicht alles auf)' : ''}` : `Verzug größer als eine Zusatzschicht – Teillieferung abstimmen`}.`);
-    a.md.push('', '> **Empfehlung:** ' + (help.length ? `Überstunden an ${mName(help[0].L.station)} für ${help[0].o.id} einplanen${noHelp.length ? '; für ' + listJoin(noHelp.map(r => r.o.id)) + ' stattdessen ' + (noHelp[0].L.ext ? 'Expressdurchlauf bei ' + noHelp[0].L.partner + ' anfragen' : 'Teillieferung abstimmen') : ''}.` : noHelp[0].L.ext ? `Expressdurchlauf bei ${noHelp[0].L.partner} anfragen und ${custShort(noHelp[0].o.customer)} informieren.` : `Teillieferung mit ${custShort(noHelp[0].o.customer)} abstimmen.`));
+    const otTxt = (r) => r.ots.length ? r.ots.slice(0, 2).map(x => x.label.replace(/^Überstunden an /, '')).join(', ') : '';
+    for (const r of rows) a.md.push(`- **${r.o.id}** (${durR(r.need)} Verzug, ${r.L.ext ? 'begrenzt durch ' + r.L.partner + (r.L.process ? ' – ' + r.L.process : '') : r.L.station ? 'begrenzt durch ' + mName(r.L.station) : 'Begrenzung unklar'}): ${r.best ? `${r.best.label} bringt ${durR(r.best.gainSec)}${r.costE != null ? ', ca. ' + eur(r.costE) : ''}` : r.ots.length ? `Überstunden (${otTxt(r)}) bringen keine spürbare Änderung` : r.helps ? `ca. ${durR(r.hrs)} Überstunden${r.costE != null ? ', ca. ' + eur(r.costE) : ''}${r.need > 8 * 3600 ? ' (holen allein nicht alles auf)' : ''}` : r.L.ext ? 'Überstunden im Werk helfen nicht' : 'Verzug größer als eine Zusatzschicht'}${!r.helps && r.other ? `; wirksamer: ${r.other.label} (${durR(r.other.gainSec)} früher${costOf(r.other) != null ? ', ' + (costOf(r.other) > 0 ? 'ca. ' + eur(costOf(r.other)) : 'ohne Zusatzkosten') : ''})` : ''}.`);
+    const alt0 = noHelp.find(r => r.other);
+    a.md.push('', '> **Empfehlung:** ' + (h0 ? `${h0.best ? h0.best.label : 'Überstunden an ' + mName(h0.L.station)} für ${h0.o.id} einplanen${noHelp.length ? '; für ' + listJoin(noHelp.map(r => r.o.id)) + ' stattdessen ' + (alt0 ? alt0.other.label : noHelp[0].L.ext ? 'Expressdurchlauf bei ' + noHelp[0].L.partner + ' anfragen' : 'Teillieferung abstimmen') : ''}.`
+      : alt0 ? `Keine Überstunden – für ${alt0.o.id} wirkt ${alt0.other.label} (${durR(alt0.other.gainSec)} früher).` : noHelp[0].L.ext ? `Expressdurchlauf bei ${noHelp[0].L.partner} anfragen und ${custShort(noHelp[0].o.customer)} informieren.` : `Teillieferung mit ${custShort(noHelp[0].o.customer)} abstimmen.`));
+    if (!h0 && alt0) for (const x of adviceText(c, alt0.o).actions) addAction(a, x);
     a.sources = ['Terminberatung je Auftrag (Engine)', 'Kostensätze (Profil)', srcStand()];
     a.followups = [`Warum ist ${late[0].id} verspätet?`, 'Was ist der Engpass?'];
     a.entity = { kind: 'order', id: late[0].id };
@@ -3005,12 +3075,16 @@
     const alts = (L.adv.alternatives || []).filter(x => x.ok);
     const costOf = (x) => (x.cost != null ? x.cost : x.costEur != null ? x.costEur : null);
     a.sev = 'warn';
-    const cheapest = alts.filter(x => costOf(x) != null).sort((x, y) => costOf(x) - costOf(y))[0] || null;
-    const otCost = !L.ext && L.station && rate ? rate * Math.min(need, 8 * 3600) / 3600 : null;
-    a.head = `${id}: ${durR(need)} Verzug${cheapest ? ` – Aufholen ab ca. ${eur(costOf(cheapest))} (${cheapest.label})` : otCost != null ? ` – Überstunden an ${L.station} ca. ${eur(otCost)}` : L.ext ? ` – hängt an ${L.partner}` : ''}`;
+    const eff = alts.filter(x => costOf(x) != null && x.gainSec >= 900).sort((x, y) => costOf(x) - costOf(y) || y.gainSec - x.gainSec);
+    const cheapest = eff[0] || null;
+    const otCost = !L.ext && L.station && rate && !alts.some(x => x.kind === 'overtime') ? rate * Math.min(need, 8 * 3600) / 3600 : null;
+    const costTxt = (v) => (v > 0 ? 'ca. ' + eur(v) : 'ohne Zusatzkosten');
+    a.head = `${id}: ${durR(need)} Verzug${cheapest ? ` – aufholbar ${costTxt(costOf(cheapest))} (${cheapest.label}, ${durR(cheapest.gainSec)} früher)` : otCost != null ? ` – Überstunden an ${L.station} ca. ${eur(otCost)}` : L.ext ? ` – hängt an ${L.partner}` : ''}`;
     a.stats = [{ l: 'Verzug', v: durR(need), s: 'Termin ' + tc(o.due), c: 'crit' }, { l: 'Prognose', v: tc(o.eta), s: o.etaNew ? 'neu gerechnet' : 'veröffentlicht' }, { l: 'Begrenzt durch', v: L.ext ? 'extern' : L.station || '–', s: L.ext ? L.partner : L.station ? station(L.station).short : '' }];
     a.md.push(`Eine Vertragsstrafe ist für ${custShort(o.customer)} nicht hinterlegt – der direkte Schaden hängt am Kundenvertrag. Beziffern lassen sich die Kosten, den Verzug aufzuholen:`, '');
-    for (const x of alts.slice(0, 4)) a.md.push(`- **${x.label}**: ${x.text}${costOf(x) != null ? ' – ca. ' + eur(costOf(x)) : ''}${x.gainSec ? ', bringt ' + durR(x.gainSec) : ''}.`);
+    const allL = (L.adv.alternatives || []).filter(x => x.kind !== 'priority' && x.kind !== 'partial');
+    for (const x of allL.slice(0, 5)) a.md.push(`- **${x.label}**: ${x.ok && x.gainSec >= 60 ? durR(x.gainSec) + ' früher' : 'keine spürbare Änderung'}${costOf(x) != null ? ' · ' + costTxt(costOf(x)) : ''}${x.addedLateSec > 0 ? ' · ein anderer Auftrag wird ' + durR(x.addedLateSec) + ' später spät' : ''}.`);
+    if (alts.some(x => x.kind === 'partial')) a.md.push(`- **Teillieferung** mit ${custShort(o.customer)} abstimmen – Frachtkosten je Lieferung.`);
     if (!alts.some(x => x.kind === 'overtime') && otCost != null) a.md.push(`- **Überstunden an ${mName(L.station)}**: ca. ${durR(Math.min(need, 8 * 3600))} × ${eur(rate)}/h = ca. ${eur(otCost)}${need > 8 * 3600 ? ' (holt allein nicht alles auf)' : ''}.`);
     if (L.ext) a.md.push(`- Überstunden im Werk helfen nicht: begrenzt durch ${L.partner}${L.process ? ' (' + L.process + ')' : ''}.`);
     a.md.push('', '> **Empfehlung:** ' + (L.adv.text ? String(L.adv.text).replace(/^Ursache:[^.]*\.\s*/, '').replace(/^Empfehlung:\s*/, '') : `Teillieferung mit ${custShort(o.customer)} abstimmen.`));
@@ -3024,14 +3098,14 @@
     const a = A('oee'), mv = c.mv(id);
     if (!mv) { a.head = `Arbeitsplatz ${id} ist nicht bekannt`; return done(a); }
     a.entity = { kind: 'machine', id };
-    const oe = mv.oeeToday || {};
-    a.eyebrow = 'Kennzahl · OEE ' + id;
+    const oe = machineOee(mv, c.k());
+    a.eyebrow = 'Kennzahl · OEE ' + id + (oe.staffed ? ' · Schichten' : '');
     if (oe.oee == null) { a.sev = 'info'; a.head = `${mName(id)}: heute noch keine OEE-Bezugszeit`; a.md.push(`${msl(mv)} – ohne eingeplanten Arbeitsgang in der Planzeit zählt keine OEE.`); return done(a); }
     const comp = [['Verfügbarkeit', oe.availability], ['Leistung', oe.performance], ['Qualität', oe.quality]].filter(x => x[1] != null);
     const low = comp.slice().sort((x, y) => x[1] - y[1])[0];
     a.sev = oe.oee >= TARGET_OEE ? 'ok' : 'warn';
-    a.head = `${mName(id)}: OEE heute ${pct(oe.oee, oeeDec(oe.oee))} – ${oe.oee >= TARGET_OEE ? 'über' : 'unter'} dem Ziel von ${pct(TARGET_OEE)}`;
-    a.md.push(`${comp.map(x => x[0] + ' ' + pct(x[1], 1)).join(' × ')} = ${pct(oe.oee, 1)}.${low ? ` Größter Verlust: **${low[0]}** (${pct(1 - low[1], 1)} gehen dort verloren).` : ''}`);
+    a.head = `${mName(id)}: OEE ${oe.staffed ? 'der Schichten ' : ''}heute ${pct(oe.oee, oeeDec(oe.oee))} – ${oe.oee >= TARGET_OEE ? 'über' : 'unter'} dem Ziel von ${pct(TARGET_OEE)}`;
+    a.md.push(`${comp.map(x => x[0] + ' ' + pct(x[1], 1)).join(' × ')} = ${pct(oe.oee, 1)}.${low ? ` Größter Verlust: **${low[0]}** (${pct(1 - low[1], 1)} gehen dort verloren).` : ''}${oe.staffed && oe.day != null ? ` Ganzer Tag inkl. Geisterschicht ${pct(oe.day, 1)}.` : ''}`);
     a.stats = [{ l: 'OEE', v: pct(oe.oee, oeeDec(oe.oee)), s: 'Ziel ' + pct(TARGET_OEE), c: oe.oee >= TARGET_OEE ? '' : 'warn' }].concat(comp.map(x => ({ l: x[0], v: pct(x[1], 1), s: x === low ? 'größter Verlust' : '', c: x === low && x[1] < 0.95 ? 'warn' : '' })));
     const row = lossByCause(c).byMachine.find(x => x.mv.id === id);
     if (row && row.causes.length) {
@@ -3080,7 +3154,8 @@
     a.md.push('- **Engpass & Was-wäre-wenn:** „Was ist der Engpass?“, „Was passiert, wenn die Studer S33 2 h ausfällt?“');
     a.md.push('- **Maschinen & Werkzeuge:** „Warum wartet M07?“, „Wann ist der nächste Werkzeugwechsel an M05?“');
     a.md.push('- **Ressourcen:** „Welches Material wird knapp?“, „Wer ist gerade wo?“, „Wie steht es um die Qualität?“');
-    a.md.push('- **Kosten:** „Wo verlieren wir heute Geld?“, „Wie hoch ist der Energieverbrauch?“');
+    a.md.push('- **Kosten:** „Wo verlieren wir heute Geld?“, „Wie hoch ist der Energieverbrauch?“, „Was kostet uns der Verzug von FA-24119?“');
+    a.md.push('- **Meldungen & Ausbringung:** „Gibt es offene Meldungen?“, „Wie viele Teile haben wir heute gefertigt?“, „Was wird bis Schichtende fertig?“');
     a.md.push('- **Aktionen:** „FA-24122 als Eilauftrag“, „Titan nachbestellen“, „Störung an M05 auslösen“, „Öffne die Plantafel“ – jede Aktion erst nach Bestätigung.');
     a.sources = ['Live-Simulation ' + (WF.app && WF.app.company ? WF.app.company().name : PROF().company.name)];
     a.followups = ['Wie läuft die Schicht?', 'Welche Aufträge sind gefährdet und warum?'];
@@ -3108,7 +3183,7 @@
     a.head = sug.length ? 'Meinten Sie eine dieser Fragen?' : 'Diese Frage kann ich so nicht zuordnen';
     a.md.push(sug.length ? 'Mit einer dieser Formulierungen antworte ich direkt aus den Live-Daten – oder die Frage etwas konkreter stellen (Maschine, Auftrag, Zeitraum).' : 'Ich beantworte Fragen zu Lage, Terminen, Engpass, Maschinen, Aufträgen, Werkzeugen, Material, Personal, Qualität, Kosten, Meldungen, Was-wäre-wenn und Schichtübergabe – immer aus den Live-Daten der Halle.', '');
     const nl = c.open().filter(o => o.risk === 'spät').length, np = mvs.filter(m => m.state === 'running').length;
-    a.md.push(`Kurz zur Lage: ${np} von ${mvs.length} Arbeitsplätzen ${np === 1 ? 'produziert' : 'produzieren'}, OEE heute ${pct(k.oee, 1)}, ${nl ? pl(nl, 'Auftrag', 'Aufträge') + ' verspätet' : 'kein Auftrag verspätet'}.`);
+    a.md.push(`Kurz zur Lage: ${np} von ${mvs.length} Arbeitsplätzen ${np === 1 ? 'produziert' : 'produzieren'}, OEE heute ${pct(oeeHead(k).v, 1)}, ${nl ? pl(nl, 'Auftrag', 'Aufträge') + ' verspätet' : 'kein Auftrag verspätet'}.`);
     a.sources = ['Live-Daten', srcStand()];
     a.followups = (sug.length ? sug : ['Was kannst du?', 'Wie läuft die Schicht?', 'Welche Aufträge sind gefährdet und warum?']).slice(0, 3);
     return done(a);
@@ -3522,7 +3597,8 @@
     const RANK = { crit: 0, warn: 1, tool: 2, info: 3, ok: 4 };
     const CAT = ['stoerung', 'termine', 'engpass', 'werkzeug', 'material', 'qualitaet'];
     B.sort((x, y) => RANK[x.sev] - RANK[y.sev] || CAT.indexOf(x.cat) - CAT.indexOf(y.cat));
-    const oeeTxt = k.oee != null ? `OEE ${pct(k.oee, 1)} ${k.oee >= TARGET_OEE ? 'über' : 'unter'} Ziel ${pct(TARGET_OEE)}` : 'noch keine OEE-Bezugszeit';
+    const ohB = oeeHead(k);
+    const oeeTxt = ohB.v != null ? `OEE${ohB.staffed ? ' der Schichten' : ''} ${pct(ohB.v, 1)} ${ohB.v >= TARGET_OEE ? 'über' : 'unter'} Ziel ${pct(TARGET_OEE)}` : 'noch keine OEE-Bezugszeit';
     const head = `${sh.id ? sh.name : 'Geisterschicht'}: ${prod} von ${mvs.length} Arbeitsplätzen produzieren, ${oeeTxt}` +
       (faults.length ? `, ${pl(faults.length, 'Störung', 'Störungen')}` : '') + (late.length ? `, ${pl(late.length, 'Termin', 'Termine')} verspätet` : tight.length ? `, ${nm(tight.length)} knapp` : ', Termine im Plan') + '.';
     const bullets = B.slice(0, 5).map(b => ({ sev: b.sev, text: b.text, entity: b.entity || undefined, category: b.cat }));
@@ -3927,7 +4003,7 @@
   .ai-mb:hover{border-color:var(--muted);color:var(--text)}
   .ai-mb.danger{color:color-mix(in srgb,var(--st-fault) 85%,white);border-color:color-mix(in srgb,var(--st-fault) 35%,transparent)}
   .ai-mb.done{opacity:.55;cursor:default}
-  .ai-extra.ai-in > *{animation:aiIn .25s ease both}
+  .ai-extra.ai-in > *{animation:aiIn .25s ease}
   .ai-after:empty{display:none}
   .ai-after .ai-fu{margin-top:2px;padding-left:2px}
   .ai-md:empty{display:none}

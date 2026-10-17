@@ -84,6 +84,10 @@
     extMaxWaitSec: 86400,  // unvollständiges Los geht spätestens nach 24 h als Teillos
     barsPickSec: 90, barsLoadSec: 180, barLenM: 3,
     waitWarnSec: 300, toolWarnSec: 180, fpiWarnSec: 600,
+    // Kurzstopps (Schichtzeit): mittlere Laufzeit zwischen zwei Kurzstopps je Maschinentyp (min), Dauer 1–4 min –
+    // Späneknäuel, Nachmessen, Lichtschranke … (typische Kleinverluste einer Lohnfertigung)
+    microStopMin: { lathe: 55, swiss: 70, biglathe: 75, deephole: 60, hobber: 90, mill5: 70, mill3: 55, cylgrinder: 90, surfgrinder: 90, saw: 80 },
+    microStopDur: [1, 4],
     idleHomeSec: 40,
     // Personal: Aufgabe darf höchstens so weit über Pause/Schichtende hinausgehen (Übergabe an die nächste Schicht: 10 min,
     // letzte Schicht des Tages: 20 min); bemannte Teile (Messraum, Montage) werden für die Pause unterbrochen, wenn sie noch
@@ -363,8 +367,11 @@
       id: st.id, idx, name: st.name, short: st.short, kind: st.kind, type: st.type, area: st.area,
       loading: st.loading || 'auto', loadMin: st.loadMin || 0, skill: st.skill, rate: st.rate || 60,
       power: st.power || { idle: 1, run: 5 }, inCap: st.inCap != null ? st.inCap : 3, outCap: st.outCap != null ? st.outCap : 3,
-      mtbfH: st.mtbfH || 0, mtbfP: st.mtbfH ? 1 / (st.mtbfH * 3600) : 0, fpiMin: st.fpiMin || 0,
+      mtbfH: st.mtbfH || 0, mtbfP: st.mtbfH ? 1 / (st.mtbfH * 3600) : 0, fpiMin: st.fpiMin || 0, micro: null,
+      msP: CFG.microStopMin[st.type] ? 1 / (CFG.microStopMin[st.type] * 60) : 0,
       automation: st.automation || 'none', conn: Object.assign({ level: 0, protocol: '–', gateway: '–' }, st.conn || {}),
+      // gemessene Signale erst ab Anbindung: Sensor (Level ≥ 1: Laufzeit, Energie) bzw. Steuerung (Level ≥ 2: Zähler)
+      meas: { sensorSince: (st.conn && st.conn.level >= 1) ? t0 : null, controlSince: (st.conn && st.conn.level >= 2) ? t0 : null, runSec: 0, energyKwh: 0, counter0: 0 },
       barMagazineM: st.barMagazineM || 0, barReorderM: st.barReorderM || 0, barStockM: st.barMagazineM ? 0 : null, barMat: null,
       state: 'idle', since: t0, cause: 'Kein Arbeitsgang eingeplant', waitCode: null,
       op: null, setupDone: false, released: false, needCorr: false, part: null, dressRem: 0, fpi: null,
@@ -1113,10 +1120,15 @@
     if (m.setupRun) return setState(m, 'setup', m.setupRun.cause);
     if (m.corrRun) return setState(m, 'setup', m.corrRun.cause);
     const pt = m.part;
+    if (m.micro) {
+      if (--m.micro.rem > 0) { m.waitCode = 'micro'; return setState(m, 'waitOperator', m.micro.cause, 'micro'); }
+      m.micro = null;
+    }
     if (pt) {
       if (pt.sub === 'load') return setState(m, 'running', pt.loadLabel);
       if (m.loading === 'attended' && !attendHere(m, pt)) return;
       if (m.mtbfP && R.next() < m.mtbfP) { startFault(m, null, false); return; }
+      if (m.msP && cur && !cur.inBreak && pt.sub === 'cut' && R.next() < m.msP) { startMicro(m); m.waitCode = 'micro'; return setState(m, 'waitOperator', m.micro.cause, 'micro'); }
       pt.rem -= 1;
       if (pt.rem > 0) {
         if (m.loading === 'perPart' && pt.rem <= CFG.precallSec) precallLoad(m);
@@ -1127,6 +1139,18 @@
     if (m.dressRem > 0) { m.dressRem--; if (m.dressRem > 0) return setState(m, 'running', 'Abrichten der Schleifscheibe (automatischer Zyklus)'); }
     if (m.fpi) { if (fpiHold(m)) return holdIdle(m, `Erstteilprüfung ${m.op ? S.orders[m.op.oid].id + ' AG ' + S.orders[m.op.oid].routing[m.op.idx].seq : ''}`); return setState(m, 'firstPiece', cz(m, 'fpi:' + m.fpi.stage, () => fpiCause(m))); }
     decide(m, 0);
+  }
+  /** Kurzstopp während der Bearbeitung (nur Schichtzeit): Bediener behebt in 1–4 min – Verfügbarkeitsverlust mit Ursache */
+  const MICRO = {
+    generic: ['Späneknäuel am Werkzeug – Bediener entfernt Späne', 'Lichtschranke/Tür ausgelöst – Bediener quittiert', 'Messsteuerung: Nachmessen am Werkstück', 'Kühlmittelfilter zugesetzt – Bediener spült'],
+    barfeeder: ['Stange klemmt im Lader – Bediener richtet aus'], loader: ['Greifer-Fehlgriff am Lader – Bediener quittiert'], pallet: ['Palette nicht verriegelt – Bediener prüft Aufspannung'],
+    cylgrinder: ['Kühlmittelstrahl nachstellen'], surfgrinder: ['Magnetspannplatte: Werkstück nachlegen'], saw: ['Bandspannung nachstellen', 'Material liegt schief im Vorschub'],
+  };
+  function startMicro(m) {
+    const list = MICRO.generic.concat(MICRO[m.automation] || [], MICRO[m.type] || []);
+    const txt = list[Math.floor(R.next() * list.length) % list.length], dur = Math.round(R.range(CFG.microStopDur[0], CFG.microStopDur[1]) * 60);
+    m.micro = { rem: dur, dur, t0: S.t, text: txt, cause: `Kurzstopp: ${txt} (ca. ${U.fmtDur(dur)})` };
+    ev('microStop', 'info', { kind: 'machine', id: m.id }, `${m.id}: Kurzstopp – ${txt} (${U.fmtDur(dur)})`, { durSec: dur, minor: true });
   }
   /** Erstteil wartet außerhalb der Schicht (niemand holt/misst es) → geplant „Bereit“ */
   function fpiHold(m) { const tk = S.tasks[m.tasks.fpi]; return !cur && m.fpi && m.fpi.stage === 'wait' && !(tk && tk.assignee); }
@@ -1747,7 +1771,8 @@
   }
   function newPart(m, o, i, sub, by) {
     const r = o.routing[i], op = o.ops[i];
-    const dur = Math.max(5, Math.round((r.cycleMin || 1) * 60 * R.range(0.97, 1.03)));
+    // Ist-Taktzeit: Plan ± Streuung plus kleine Geschwindigkeitsverluste (Vorschub reduziert, Messzyklen) – Leistung ≈ 95 %
+    const dur = Math.max(5, Math.round((r.cycleMin || 1) * 60 * R.range(0.99, 1.07)));
     m.part = { oid: o.id, idx: i, seq: r.seq, sub, rem: dur, dur, first: !m.released, by: by || null, t0: S.t,
       no: op.good + op.scrap + op.inProc, of: opTotal(o, i), rework: !!m.reworking };
     m.reworking = false;
@@ -3450,6 +3475,7 @@
       else if (plan) { const e = m.rate / 3600; kd.lossSec++; kd.lossEur += e; ks.lossSec++; ks.lossEur += e; kd.lossEurBy[st] += e; ks.lossEurBy[st] += e; if (night) { kn.lossSec++; kn.lossEur += e; kn.lossEurBy[st] += e; } }
       const pw = machinePower(m);
       kd.energyKwh += pw / 3600; kw += pw;
+      if (m.meas && m.meas.sensorSince != null) { if (st === 'running') m.meas.runSec++; m.meas.energyKwh += pw / 3600; }
     }
     for (let j = 0; j < AA.length; j++) { const a = AA[j]; kw += a.route ? 0.6 : a.state === 'charging' ? 1.5 : a.waitRem > 0 ? 0.3 : 0.05; }
     S.powerKw = kw; S.energyKwh += kw / 3600; S.today.energyKwh += kw / 3600;
@@ -3569,7 +3595,7 @@
   }
   function dayRollover() {
     S.yesterday = Object.assign({ kpi: kpis() }, S.today);
-    for (const id in S.machines) { S.machines[id].kd = freshStats(S.machines[id]); S.machines[id].kn = newStats(); }
+    for (const id in S.machines) { const mm = S.machines[id]; mm.kd = freshStats(mm); mm.kn = newStats(); if (mm.meas) { mm.meas.runSec = 0; mm.meas.energyKwh = 0; } }
     S.today = { day: Math.floor(S.t / DAY), good: 0, goodFinished: 0, scrap: 0, scrapBy: { 'Maß': 0, 'Werkzeugbruch': 0, 'Erstteil n.i.O.': 0 }, fpiOk: 0, fpiNok: 0,
       transports: 0, emptyReturns: 0, shipped: 0, toolChanges: 0, faults: 0, setups: 0, energyKwh: 0, lossEur: 0 };
     for (const id in S.toolStock) S.toolStock[id].scrapToday = 0;
@@ -3589,6 +3615,13 @@
        Level 0: Tablet-Rückmeldung (nur letzte Meldung), Level 1: Stromsensor + Signalsäule (Leistung, Strom, Ampel, Laufzeit),
        Level 2/3: Steuerungsdaten – Spindel nur bei Maschinen mit Spindel; Messraum: Messprogramm/Merkmal; Waschanlage: Bad/Zyklus;
        Montage: Terminal-Schritt. Level 3 zusätzlich Werkzeug in der Spindel. */
+  /** ab wann ein Signal gemessen ist (je Signal; null = nicht gemessen) – Sensorwerte ab Sensor-Anbindung, Zähler ab Steuerung,
+      Tageswerte ab max(Tagesbeginn, Anbindung) */
+  function measuredSince(m) {
+    const ms = m.meas || {}, d0 = Math.floor(S.t / DAY) * DAY, day = (t) => t == null ? null : Math.max(d0, t);
+    return { powerKw: ms.sensorSince, currentA: ms.sensorSince, stackLight: ms.sensorSince, runtimeTodaySec: day(ms.sensorSince), energyKwhMeasuredToday: day(ms.sensorSince),
+      spindleRpm: ms.controlSince, partCounter: ms.controlSince, partsMeasured: ms.controlSince, program: ms.controlSince, history: ms.sensorSince };
+  }
   function computeSignals(m, T) {
     {
       const lv = m.conn.level || 0;
@@ -3601,7 +3634,8 @@
       if (lv === 1) {
         const kw = Math.round(machinePower(m) * (1 + 0.03 * nz) * 10) / 10;
         return { t: T, level: 1, source: 'Stromsensor + Signalsäule', powerKw: kw, currentA: Math.round(kw * 1000 / (1.732 * 400 * 0.85) * 10) / 10,
-          stackLight: light, stackLightLabel: LABELS.stackLight[light], runtimeTodaySec: m.kd.stateSec.running, partCounter: null };
+          stackLight: light, stackLightLabel: LABELS.stackLight[light], runtimeTodaySec: m.meas ? m.meas.runSec : 0, energyKwhMeasuredToday: m.meas ? Math.round(m.meas.energyKwh * 10) / 10 : null, partCounter: null,
+          measuredSince: measuredSince(m) };
       }
       const tl = c ? mainToolOf(m, c.r) : null, wear = tl ? tl.used / tl.life : 0;
       const base = RPM[m.type] || 0, spindle = base > 0;
@@ -3613,7 +3647,9 @@
         program: c ? (m.type === 'cmm' ? 'CALYPSO_' + o4(c.o) + '_AG' + c.r.seq : m.type === 'assembly' ? 'Montageanweisung ' + (c.o.part.drawing || c.o.part.no) : m.type === 'washer' ? 'Waschprogramm ' + (c.o.part.material || 'Standard') : progName(c.o, c.r)) : '–',
         partCounter: c ? c.op.good + c.op.scrap : 0, totalCounter: m.counter,
         toolInSpindle: lv >= 3 && spindle && tl ? tl.typeId : null, toolInSpindleName: lv >= 3 && spindle && tl ? tl.name : null,
-        alarm: m.fault ? m.fault.code + ' ' + m.fault.text : null, coolant: cutting && spindle };
+        alarm: m.fault ? m.fault.code + ' ' + m.fault.text : null, coolant: cutting && spindle,
+        runtimeTodaySec: m.meas ? m.meas.runSec : 0, energyKwhMeasuredToday: m.meas ? Math.round(m.meas.energyKwh * 10) / 10 : null,
+        partsMeasured: m.meas && m.meas.controlSince != null ? m.counter - m.meas.counter0 : null, measuredSince: measuredSince(m) };
       if (m.type === 'cmm') { const ch = c ? charOf(m, c.r) : null; sg.measuringProgram = sg.program; sg.feature = cutting && ch ? ch.name : null; sg.probe = m.fault ? 'Taster gestört' : cutting ? 'misst' : 'bereit'; }
       if (m.type === 'washer') { sg.bathTempC = Math.round((m.fault ? 48 : 60) + 1.5 * nz); sg.cycle = cutting ? (m.part.rem > m.part.dur * 0.3 ? 'Waschen' : 'Trocknen') : '–'; }
       if (m.type === 'assembly') { const n = 7, k = cutting ? Math.min(n, 1 + Math.floor((1 - m.part.rem / m.part.dur) * n)) : 0; sg.terminalStep = cutting ? `Schritt ${k}/${n}` : '–'; }
@@ -4999,6 +5035,7 @@
       lossEurToday: Math.round(m.kd.lossEur), energyKwhToday: Math.round(m.kd.energyKwh * 10) / 10, energyEurToday: Math.round(m.kd.energyKwh * energyPrice() * 100) / 100,
       powerKw: (m.conn.level || 0) >= 1 ? Math.round(machinePower(m) * 10) / 10 : null, powerKwEst: Math.round(machinePower(m) * 10) / 10,
       signals: m.signals, powerMeasured: (m.conn.level || 0) >= 1,
+      measuredSince: m.meas ? m.meas.sensorSince : null, energyKwhMeasuredToday: m.meas && m.meas.sensorSince != null ? Math.round(m.meas.energyKwh * 10) / 10 : null,
       barStockM: m.barMagazineM ? m.barStockM : null, barMagazineM: m.barMagazineM || null, barReorderM: m.barReorderM || null, barMaterial: m.barMat ? S.materials[m.barMat].name : null,
       fault: m.fault ? Object.assign({}, m.fault, { sinceSec: S.t - m.fault.t0 }) : null,
       fpi: m.fpi ? Object.assign({}, m.fpi, { waitingSec: S.t - m.fpi.t0 }) : null,
@@ -5287,6 +5324,12 @@
     const lv = Math.round(Number(level));
     if (!(lv >= 0 && lv <= 3)) return fail('Anschluss-Level muss 0–3 sein');
     const old = m.conn.level;
+    // Messung beginnt mit der Anbindung (kein „Laufzeit heute 2 h 40 min“ von einem eben montierten Sensor)
+    const ms = m.meas || (m.meas = { sensorSince: null, controlSince: null, runSec: 0, energyKwh: 0, counter0: 0 });
+    if (lv >= 1 && !(old >= 1)) { ms.sensorSince = S.t; ms.runSec = 0; ms.energyKwh = 0; }
+    if (lv >= 2 && !(old >= 2)) { ms.controlSince = S.t; ms.counter0 = m.counter; }
+    if (lv < 1) ms.sensorSince = null;
+    if (lv < 2) ms.controlSince = null;
     m.conn = { level: lv, protocol: protocol || m.conn.protocol, gateway: lv === 0 ? '–' : (m.conn.gateway && m.conn.gateway !== '–' ? m.conn.gateway : 'werkfluss Edge 03'), connectedT: S.t };
     ev('connect', 'ok', { kind: 'machine', id: m.id }, `${m.id} ${m.short}: Anbindung Level ${old} → ${lv} (${m.conn.protocol})`, { from: old, to: lv, protocol: m.conn.protocol });
     return { ok: true, msg: `${m.id} ist jetzt mit Level ${lv} angebunden` };
