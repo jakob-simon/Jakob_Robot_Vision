@@ -348,3 +348,5 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.8px; }
   body.ai-open #toasts { right: calc(min(440px, 100%) + 16px); }
   body.ai-open.ai-beside.drawer-open #toasts { right: calc(min(480px, 100%) + min(440px, 100%) + 16px); }
 }
+/* TV-Modus: Meldungen oben rechts, Fußzeile (Status, Beenden) bleibt frei */
+body.tv-on #toasts { top: calc(var(--top-h) + env(safe-area-inset-top, 0px) + 12px); bottom: auto; }

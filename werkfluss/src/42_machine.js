@@ -687,7 +687,7 @@
         case 'repair': { const r = WF.sim.actions.repair(id); WF.app.toast(r.msg || 'Behoben', r.ok === false ? 'warn' : 'ok'); update(el, true); break; }
         case 'fault': openFaultModal(id); break;
         case 'plan': openPlanModal(id); break;
-        case 'hall': WF.app.navigate('halle'); if (WF.hall && WF.hall.focusStation) { try { WF.hall.focusStation(id); } catch (err) { console.warn(err); } } break;
+        case 'hall': if (window.innerWidth <= 900 && WF.app.hideDrawer) WF.app.hideDrawer(); WF.app.navigate('halle'); if (WF.hall && WF.hall.focusStation) { try { WF.hall.focusStation(id); } catch (err) { console.warn(err); } } break;
         case 'connect': WF.app.navigate('anbindung', { machineId: id }); break;
       }
     }

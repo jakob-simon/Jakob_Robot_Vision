@@ -1,6 +1,7 @@
 // Schneller Node-Läufer für die Simulations-Engine: lädt 00_core, 05_profile, 10_sim,
-// rechnet 36 Sim-Stunden und gibt eine Zusammenfassung aus (Aufträge, KPIs, Ereignisse, Invarianten).
-// Aufruf: node werkfluss/test/run_sim.mjs [stunden]
+// rechnet 36 Sim-Stunden und gibt eine Zusammenfassung aus (Aufträge, KPIs, Ereignisse, Invarianten,
+// Auftragseingang, Belegung, Engpass, Empfehlungen, Auslastung in der Schichtzeit).
+// Aufruf: node werkfluss/test/run_sim.mjs [stunden]   (z. B. 168 = 7 Tage Dauerbetrieb)
 import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
@@ -75,6 +76,16 @@ function checkInvariants() {
   }
 }
 const stuckOp = {};
+// Auftragseingang, Kanban, Versand, Wendeplatten mitzählen; Auslastung in der Schichtzeit (Mo–Fr, ohne Pausen)
+const cnt = { intake: 0, kanban: 0, shipOut: 0, remake: 0, index: 0, replace: 0 }, firstIntake = [];
+WF.bus.on('sim:event', (e) => {
+  if (e.type === 'orderIntake') { cnt.intake++; if (firstIntake.length < 4) firstIntake.push(U.fmtDayClock(e.t) + ' ' + e.msg); }
+  else if (e.type === 'reorder' && e.data && e.data.kanban) cnt.kanban++;
+  else if (e.type === 'shipOut') cnt.shipOut++;
+  else if (e.type === 'remake') cnt.remake++;
+  else if (e.type === 'toolChanged' && e.data) for (const x of e.data.tools || []) cnt[x.action === 'index' ? 'index' : 'replace']++;
+});
+const util = {}; let maxOpen = 0, maxOrders = 0, maxWip = 0, minOpenStaffed = Infinity;
 t0 = performance.now();
 let lastT = S.t, stepMs = [];
 for (let h = 0; h < HOURS; h++) {
@@ -85,6 +96,13 @@ for (let h = 0; h < HOURS; h++) {
     checkInvariants();
     const sh = WF.sim.shift();
     for (const id in S.machines) { const m = S.machines[id]; if (m.state === 'waitOperator' && sh.id && !sh.inBreak) stuckOp[id] = (stuckOp[id] || 0) + 60; else stuckOp[id] = 0; if (stuckOp[id] > 4 * 3600) v('waitOperator>4h', id); }
+    const open = Object.values(S.orders).filter(o => o.status !== 'fertig').length;
+    maxOpen = Math.max(maxOpen, open); maxOrders = Math.max(maxOrders, Object.keys(S.orders).length);
+    if (sh.id && !sh.inBreak) {
+      minOpenStaffed = Math.min(minOpenStaffed, open);
+      for (const id in S.machines) { const m = S.machines[id], u = util[id] || (util[id] = { n: 0, run: 0, idle: 0 }); u.n++; if (m.state === 'running') u.run++; if (m.state === 'idle') u.idle++; }
+    }
+    if (k % 10 === 0) maxWip = Math.max(maxWip, WF.sim.kpis().wip);
   }
   stepMs.push(performance.now() - a);
   if (errors.some(e => e.startsWith('EXCEPTION'))) break;
@@ -123,6 +141,17 @@ console.log('\nMaterial:', Object.values(S.materials).map(m => `${m.id} ${m.onHa
 console.log('Werkzeugausgabe:', Object.entries(S.toolStock).filter(([, x]) => x.regrind || x.scrapToday).map(([k2, x]) => `${k2} r${x.ready}/n${x.regrind}/s${x.scrapToday}`).join(' '));
 const snap = JSON.stringify(WF.sim.snapshot());
 console.log('Snapshot', (snap.length / 1024).toFixed(1), 'kB');
+// Auftragseingang, Belegung, Engpass, Empfehlungen
+const oc = k.occupancy, bn = WF.sim.bottleneck();
+console.log(`\nAuftragseingang: ${cnt.intake} Aufträge, Kanban-Abrufe ${cnt.kanban}, Versand-Abholungen ${cnt.shipOut}, Nachfertigungen ${cnt.remake}, archiviert ${S.archived || 0} – offen max ${maxOpen}, min ${minOpenStaffed === Infinity ? '–' : minOpenStaffed} (Schichtzeit), Aufträge im Zustand max ${maxOrders}, WIP max ${maxWip}`);
+for (const x of firstIntake) console.log('  ' + x);
+console.log(`Belegung: ${oc.machinesWithWork}/${oc.total} Maschinen mit Auftrag · Vorrat ${oc.backlogDays} Tage (max ${oc.backlogDaysMax} ${oc.backlogMaxMachine})`);
+console.log('Engpass:', bn ? `${bn.stationId} ${bn.short} – ${bn.why}` : '–');
+for (const id of Object.keys(S.orders)) { const a = WF.sim.orderAdvice(id); if (a && (a.risk === 'spät' || a.risk === 'knapp')) console.log(`  Empfehlung ${id} (${a.risk}): ${a.text.slice(0, 170)}${a.action ? ' [Aktion ' + a.actionLabel + ']' : ''}`); }
+console.log(`Wendeplatten/Werkzeuge: ${cnt.index} × Schneide gewendet, ${cnt.replace} × Werkzeug getauscht`);
+const ut = Object.entries(util).map(([id, u]) => `${id} ${Math.round(u.run / u.n * 100)}/${Math.round(u.idle / u.n * 100)}`);
+const tot = Object.entries(util).filter(([id]) => S.machines[id].kind === 'machine').reduce((a, [, u]) => ({ n: a.n + u.n, run: a.run + u.run, idle: a.idle + u.idle }), { n: 0, run: 0, idle: 0 });
+console.log(`Auslastung Schichtzeit (Produktion %/Bereit %): ${ut.join(' · ')} – Bearbeitungsmaschinen gesamt ${(tot.run / tot.n * 100).toFixed(1)} % Produktion, ${(tot.idle / tot.n * 100).toFixed(1)} % Bereit`);
 // Leistung: 1 Sim-Stunde
 t0 = performance.now(); WF.sim.advance(3600); const hMs = performance.now() - t0;
 console.log(`1 Sim-Stunde: ${hMs.toFixed(0)} ms`);
@@ -143,6 +172,10 @@ try {
     routing: [{ op: 'Fräsen', station: 'M06', setupMin: 20, cycleMin: 5, tools: [{ type: 'TT-VHM16', cutMinPerPart: 2 }], material: { id: 'MAT-ALBL', perPart: 1 } }, { op: 'Prüfung', station: 'QS', cycleMin: 1 }] });
   res.addOrder = typeof nid === 'string' ? nid : nid.msg;
   res.moveOp = A.moveOp('FA-24121', 20, 'M05').msg;
+  const wi = WF.sim.whatIfPriority('FA-24122'); res.whatIf = wi.ok ? wi.text : wi.msg;
+  res.orderAdvice = (WF.sim.orderAdvice('FA-24122') || {}).text;
+  res.releaseIntake = A.releaseIntake().msg;
+  res.planRemake = A.planRemake('FA-24118').msg;   // ohne Fehlmenge → begründete Ablehnung
   const n = WF.sim.state.notifications.find(x => x.status === 'open'); res.ack = A.ack(n.id, 'Test').ok; res.resolve = A.resolve(n.id).ok;
   res.invalid = [A.triggerFault('XX').ok, A.setPriority('FA-24122', 'x').ok, A.addOrder({}).ok, A.moveOp('FA-24122', 30, 'M05').ok].join('/');
   for (let h = 0; h < 30; h++) { WF.sim.advance(3600); checkInvariants(); }

@@ -372,6 +372,7 @@
   let tvBtn = null;
   app.setTv = (on) => {
     document.getElementById('app').classList.toggle('tv', !!on); app.tv = !!on;
+    document.body.classList.toggle('tv-on', !!on);
     if (!tvBtn) { tvBtn = el('button', { class: 'btn tv-exit', html: icon('x', 15) + ' TV-Modus beenden', onclick: () => app.setTv(false) }); document.body.append(tvBtn); }
     tvBtn.classList.toggle('on', !!on);
     WF.bus.emit('settings', settings);

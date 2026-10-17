@@ -63,6 +63,9 @@
   const deltaTxt = (sec) => (sec == null || Math.abs(sec) < 60 ? NOCHG : (sec > 0 ? '+' : '−') + durR(Math.abs(sec)));
   /** Puffer bzw. Verzug eines Auftrags (Sekunden bis Termin) */
   const slackTxt = (s) => (s == null ? 'ohne Prognose' : s < 0 ? durR(-s) + ' Verzug' : s < 60 ? 'kein Puffer' : 'Puffer ' + durR(s));
+  /** OEE-Kachel: nahe am Ziel (± 0,5 Pkt.) mit einer Nachkommastelle, damit Farbe und Zahl zusammenpassen (74,6 % statt „75 %“ in Gelb) */
+  const oeeStat = (oee, sub, dec) => ({ l: 'OEE heute', v: oee == null ? '–' : pct(oee, dec != null ? dec : 1), s: sub, c: oee == null ? '' : oee >= TARGET_OEE ? 'ok' : 'warn' });
+  const oeeDec = (oee) => (oee != null && Math.abs(oee - TARGET_OEE) < 0.005 ? 1 : 0);
   /** Stückpreis: unter 100 € mit Cent (9,80 €), sonst ganze Euro */
   const eurUnit = (n) => U.fmtEur(n, n < 100 && Math.round(n) !== n ? 2 : 0);
   /** Strompreis (€/kWh): aus dem Profil, sonst Annahme Industrietarif */
@@ -201,118 +204,227 @@
     const desc = (e) => e.orderId + ' AG ' + e.seq + (e.active ? ' (läuft)' : '');
     return { before, running, queued, until, text: `${stationId} ist vorher mit ${listJoin(before.slice(0, 3).map(desc))}${before.length > 3 ? ' u. a.' : ''} belegt (bis ca. ${tc(until)})` };
   }
-  const bnMachine = (o) => (o && o.bottleneck ? o.bottleneck.split(' ')[0] : null);
-  /** kurze Begründung, warum ein Auftrag knapp/spät ist – aus Arbeitsgang-Kette, Plantafel und Engpass */
-  /** kompakte Bausteine für die Risiko-Karten: wo steht der Auftrag jetzt, was bremst ihn (Engpass + Belegung davor) */
+  const bnMachine = (o) => (o ? o.bottleneckStation || (o.bottleneck ? o.bottleneck.split(' ')[0] : null) : null);
+
+  // ================================================================== Kritischer Pfad: warum ist ein Auftrag knapp oder spät?
+  /** Segmente der offenen Arbeitsgänge laut Prognose (Plantafel):
+      – Warten: die Teile wären da (bzw. der Vorgänger liefert), der Arbeitsplatz ist aber mit anderen Aufträgen belegt,
+      – Bearbeitung: eigene Rest-Bearbeitungszeit (nur wenn sie das Ende bestimmt, nicht der Nachlauf des Vorgängers),
+      – Fremdbearbeitung: Abholung bis letzter Rücklauf,
+      – Stopp: der laufende Arbeitsgang steht gerade (Störung, Werkzeug, Material, Bediener).
+      Zeiten in Arbeitszeit bei bemannten, in Kalenderzeit bei unbemannt laufenden Arbeitsplätzen. */
+  function orderChain(c, o) {
+    const f = c.fc().orders[o.id];
+    if (!f || f.done || !f.ops) return null;
+    const now = c.t, raw = S().orders[o.id], segs = [];
+    let stop = null;
+    o.ops.forEach((op, i) => {
+      const fe = f.ops[i];
+      if (op.complete || op.station === 'VERSAND' || !fe) return;
+      if (op.station === 'EXT') {
+        const from = Math.max(now, fe.start), to = fe.lastReturn != null ? fe.lastReturn : fe.end;
+        segs.push({ kind: 'ext', i, op, from, to, sec: workBetween(from, to), partner: (op.ext && op.ext.partner) || 'dem Fremdbearbeiter', process: (op.ext && op.ext.process) || op.op });
+        return;
+      }
+      const st = station(op.station);
+      if (!st || !S().machines[op.station]) return;
+      const auto = st.loading === 'auto', span = (a, b) => (b <= a ? 0 : auto ? b - a : workBetween(a, b));
+      const r = (raw && raw.routing[i]) || {};
+      const load = st.loading === 'perPart' ? ((r.loadMin != null ? r.loadMin : st.loadMin) || 1) : 0;
+      const left = Math.max(0, WF.sim.partsLeft(o.id, op.seq) || 0);
+      const own = left * ((op.cycleMin || 0) + load) * 60 + (op.state === 'active' || op.good + op.scrap > 0 ? 0 : (op.setupMin || 0) * 60);
+      const from = Math.max(now, fe.start);
+      const seg = { kind: 'run', i, op, station: op.station, auto, left, own, runSpan: span(from, fe.end), start: fe.start, end: fe.end, wait: 0, blockers: [] };
+      seg.tail = seg.runSpan > own + 1800; // Ende bestimmt der Nachlauf des Vorgängers
+      if (op.state === 'active') {
+        const mv = c.mv(op.station);
+        if (mv && (mv.state === 'fault' || WAIT[mv.state])) stop = { i, op, mv };
+      } else {
+        const pfe = i > 0 ? f.ops[i - 1] : null;
+        const avail = i === 0 || op.waiting > 0 ? now : pfe && pfe.first != null ? pfe.first : now;
+        const ready = Math.max(now, avail - (op.setupMin || 0) * 60);
+        if (fe.start > ready + 300) {
+          seg.wait = span(ready, fe.start); seg.waitFrom = ready;
+          seg.blockers = (c.fc().machines[op.station] || []).filter(e => e.orderId !== o.id && e.start < fe.start && e.end > ready).sort((a, b) => a.start - b.start);
+        }
+      }
+      segs.push(seg);
+    });
+    return { f, segs, stop };
+  }
+  const blockTxt = (bl) => (bl.length ? listJoin(bl.slice(0, 2).map(e => `${e.orderId} AG ${e.seq}${e.active ? ' (läuft)' : ''}`)) + (bl.length > 2 ? ' u. a.' : '') : 'anderen Aufträgen');
+  /** Ursachen eines knappen/späten Auftrags aus der Kette – in Routenreihenfolge; main = größter Beitrag */
+  function delayCauses(c, o) {
+    const ch = orderChain(c, o);
+    if (!ch) return null;
+    const items = [];
+    if (ch.stop) {
+      const { op, mv } = ch.stop, fi = faultInfo(mv);
+      items.push({ kind: 'stop', i: ch.stop.i, sec: fi ? fi.rem : mv.sinceSec, station: op.station, state: mv.state, mv,
+        text: fi ? `AG ${op.seq} an ${op.station} steht: Störung ${mv.fault.code} ${mv.fault.text} – Reparatur bis ca. ${clk(fi.endT)}` : `AG ${op.seq} an ${op.station} steht seit ${durR(mv.sinceSec)}: ${stLabel(mv.state)} – ${causeCore(mv)}`,
+        short: fi ? `Störung an ${op.station}` : `${stLabel(mv.state)} an ${op.station}` });
+    }
+    for (const s of ch.segs) {
+      if (s.kind !== 'run' || s.tail || s.wait < 1800) continue;
+      const until = s.blockers.length ? Math.min(s.start, Math.max(...s.blockers.map(e => e.end))) : s.start;
+      items.push({ kind: 'wait', i: s.i, sec: s.wait, station: s.station, auto: s.auto, blockers: s.blockers, seg: s,
+        text: `${durR(s.wait)} Warten an ${mName(s.station)} – belegt mit ${blockTxt(s.blockers)} bis ca. ${tc(until)}`, short: `Wartezeit an ${s.station}` });
+    }
+    const runs = ch.segs.filter(s => s.kind === 'run' && !s.tail && s.own >= 3600).sort((a, b) => b.own - a.own);
+    if (runs[0]) {
+      const s = runs[0];
+      items.push({ kind: 'run', i: s.i, sec: s.own, station: s.station, auto: s.auto, seg: s,
+        text: `${durR(s.own)} Bearbeitung an ${mName(s.station)} (AG ${s.op.seq}, ${teile(s.left)} à ${nm(s.op.cycleMin, s.op.cycleMin < 10 ? 1 : 0)} min) – fertig ca. ${tc(s.end)}`, short: `Bearbeitungszeit an ${s.station}` });
+    }
+    const ext = ch.segs.filter(s => s.kind === 'ext' && s.sec >= 2 * 3600).sort((a, b) => b.sec - a.sec)[0];
+    if (ext) items.push({ kind: 'ext', i: ext.i, sec: ext.sec, partner: ext.partner, process: ext.process,
+      text: `Fremdbearbeitung ${ext.process} bei ${ext.partner} – Rücklauf ca. ${tc(ext.to)}`, short: `Fremdbearbeitung (${ext.process})` });
+    const op0 = o.ops.find(x => !x.complete);
+    if (op0 && op0.state === 'active' && !ch.stop) {
+      const mv = c.mv(op0.station);
+      if (mv && mv.state === 'starved' && /Rohmaterial|Lager|Stangen/.test(mv.cause)) items.push({ kind: 'material', i: o.ops.indexOf(op0), sec: mv.sinceSec, station: op0.station, mv, text: `Rohmaterial fehlt an ${op0.station}: ${mv.cause}`, short: 'fehlendes Rohmaterial' });
+    }
+    const main = items.slice().sort((a, b) => b.sec - a.sec)[0] || null;
+    const list = items.slice().sort((a, b) => b.sec - a.sec).slice(0, 4).sort((a, b) => a.i - b.i);
+    return { items: list, main, chain: ch };
+  }
+  /** kompakte Bausteine für die Risiko-Karten: wo steht der Auftrag jetzt, was bremst ihn (Hauptursache laut Plantafel) */
   function orderWhyParts(c, o) {
     const cur = curOp(o);
-    let now = '', bn = '';
+    let now = '';
     if (cur) {
       const isM = !!S().machines[cur.station], mv = isM ? c.mv(cur.station) : null;
+      const fe = (c.fc().orders[o.id] || {}).ops ? c.fc().orders[o.id].ops[o.ops.indexOf(cur)] : null;
       if (cur.state === 'active' && mv) {
-        if (mv.state === 'fault' || WAIT[mv.state]) now = `AG ${cur.seq} an ${cur.station} steht: ${stLabel(mv.state)} – ${mv.cause}`;
+        if (mv.state === 'fault' || WAIT[mv.state]) now = `AG ${cur.seq} an ${cur.station} steht: ${stLabel(mv.state)} – ${causeCore(mv)}`;
         else now = `AG ${cur.seq} „${cur.op}“ an ${cur.station}${mv.state !== 'running' ? ' (' + stLabel(mv.state) + ')' : ''} · ${nm(cur.good + cur.scrap)}/${nm(cur.target)}${mv.etaOpEnd ? ' · fertig ca. ' + tc(mv.etaOpEnd) : ''}`;
       } else if (cur.state === 'external' && cur.ext) now = `AG ${cur.seq} ${cur.op}: ${cur.ext.returnText}`;
-      else if (cur.state === 'waiting') {
-        const b = isM ? blockerOn(c, cur.station, o.id, cur.seq) : null;
-        now = `AG ${cur.seq} „${cur.op}“ wartet an ${cur.station}${cur.waiting ? ' · ' + stk(cur.waiting) + ' im Eingang' : ''}${b ? ' · vorher ' + b.before[0].orderId + ' AG ' + b.before[0].seq + (b.before[0].active ? ' (läuft)' : '') + ' bis ca. ' + tc(b.until) : ''}`;
-      } else now = `nächster Schritt AG ${cur.seq} „${cur.op}“ an ${cur.station === 'EXT' ? 'Fremdbearbeitung' : cur.station}${cur.plannedStart ? ' ab ca. ' + tc(cur.plannedStart) : ''}`;
+      else if (cur.state === 'waiting') now = `AG ${cur.seq} „${cur.op}“ wartet an ${cur.station}${cur.waiting ? ' · ' + stk(cur.waiting) + ' im Eingang' : ''}${fe && fe.start > c.t + 300 ? ' · Start ca. ' + tc(fe.start) : ''}`;
+      else now = `nächster Schritt AG ${cur.seq} „${cur.op}“ an ${cur.station === 'EXT' ? 'Fremdbearbeitung' : cur.station}${fe ? ' ab ca. ' + tc(Math.max(c.t, fe.start)) : ''}`;
     }
-    const bm = bnMachine(o);
-    if (o.bottleneck) {
-      const bop = bm ? o.ops.find(op => op.station === bm && !op.complete) : null;
-      const b = bop && bop.state !== 'active' && S().machines[bm] ? blockerOn(c, bm, o.id, bop.seq) : null;
-      bn = `${o.bottleneck}${b ? ' · vorher ' + b.before[0].orderId + ' AG ' + b.before[0].seq + (b.before[0].active ? ' (läuft)' : '') + ' bis ca. ' + tc(b.until) : ''}`;
-    }
-    return { now, bn };
+    const dc = delayCauses(c, o);
+    return { now, bn: dc && dc.main ? dc.main.text : o.bottleneck || '' };
   }
+  /** Ursachenkette als Satz (für Klartext, Übergabe, Claude) */
   function orderWhy(c, o) {
-    const parts = [];
-    const cur = curOp(o);
-    if (cur) {
-      const mv = S().machines[cur.station] ? c.mv(cur.station) : null;
-      if (cur.state === 'active' && mv) {
-        if (mv.state === 'fault' || WAIT[mv.state]) parts.push(`AG ${cur.seq} an ${mName(cur.station)} steht: ${stLabel(mv.state)} – ${mv.cause}`);
-        else parts.push(`AG ${cur.seq} „${cur.op}“ ${mv.state === 'running' ? 'läuft an ' + mName(cur.station) : 'an ' + mName(cur.station) + ': ' + stLabel(mv.state)} (${cur.good + cur.scrap}/${cur.target}${mv.etaOpEnd ? ', fertig ca. ' + tc(mv.etaOpEnd) : ''})`);
-      } else if (cur.state === 'external' && cur.ext) parts.push(`AG ${cur.seq} ${cur.op}: ${cur.ext.returnText}`);
-      else if (cur.state === 'waiting') {
-        const b = S().machines[cur.station] ? blockerOn(c, cur.station, o.id, cur.seq) : null;
-        parts.push(`AG ${cur.seq} „${cur.op}“ wartet an ${mName(cur.station)}${cur.waiting ? ' (' + stk(cur.waiting) + ' im Eingang)' : ''}${b ? ' – ' + b.text : ''}`);
-      } else parts.push(`nächster Schritt AG ${cur.seq} „${cur.op}“ an ${cur.station === 'EXT' ? 'Fremdbearbeitung' : mName(cur.station)}${cur.plannedStart ? ' ab ca. ' + tc(cur.plannedStart) : ''}`);
-    }
-    const bm = bnMachine(o);
-    if (o.bottleneck) {
-      const bop = bm ? o.ops.find(op => op.station === bm && !op.complete) : null;
-      const b = bop && bop.state !== 'active' && S().machines[bm] ? blockerOn(c, bm, o.id, bop.seq) : null;
-      parts.push(`längster Arbeitsgang im Plan: ${o.bottleneck}${b ? ' – ' + b.text : ''}`);
-    }
-    return uc1(parts.join('; ')) + '.';
+    const dc = delayCauses(c, o);
+    if (!dc || !dc.items.length) return o.bottleneck ? `Längster Arbeitsgang im Plan: ${o.bottleneck}.` : '';
+    return 'Ursache laut Plantafel: ' + dc.items.map(x => x.text).join('; ') + '.';
   }
-  /** Empfehlung für einen knappen/späten Auftrag – nur, was nach Datenlage wirklich hilft:
-      Eilauftrag nur, wenn eingeplante (nicht laufende) Arbeitsgänge anderer Aufträge davor liegen; Hinweis, wenn dabei
-      selbst knappe Aufträge überholt würden. */
-  function orderAdvice(c, o) {
-    const remain = o.ops.filter(op => !op.complete && op.station !== 'VERSAND');
-    const nowT = NOW();
-    // ab wann die Teile für einen Arbeitsgang am Platz sind (wie die Engine: Eingang → jetzt, Ausgang Vorgänger → ~10 min, sonst erster Behälter)
-    const availOf = (op) => {
-      const i = o.ops.indexOf(op), prev = i > 0 ? o.ops[i - 1] : null;
-      if (i <= 0 || op.waiting > 0 || !prev) return nowT;
-      if (prev.complete || prev.inOutput > 0) return nowT + 600;
-      return prev.firstOutT || nowT;
-    };
-    // Überholbar sind nur eingeplante (nicht laufende) Aufträge, die erst starten, wenn die eigenen Teile schon da sind
-    const cand = []; let gated = null;
-    for (const op of remain) {
-      if (!S().machines[op.station] || op.state === 'active') continue;
+
+  // ================================================================== Terminberatung (eine Regel für Meldung, Auftragsliste und Copilot)
+  /** WF.sim.orderAdvice, sonst dieselbe Regel lokal: Eilauftrag nur, wenn er mindestens 15 min bringt und kein anderer
+      Auftrag dadurch spät (bzw. später spät) wird – Was-wäre-wenn der Engine, ohne sie eine vorsichtige Schätzung. */
+  function simAdvice(orderId) {
+    if (WF.sim && typeof WF.sim.orderAdvice === 'function') {
+      try { const r = WF.sim.orderAdvice(orderId); if (r) return r; } catch (e) { if (G.console) console.warn('[ai] orderAdvice', e); }
+    }
+    return fallbackAdvice(orderId);
+  }
+  function fallbackAdvice(orderId) {
+    const c = data(), o = c.ov(orderId);
+    if (!o) return null;
+    const open = { label: 'Auftrag öffnen', action: { type: 'select', kind: 'order', id: o.id } };
+    const base = { orderId: o.id, risk: o.risk, lateSec: o.eta != null ? o.eta - o.due : null, eta: o.eta, due: o.due, bottleneckStation: bnMachine(o) };
+    if (o.status === 'fertig') return Object.assign(base, { cause: 'Auftrag fertig', causeKind: 'done', text: `${o.id} ist fertig (${o.shippedQty}/${o.qty} Stk).`, action: null, actionLabel: null, actions: [open], alternatives: [], sideEffects: [], whatIf: null });
+    let wi = null;
+    if (o.priority !== 'eil') {
+      let w = null;
+      if (typeof WF.sim.whatIfPriority === 'function') { try { w = WF.sim.whatIfPriority(o.id, 'eil'); } catch (e) { w = null; } }
+      wi = w && w.ok ? { recommend: !!w.recommend, gainSec: w.gainSec || 0, newlyLate: w.newlyLate || [], laterLate: w.laterLate || [],
+        side: (w.affected || []).filter(r => Math.abs(r.deltaSec) >= 300).map(r => ({ orderId: r.orderId, beforeT: r.before, afterT: r.after, lateBy: Math.max(0, r.after - r.due) })) } : localEilCheck(c, o);
+    }
+    const dc = delayCauses(c, o), main = dc && dc.main;
+    const action = wi && wi.recommend ? { type: 'setPriority', orderId: o.id, priority: 'eil' } : null;
+    const r = Object.assign(base, { cause: main ? main.text : slackTxt(o.slackSec), causeKind: main ? ({ wait: 'queue', run: 'bottleneck' }[main.kind] || main.kind) : null,
+      action, actionLabel: action ? 'Als Eilauftrag' : null, actions: action ? [{ label: 'Als Eilauftrag', action }, open] : [open], alternatives: [],
+      sideEffects: wi ? wi.side : [], whatIf: wi ? { recommend: wi.recommend, gainSec: wi.gainSec, newlyLate: wi.newlyLate, laterLate: wi.laterLate } : null });
+    r.text = adviceText(c, o, r).text.replace(/\*\*/g, '');
+    return r;
+  }
+  /** Schätzung ohne Was-wäre-wenn der Engine: überholbar sind nur eingeplante Arbeitsgänge, die erst starten, wenn die
+      eigenen Teile schon da sind; die Überholten rutschen um die eigene Belegzeit nach hinten. */
+  function localEilCheck(c, o) {
+    const now = c.t, cand = [];
+    for (const op of o.ops) {
+      if (op.complete || !S().machines[op.station] || op.state === 'active') continue;
       const b = blockerOn(c, op.station, o.id, op.seq); if (!b || !b.queued.length) continue;
-      const av = availOf(op), ov = b.queued.filter(e => e.start >= av - 300);
-      if (ov.length) cand.push({ op, b, ov, av }); else if (!gated) gated = { op, av };
+      const i = o.ops.indexOf(op), prev = i > 0 ? o.ops[i - 1] : null;
+      const av = i <= 0 || op.waiting > 0 || !prev ? now : prev.complete || prev.inOutput > 0 ? now + 600 : (prev.firstOutT || now);
+      const ov = b.queued.filter(e => e.start >= av - 300);
+      if (ov.length) cand.push({ op, ov });
     }
-    const ext = remain.find(op => op.station === 'EXT' && op.state !== 'done');
-    const eil = { label: `${o.id} als Eilauftrag`, desc: `Maschinen ziehen ${o.id} beim nächsten Auftragswechsel vor; laufende Teile werden nicht unterbrochen.`, action: { type: 'setPriority', orderId: o.id, priority: 'eil' }, icon: 'bolt' };
-    const late = o.risk === 'spät';
-    const bm = bnMachine(o);
-    const protect = bm && S().machines[bm] ? (station(bm).loading === 'auto' ? `${bm} läuft unbemannt weiter – Material und Standzeit für die Nacht sichern` : `${bm} ohne Unterbrechung laufen lassen (Pausenablösung, Störungen dort zuerst beheben)`) : null;
-    const pufT = (x) => (x.slackSec < 0 ? dur0(-x.slackSec) + ' Verzug' : x.slackSec < 60 ? 'kein Puffer' : 'Puffer ' + dur0(x.slackSec));
-    if (o.priority !== 'eil' && cand.length) {
-      const q = cand[0];
-      const over = [...new Set(cand.flatMap(x => x.ov.map(e => e.orderId)))];
-      const tightOver = over.map(id => c.ov(id)).filter(x => x && x.status !== 'fertig' && x.slackSec != null && x.slackSec < 2 * 3600);
-      // Abwägung: Belegung des eigenen Arbeitsgangs (= Verschiebung der Überholten) gegen den möglichen Gewinn
-      const mine = (c.fc().machines[q.op.station] || []).find(e => e.orderId === o.id && e.seq === q.op.seq);
-      const pushSec = mine ? Math.max(0, mine.end - mine.start) : 0;
-      const gainSec = Math.max(...cand.map(x => x.ov.reduce((s, e) => s + Math.max(0, e.end - e.start), 0)));
-      const hurt = tightOver.filter(x => x.slackSec < pushSec).map(x => ({ x, by: pushSec - Math.max(0, x.slackSec) }));
-      const okOver = tightOver.filter(x => x.slackSec >= pushSec);
-      const costSec = hurt.reduce((s, h) => s + h.by, 0), helpSec = late ? Math.min(gainSec, -o.slackSec) : 0;
-      const hurtTxt = (h) => (h.x.slackSec < 0 ? `${h.x.id} (schon ${dur0(-h.x.slackSec)} Verzug) bekäme ~${dur0(h.by)} mehr` : `${h.x.id} (${pufT(h.x)}) würde ~${dur0(h.by)} spät`);
-      if (late && hurt.length && costSec >= helpSec * 0.8) {
-        const alts = capableAlts(o.id, q.op.seq, q.op.station).filter(x => { const v = c.mv(x); return v && v.state !== 'fault' && v.state !== 'off'; });
-        const altTxt = alts.length ? `AG ${q.op.seq} auf ${listJoin(alts.slice(0, 2))} verlagern (dort neu rüsten), ` : '';
-        const act = alts.length ? { label: `${o.id} AG ${q.op.seq} auf ${alts[0]} verlagern`, desc: `${q.op.op} · ${q.op.station} bleibt für ${listJoin(hurt.map(h => h.x.id))} frei · dort neu rüsten`, action: { type: 'moveOp', orderId: o.id, seq: q.op.seq, stationId: alts[0] }, icon: 'route' } : null;
-        const bnT = bm && S().machines[bm] ? (station(bm).loading === 'auto' ? `${bm} unbemannt durchlaufen lassen` : `Überstunden am Engpass ${bm}`) : `Überstunden an ${q.op.station}`;
-        return { text: `Ein Eilauftrag würde den Verzug nur verschieben: ${o.id} würde an ${q.op.station} vor ${listJoin(q.ov.slice(0, 2).map(e => e.orderId + ' AG ' + e.seq))} gezogen und belegt die Maschine ~${dur0(pushSec)} – ${listJoin(hurt.map(hurtTxt))}. Besser: ${altTxt}${bnT} oder Teillieferung mit ${custShort(o.customer)} abstimmen.`, action: act };
-      }
-      const caution = (hurt.length ? ` Achtung: ${listJoin(hurt.map(hurtTxt))} – netto gewinnt ${o.id} trotzdem bis ~${dur0(helpSec)}.` : '')
-        + (okOver.length ? ` ${listJoin(okOver.map(x => `${x.id} (${pufT(x)})`))} ${okOver.length === 1 ? 'wird' : 'werden'} überholt, der Puffer reicht aber (${q.op.station}-Belegung ~${dur0(pushSec)}).` : '');
-      return { text: `${late ? '' : 'Termin hält knapp. Falls es enger wird: '}${o.id} als **Eilauftrag** kennzeichnen – ${q.op.station} zieht ihn dann vor ${listJoin(q.ov.slice(0, 2).map(e => e.orderId + ' AG ' + e.seq))}; laufende Teile werden nicht unterbrochen.${caution}`, action: late || o.slackSec < 3600 ? eil : null };
+    const none = { recommend: false, gainSec: 0, newlyLate: [], laterLate: [], side: [] };
+    if (!cand.length) return none;
+    const q = cand[0];
+    const mine = (c.fc().machines[q.op.station] || []).find(e => e.orderId === o.id && e.seq === q.op.seq);
+    const push = mine ? Math.max(0, mine.end - mine.start) : 0;
+    const gain = q.ov.reduce((s, e) => s + Math.max(0, e.end - e.start), 0);
+    const side = [], newlyLate = [], laterLate = [];
+    for (const id of new Set(q.ov.map(e => e.orderId))) {
+      const x = c.ov(id); if (!x || x.eta == null) continue;
+      const after = x.eta + push;
+      side.push({ orderId: id, beforeT: x.eta, afterT: after, lateBy: Math.max(0, after - x.due) });
+      if (after > x.due) (x.eta > x.due ? laterLate : newlyLate).push(id);
     }
-    if (ext) {
-      const partner = (ext.ext && ext.ext.partner) || 'der Härterei';
-      return { text: late ? `Termin hängt am Rücklauf aus der Fremdbearbeitung (${ext.op}) – Expressdurchlauf bei ${partner} anfragen oder Teillieferung mit ${custShort(o.customer)} abstimmen.` : `Termin hält knapp; kritisch ist der Rücklauf aus der Fremdbearbeitung: ${ext.op} bei ${partner} – Lose pünktlich bereitstellen${protect ? '; ' + protect : ''}.`, action: null };
+    return { recommend: gain >= 900 && !newlyLate.length && !laterLate.length, gainSec: gain, newlyLate, laterLate, side };
+  }
+  /** Überstunden-Text: realistisch nur bis ca. 8 h; darüber reicht es allein nicht */
+  const overtimeTxt = (st, sec) => (sec > 8 * 3600 ? `Überstunden an ${st} allein reichen nicht (es fehlen ca. ${durR(sec)})` : `ca. ${durR(Math.max(900, sec))} Überstunden an ${st}`);
+  /** Empfehlung zu einem Auftrag: Eilauftrag nur nach der Engine-Regel, sonst der Hebel an der Hauptursache.
+      → { text (Markdown), actions: [Aktionskarten], eilOk, main (Hauptursache), causes } */
+  function adviceText(c, o, adv) {
+    adv = adv || simAdvice(o.id) || {};
+    const dc = delayCauses(c, o), main = dc && dc.main;
+    const late = o.slackSec != null && o.slackSec < 0, need = late ? -o.slackSec : 0;
+    const wi = adv.whatIf, acts = [];
+    const sideFx = (adv.sideEffects || []).filter(x => x.orderId !== o.id && Math.abs(x.afterT - x.beforeT) >= 300);
+    const lateOf = (id) => { const x = sideFx.find(y => y.orderId === id); return x && x.lateBy > 0 ? `${id} würde ${durR(x.lateBy)} zu spät` : `${id} würde spät`; };
+    const eilOk = !!(adv.action && adv.action.type === 'setPriority');
+    let eil = '';
+    if (o.priority === 'eil') eil = `${o.id} ist bereits Eilauftrag.`;
+    else if (eilOk) {
+      const g = wi && wi.gainSec ? wi.gainSec : 0;
+      eil = `**${o.id} als Eilauftrag kennzeichnen:** fertig ca. ${tc(o.eta - g)} statt ${tc(o.eta)} (${deltaTxt(-g)}); kein anderer Auftrag wird dadurch spät${sideFx.length ? ' – später fertig werden ' + listJoin(sideFx.slice(0, 3).map(x => `${x.orderId} (${deltaTxt(x.afterT - x.beforeT)})`)) : ''}.`;
+      acts.push({ label: `${o.id} als Eilauftrag`, desc: `Fertig ca. ${dueTxt(o.eta - g)} statt ${dueTxt(o.eta)} · Maschinen ziehen ihn beim nächsten Auftragswechsel vor`, action: adv.action, icon: 'bolt' });
+    } else if (wi) {
+      const hurt = (wi.newlyLate || []).concat(wi.laterLate || []);
+      if (hurt.length) eil = `Kein Eilauftrag – er würde den Verzug nur verschieben: ${listJoin(hurt.slice(0, 2).map(lateOf))}.`;
+      else if (!(wi.gainSec >= 60)) {
+        const why = main && main.kind === 'wait' && main.blockers && main.blockers.length ? `${main.station} ist schon mit ${blockTxt(main.blockers)} belegt, bevor die Teile da sind – laufende Arbeitsgänge werden nicht unterbrochen` : `vor ${o.id} liegt nur laufende bzw. ohnehin früher fertige Arbeit`;
+        eil = `Ein Eilauftrag bringt hier nichts (${why}).`;
+      } else if (wi.gainSec < 900) eil = `Ein Eilauftrag brächte nur ${durR(wi.gainSec)}.`;
     }
-    const gatedTxt = gated ? `die Teile für AG ${gated.op.seq} sind erst ca. ${tc(gated.av)} an ${gated.op.station}, die Aufträge davor laufen bis dahin ohnehin` : null;
-    if (!late) return { text: `Termin hält knapp – ${protect || 'Engpass ohne Unterbrechung laufen lassen'}. Ein Eilauftrag bringt hier nichts: ${gatedTxt || 'vor ' + o.id + ' liegt nur bereits laufende Arbeit'}.`, action: null };
-    let runTxt = null;
-    for (const op of remain) {
-      if (!S().machines[op.station] || op.state === 'active') continue;
-      const b = blockerOn(c, op.station, o.id, op.seq);
-      if (b && b.running.length) { runTxt = `an ${op.station} läuft zuerst ${b.running[0].orderId} AG ${b.running[0].seq} (bis ca. ${tc(b.running[0].end)})`; break; }
+    // Hebel an der Hauptursache
+    const lev = [];
+    if (adv.action && adv.action.type === 'moveOp') {
+      const a = adv.action, alt = (adv.alternatives || []).find(x => x.kind === 'moveOp' && x.action && x.action.stationId === a.stationId);
+      lev.push(`AG ${a.seq} auf ${mName(a.stationId)} verlagern${alt && alt.gainSec >= 60 ? ' (' + durR(alt.gainSec) + ' früher)' : ''}`);
+      acts.push({ label: `${o.id} AG ${a.seq} auf ${a.stationId} verlagern`, desc: `Dort wird neu gerüstet${alt && alt.gainSec >= 60 ? ' · ' + durR(alt.gainSec) + ' früher fertig' : ''}`, action: a, icon: 'route' });
     }
-    runTxt = [runTxt, gatedTxt].filter(Boolean).join('; ') || 'vor ' + o.id + ' liegt nur bereits laufende Arbeit';
-    const bnTxt = bm && S().machines[bm] ? (station(bm).loading === 'auto' ? `${bm} unbemannt durchlaufen lassen` : `Zusatzschicht/Überstunden an ${bm}`) : 'Zusatzschicht/Überstunden am Engpass';
-    return { text: `Ein Eilauftrag hilft hier nicht – ${runTxt}. Der Verzug entsteht in der Bearbeitungszeit${o.bottleneck ? ' am Engpass ' + o.bottleneck : ''}: ${bnTxt} oder Teillieferung mit ${custShort(o.customer)} abstimmen.`, action: null };
+    if (main) {
+      if (main.kind === 'stop' && main.mv) {
+        const fi = faultInfo(main.mv);
+        lev.push(fi ? `Störung an ${main.station} zuerst beheben (${fi.working ? 'Reparatur läuft' : fi.person ? sn(fi.person.name) + ' ist unterwegs' : 'Instandhaltung hinschicken'}, Ende ca. ${clk(fi.endT)})` : lc1(waitAdvice(c, main.mv)).replace(/\.$/, ''));
+      } else if (main.kind === 'wait' || main.kind === 'run') {
+        const st = main.station, sec = late ? Math.min(main.sec, need) : main.sec;
+        if (main.auto) lev.push(`${st} läuft auch unbemannt – Standzeit und Material für die Nacht sichern`);
+        else if (late) lev.push(overtimeTxt(st, sec));
+        else lev.push(`${st} ohne Unterbrechung laufen lassen (Pausenablösung, Störungen dort zuerst)`);
+      } else if (main.kind === 'ext') lev.push(`Expressdurchlauf bei ${main.partner} anfragen (${main.process})`);
+      else if (main.kind === 'material' && main.mv) lev.push(lc1(waitAdvice(c, main.mv)).replace(/\.$/, ''));
+    }
+    if (late) lev.push(`Teillieferung mit ${custShort(o.customer)} abstimmen`);
+    let text;
+    if (!late && o.slackSec != null && o.slackSec >= 0) {
+      const watch = main ? `im Blick: ${main.short}` : bnMachine(o) ? `im Blick: ${bnMachine(o)}` : '';
+      if (eilOk && o.slackSec < 2 * 3600) text = `Termin hält knapp (${slackTxt(o.slackSec)}). Zur Absicherung: ${eil}`;
+      else text = `Kein Eingriff nötig – ${slackTxt(o.slackSec)} reicht${watch ? '; ' + watch : ''}${lev.length && !eilOk ? ' (' + lev[0] + ')' : ''}.${!eilOk && wi && (wi.newlyLate || []).concat(wi.laterLate || []).length ? ' ' + eil : ''}`;
+      if (!(eilOk && o.slackSec < 2 * 3600)) { const k = acts.findIndex(x => x.action && x.action.type === 'setPriority'); if (k >= 0) acts.splice(k, 1); }
+    } else {
+      text = [eil, lev.length ? (eilOk ? 'Außerdem: ' : 'Hebel: ') + uc1(listJoin(lev)) + '.' : ''].filter(Boolean).join(' ');
+    }
+    return { text: text.replace(/\s+/g, ' ').trim(), actions: acts, eilOk, main, causes: dc };
   }
   /** Rohmaterialbedarf der offenen Aufträge (noch nicht ausgebucht) je Material */
   function materialNeeds() {
@@ -573,13 +685,21 @@
   }
 
   // ================================================================== Antwort-Baukasten
-  function A(kind) { return { kind, md: [], stats: null, sources: [], actions: [], followups: [], impact: null, entity: null, slots: null }; }
+  /** Antwort: Kopf (eyebrow, head, sev), Kennzahlen (stats), Text (md), Empfehlung (rec + actions), Datenbasis (sources) */
+  function A(kind) { return { kind, eyebrow: null, head: null, sev: null, md: [], stats: null, rec: null, sources: [], actions: [], followups: [], impact: null, entity: null, slots: null }; }
   /** Platzhalter „\u0005name“ im Markdown = grafischer Block (z. B. Arbeitsgang-Kette); a.text enthält stattdessen den Klartext */
   const SLOT = (a, name, text, data) => { (a.slots = a.slots || {})[name] = { text, data }; a.md.push('\u0005' + name); };
+  const REC_RE = /^>\s*\*\*(Empfehlung|Einschätzung|Hinweis|Jetzt tun):\*\*\s*(.*)$/;
   const done = (a) => {
-    const j = a.md.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-    if (a.slots && /\u0005/.test(j)) { a.display = j; a.text = j.replace(/\u0005(\w+)/g, (_, k) => (a.slots[k] ? a.slots[k].text : '')).replace(/\n{3,}/g, '\n\n').trim(); }
-    else { a.display = null; a.text = j.replace(/\u0005\w+/g, '').trim(); }
+    // Empfehlung als eigener Block (mit den Aktionen), Überschrift aus einer reinen Fett-Zeile am Anfang
+    const body = [];
+    for (const l of a.md) { const m = REC_RE.exec(l); if (m && !a.rec) a.rec = { label: m[1], text: m[2] }; else body.push(l); }
+    if (!a.head) { const k = body.findIndex(l => l.trim()); if (k >= 0 && /^\*\*[^*]+\*\*$/.test(body[k].trim())) { a.head = body[k].trim().slice(2, -2).replace(/[.:]$/, ''); body.splice(k, 1); } }
+    const j = body.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    a.display = j;
+    const plain = (a.slots ? j.replace(/\u0005(\w+)/g, (_, k) => (a.slots[k] ? a.slots[k].text : '')) : j.replace(/\u0005\w+/g, '')).replace(/\n{3,}/g, '\n\n').trim();
+    a.body = plain;
+    a.text = [a.head ? '**' + a.head + '**' : '', plain, a.rec ? '> **' + a.rec.label + ':** ' + a.rec.text : ''].filter(Boolean).join('\n\n');
     return a;
   };
   function addAction(a, x) { if (x && !a.actions.some(y => JSON.stringify(y.action) === JSON.stringify(x.action))) a.actions.push(x); }
@@ -595,14 +715,17 @@
     const open = c.open(), late = open.filter(o => o.risk === 'spät').sort((x, y) => x.slackSec - y.slackSec), tight = open.filter(o => o.risk === 'knapp').sort((x, y) => x.slackSec - y.slackSec);
     const people = Object.values(S().people).filter(p => p.state !== 'offShift');
     const shName = sh.id ? sh.name : 'Geisterschicht (unbemannt)';
-    const oeeTxt = k.oee != null ? `, OEE heute **${pct(k.oee, 1)}** (${k.oee >= TARGET_OEE ? 'über' : 'unter'} dem Ziel von ${pct(TARGET_OEE)})` : '';
-    if (sh.id) a.md.push(`**${shName}, ${WF.sim.clock()}:** ${prod.length} von ${mvs.length} Arbeitsplätzen produzieren${oeeTxt}.`);
-    else a.md.push(`**${shName}, ${WF.sim.clock()}:** ${prod.length ? prod.length + ' von ' + mvs.length + ' Arbeitsplätzen produzieren unbemannt' : 'kein Arbeitsplatz produziert'}; Frühschicht ab ${dueTxt(sh.endsAt)}${oeeTxt}.`);
+    const oeeTxt = k.oee != null ? `OEE heute **${pct(k.oee, 1)}** – ${k.oee >= TARGET_OEE ? 'über' : 'unter'} dem Ziel von ${pct(TARGET_OEE)}` : 'noch keine OEE-Bezugszeit heute';
+    const runTxt = sh.id ? `${prod.length} von ${mvs.length} Arbeitsplätzen produzieren` : prod.length ? `${prod.length} von ${mvs.length} Arbeitsplätzen produzieren unbemannt` : 'kein Arbeitsplatz produziert';
+    a.eyebrow = `Lage · ${shName} · ${WF.sim.clock()}`;
+    a.sev = faults.length ? 'crit' : late.length || waits.some(m => m.sinceSec >= 600) ? 'warn' : 'ok';
+    a.head = faults.length ? `Störung an ${listJoin(faults.map(m => m.id))} – ${runTxt}` : late.length ? `${uc1(runTxt)} – ${pl(late.length, 'Termin', 'Termine')} verspätet` : `${uc1(runTxt)}, Termine im Plan`;
+    a.md.push(`${oeeTxt}${sh.id ? '' : '; Frühschicht ab ' + dueTxt(sh.endsAt)}.`);
     a.stats = [
-      { l: 'OEE heute', v: pct(k.oee, 1), s: sh.id && k.oeeShift != null ? 'Schicht ' + pct(k.oeeShift, 1) : 'Ziel ' + pct(TARGET_OEE), c: k.oee == null ? '' : k.oee >= TARGET_OEE ? 'ok' : 'warn' },
-      { l: 'Fertige Teile', v: nm(k.goodFinished), s: nm(k.good) + ' je AG' },
+      oeeStat(k.oee, sh.id && k.oeeShift != null ? 'Schicht ' + pct(k.oeeShift, 1) : 'Ziel ' + pct(TARGET_OEE)),
+      { l: 'Fertige Teile', v: nm(k.goodFinished), s: nm(k.good) + ' je Arbeitsgang' },
       { l: 'Termintreue', v: pct(k.onTimePct), s: late.length + ' spät · ' + tight.length + ' knapp', c: late.length ? 'warn' : 'ok' },
-      { l: 'Stillstand', v: eur(k.lossEur), s: 'heute', c: 'info' },
+      { l: 'Stillstand', v: eur(k.lossEur), s: 'Kosten heute', c: 'info' },
     ];
     a.md.push('');
     for (const m of faults) { const fi = faultInfo(m); a.md.push(`- **Störung ${mName(m.id)}** seit ${clk(m.since)}: ${m.fault.code} ${m.fault.text} – ${fi.who}.`); }
@@ -628,14 +751,14 @@
       a.md.push(`- Personal: ${people.length} im Dienst${brk ? ', ' + brk + ' in Pause' : ''}${free ? ', ' + free + ' verfügbar' : ''}.`);
     } else a.md.push(`- Personal: niemand im Dienst – autonome Maschinen laufen weiter, solange Material und Standzeit reichen.`);
     a.md.push(`- Qualität: ${nm(k.scrap)} Ausschuss, FPY ${pct(k.fpy, 1)}.`);
-    // Empfehlung: das Wichtigste zuerst
-    let rec = null;
-    if (faults.length) { const m = faults[0], fi = faultInfo(m); rec = `Störung an ${mName(m.id)} hat Vorrang – ${fi.working ? 'Reparatur läuft' : fi.person ? sn(fi.person.name) + ' ist unterwegs' : 'Instandhaltung hinschicken'}; Prognose rechnet mit Ende ca. ${clk(fi.endT)}.`; }
-    else if (!sh.id && morningPlan(c)) rec = morningPlan(c);
-    else if (waitsS.length && waitsS[0].sinceSec >= 300) rec = `${mName(waitsS[0].id)}: ${waitAdvice(c, waitsS[0])}`;
-    else if (late.length) { const adv = orderAdvice(c, late[0]); rec = adv.text; addAction(a, adv.action); }
-    else if (low.some(mt => !mt.onOrder)) { const mt = low.find(x => !x.onOrder); rec = `${mt.name} nachbestellen (${matQty(mt, mt.reorderQty)} bei ${mt.supplier}, Lieferzeit ca. ${durR(mt.leadMin * 60)}).`; addAction(a, reorderAction(mt)); }
-    else if (ch.length) rec = `Keine akuten Eingriffe nötig. Nächster Fokus: Werkzeugwechsel ${clk(ch[0].t)} an ${mName(ch[0].machine)} vorbereiten.`;
+    // Empfehlung: das Wichtigste zuerst (dieselbe Rangfolge wie „Was muss ich jetzt tun?“)
+    const todo = todoList(c);
+    let rec;
+    if (!sh.id && morningPlan(c)) rec = morningPlan(c);
+    else if (todo.length) {
+      rec = todo[0].text + (todo[1] ? ` Danach: ${todo[1].short || todo[1].text}` : '');
+      for (const x of todo.slice(0, 2)) for (const ac of x.actions || []) addAction(a, ac);
+    } else if (ch.length) rec = `Keine akuten Eingriffe nötig. Nächster Fokus: Werkzeugwechsel ${clk(ch[0].t)} an ${mName(ch[0].machine)} vorbereiten.`;
     else rec = 'Keine akuten Eingriffe nötig – alle Arbeitsplätze laufen planmäßig.';
     a.md.push('', '> **Empfehlung:** ' + rec);
     a.sources = ['Maschinenstatus (' + mvs.length + ' Arbeitsplätze)', 'Prognose / Plantafel', 'Kennzahlen heute', 'Personal', srcStand()];

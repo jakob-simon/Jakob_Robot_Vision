@@ -158,6 +158,7 @@
       tip: `${r.short}: ${U.fmtNum(r.energy, 1)} kWh, ${U.fmtNum(r.good)} Gutteile${pp != null ? ' → ' + U.fmtNum(pp, 2) + ' kWh je Teil' : ''}` }; }));
   }
   const pct0 = (v) => v == null ? '–' : Math.round(v * 100) + ' %';
+  const pct1 = (v) => v == null ? '–' : U.fmtNum(v * 100, 1) + ' %';
   function niceStep(raw) {
     if (!(raw > 0)) return 1;
     const p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
@@ -241,7 +242,7 @@
       <div class="kpis an-kpis">
         <div class="kpi"><div class="l">Verlust ${range === 'ks' ? 'Schicht' : 'heute'}</div><div class="v">${U.fmtNum(lossTotal)}<small>€</small></div><div class="s" title="Maschinenstundensatz × Stillstand bei eingeplantem Auftrag">Stundensatz × Stillstand mit Auftrag</div></div>
         <div class="kpi"><div class="l">Größte Ursache</div><div class="v" style="font-size:22px">${top ? esc(top.label) : '–'}</div><div class="s">${top ? U.fmtEur(top.eur) + ' · ' + U.fmtPct(par.total ? top.eur / par.total : 0) + ' des Verlusts' : 'keine Verluste'}</div></div>
-        <div class="kpi"><div class="l">Werk-OEE</div><div class="v">${oo.oee == null ? '–' : U.fmtNum(oo.oee * 100, 1)}<small>%</small></div><div class="s">${range === 'ks' ? 'laufende Schicht' : `V ${pct0(k.availability)} × L ${pct0(k.performance)} × Q ${pct0(k.quality)}`}</div></div>
+        <div class="kpi"><div class="l">Werk-OEE</div><div class="v">${oo.oee == null ? '–' : U.fmtNum(oo.oee * 100, 1)}<small>%</small></div><div class="s">${range === 'ks' ? 'laufende Schicht' : `V ${pct1(k.availability)} × L ${pct1(k.performance)} × Q ${pct1(k.quality)}`}</div></div>
         <div class="kpi"><div class="l">Engpass</div><div class="v" style="font-size:22px">${bott ? esc(bott.short) : '–'}</div><div class="s"${bott && bott.full ? ` title="${esc(bott.full)}"` : ''}>${bott ? esc(bott.why) : 'kein eindeutiger Engpass'}</div></div>
         <div class="kpi"><div class="l">Energie je Fertigteil</div><div class="v">${energyPerPart != null ? U.fmtNum(energyPerPart, 2) : '–'}<small>kWh</small></div><div class="s">${U.fmtNum(machEnergy)} kWh Maschinen · ${U.fmtNum(k.goodFinished)} Fertigteile</div></div>
       </div>

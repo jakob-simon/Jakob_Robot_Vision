@@ -171,6 +171,8 @@
   const stShort = (id) => (ST[id] ? (ST[id].short || ST[id].name) : id);
   const mLabel = (id) => (ST[id] && ST[id].kind !== 'zone' && ST[id].kind !== 'store' ? id + ' ' + (ST[id].short || '') : stShort(id));
   const teile = (n) => n + (n === 1 ? ' Teil' : ' Teile');
+  /** Kurzname für Meldungen: ohne Klammerzusätze („(Beispiel)“, „(Schwesterfirma)“) und Rechtsform */
+  const shortName = (s0) => String(s0 || '').replace(/\s*\([^)]*\)/g, '').replace(/\s+(GmbH(\s*&\s*Co\.?\s*KG)?|AG|KG|e\.U\.)$/, '').trim();
   const opBatch = (r) => Math.max(1, r.transferBatch || 10);
   const sumArr = (a) => { let s = 0; for (const x of a || []) s += x; return s; };
   /** deterministisches Rauschen ohne RNG-Verbrauch (für Signale) */
@@ -3322,8 +3324,8 @@
         let adv = n0 && n0.advice && S.t - n0.advice.t < 1800 && n0.advice.prio === o.priority ? n0.advice : null;
         if (!adv) { const a = orderAdvice(id); adv = { t: S.t, prio: o.priority, suggestion: a.text, actions: a.actions, wi: a.whatIf }; }
         const n = notify({ key, sev: 'warn', role: 'Schichtleitung', entity: { kind: 'order', id },
-          title: `Termin gefährdet: ${id} (${o.customer})`,
-          body: `Prognose fertig ${U.fmtDayClock(f.eta)}, Termin ${U.fmtDayClock(o.due)} – ${d > 0 ? 'ca. ' + U.fmtDur(d) + ' Verzug' : 'sehr knapp (nur ' + U.fmtDur(-d) + ' Puffer)'}.${bn}`,
+          title: `Termin gefährdet: ${id} (${shortName(o.customer)})`,
+          body: `Prognose ${U.fmtDayClock(f.eta)} · Termin ${U.fmtDayClock(o.due)} · ${d > 0 ? U.fmtDur(d) + ' zu spät' : 'nur ' + U.fmtDur(-d) + ' Puffer'}${f.bottleneckStation ? ' · Engpass ' + f.bottleneckStation + ' ' + stShort(f.bottleneckStation) + (f.bottleneckSeq != null ? ' (AG ' + f.bottleneckSeq + ')' : '') : ''}`,
           suggestion: adv.suggestion, actions: adv.actions });
         n.whatIf = adv.wi || null; n.advice = adv;
       } else if (open && !late) resolveKey(key, 'Prognose wieder im Termin');
@@ -3647,25 +3649,25 @@
     const o = S.orders[orderId]; if (!o) return null;
     const open = { label: 'Auftrag öffnen', action: { type: 'select', kind: 'order', id: o.id } };
     if (o.status === 'fertig') return { orderId: o.id, risk: riskOf(o, o.doneT), lateSec: o.doneT - o.due, eta: o.doneT, due: o.due, cause: 'Auftrag fertig', causeKind: 'done', bottleneckStation: null,
-      text: `${o.id} ist fertig (${o.shippedQty}/${o.qty} Stk).`, action: null, actionLabel: null, actions: [open], alternatives: [], sideEffects: [], whatIf: null };
+      text: `${o.id} ist fertig (${o.shippedQty}/${o.qty} Stk).`, detail: `${o.id} ist fertig (${o.shippedQty}/${o.qty} Stk, ${U.fmtDayClock(o.doneT)}).`, action: null, actionLabel: null, actions: [open], alternatives: [], sideEffects: [], whatIf: null };
     const fc = forecast(), f = fc.orders[o.id] || {}, eta = f.eta != null ? f.eta : null;
     const lateSec = eta != null ? eta - o.due : null, risk = riskOf(o, eta);
     // Ursache: Rohmaterial fehlt im 1. Arbeitsgang, längster Abschnitt in der Fremdbearbeitung, sonst Engpass-Arbeitsgang
     let cause = null, causeKind = null, ext = null;
     const r0 = o.routing[0], op0 = o.ops[0], m0 = S.machines[r0.station];
     if (!op0.complete && r0.material && m0 && m0.op && m0.op.oid === o.id && m0.state === 'starved' && /Rohmaterial|Lager|Stangen/.test(m0.cause)) {
-      causeKind = 'material'; cause = `Rohmaterial fehlt an ${r0.station} (${m0.cause})`;
+      causeKind = 'material'; cause = `Rohmaterial ${S.materials[r0.material.id].name} fehlt an ${r0.station}`;
     }
     if (!cause) {
       let worst = null;
       (f.ops || []).forEach((x, i) => { if (x && x.end != null && x.start != null) { const d = x.end - Math.max(S.t, x.start); if (!worst || d > worst.d) worst = { d, i, x }; } });
       if (worst && o.routing[worst.i].station === 'EXT' && worst.d > (f.bottleneckSec || 0)) {
         const r = o.routing[worst.i]; ext = r;
-        causeKind = 'ext'; cause = `Fremdbearbeitung ${(r.ext && r.ext.process) || r.op} bei ${(r.ext && r.ext.partner) || 'Partner'} (Rückkehr ca. ${worst.x.lastReturn != null ? U.fmtDayClock(worst.x.lastReturn) : U.fmtDayClock(worst.x.end)})`;
+        causeKind = 'ext'; cause = `${r.op} bei ${shortName((r.ext && r.ext.partner) || 'Fremdbearbeiter')} (Rückkehr ca. ${worst.x.lastReturn != null ? U.fmtDayClock(worst.x.lastReturn) : U.fmtDayClock(worst.x.end)})`;
       }
     }
     const bnId = f.bottleneckStation || null, bnTxt = bnId ? `${bnId} ${stShort(bnId)}` : null;
-    if (!cause && bnId) { causeKind = 'bottleneck'; cause = `Engpass ${f.bottleneck}${f.bottleneckSec ? ', ca. ' + U.fmtDur(f.bottleneckSec) + ' Durchlauf' : ''}`; }
+    if (!cause && bnId) { causeKind = 'bottleneck'; cause = `Engpass ${bnTxt}${f.bottleneckSeq != null ? ' (AG ' + f.bottleneckSeq + ')' : ''}`; }
     const lateTxt = lateSec == null ? 'keine Prognose' : lateSec > 0 ? `Prognose ${U.fmtDayClock(eta)}, ${U.fmtDur(lateSec)} nach Termin ${U.fmtDayClock(o.due)}` : `Prognose ${U.fmtDayClock(eta)}, Puffer ${U.fmtDur(-lateSec)} bis Termin ${U.fmtDayClock(o.due)}`;
     const alternatives = [];
     // 1) Eilauftrag (Was-wäre-wenn)
@@ -3693,28 +3695,30 @@
     }
     // 3) Überstunden am Engpass, Expressdurchlauf (Fremdbearbeitung), Teillieferung – immer konkret benannt
     if (bnTxt && causeKind !== 'ext') alternatives.push({ kind: 'overtime', label: `Überstunden an ${bnId}`, ok: true, text: `Überstunden/Zusatzschicht am Engpass ${bnTxt}${lateSec > 0 ? ' (ca. ' + U.fmtDur(lateSec) + ' fehlen)' : ''}`, action: null });
-    if (ext) alternatives.push({ kind: 'express', label: 'Expressdurchlauf anfragen', ok: true, text: `Expressdurchlauf bei ${(ext.ext && ext.ext.partner) || 'dem Fremdbearbeiter'} anfragen (${(ext.ext && ext.ext.process) || ext.op})`, action: null });
+    if (ext) alternatives.push({ kind: 'express', label: 'Expressdurchlauf anfragen', ok: true, text: `Expressdurchlauf bei ${shortName((ext.ext && ext.ext.partner) || 'dem Fremdbearbeiter')} anfragen (${(ext.ext && ext.ext.process) || ext.op})`, action: null });
     if (causeKind === 'material') alternatives.push({ kind: 'material', label: 'Liefertermin klären', ok: true, text: `Liefertermin ${S.materials[r0.material.id].name} beim Lieferanten beschleunigen`, action: null });
-    alternatives.push({ kind: 'partial', label: 'Teillieferung abstimmen', ok: true, text: `Teillieferung mit ${o.customer} abstimmen`, action: null });
+    alternatives.push({ kind: 'partial', label: 'Teillieferung abstimmen', ok: true, text: `Teillieferung mit ${shortName(o.customer)} abstimmen`, action: null });
     // Hauptaktion und Text
-    let action = null, text;
+    // text = kompakt (Meldung, Leitstand-Karte): „Ursache: … Empfehlung: <eine Hauptmaßnahme>.“ – Details in detail/alternatives
+    let action = null, text, primary;
     const sideTxt = w && w.ok && (w.newlyLate.length || w.laterLate.length) ? w.text.split('; ').slice(1).join('; ') : '';
-    if (prioOk) {
-      action = { type: 'setPriority', orderId: o.id, priority: 'eil' };
-      text = `${w.text}. Als Eilauftrag kennzeichnen – die Maschinen ziehen ${o.id} beim nächsten Auftragswechsel vor (laufende Teile werden nicht unterbrochen); kein anderer Auftrag wird dadurch spät.`;
-    } else if (!cause) {
-      text = `Ursache: ${lateTxt} – Optionen im Copilot prüfen.`;
-    } else {
-      const why = o.priority === 'eil' ? 'Auftrag ist bereits Eilauftrag. ' : !w || !w.ok ? '' : sideTxt ? `Ein Eilauftrag würde den Verzug nur verschieben (${sideTxt}). `
-        : w.gainSec < 60 ? `Ein Eilauftrag bringt nichts – vor ${o.id} liegt nur bereits laufende bzw. ohnehin früher fertige Arbeit. ` : w.gainSec < 900 ? `Ein Eilauftrag bringt kaum etwas (nur ${U.fmtDur(w.gainSec)} früher). ` : '';
-      const opts = [];
-      if (move) { action = { type: 'moveOp', orderId: o.id, seq: f.bottleneckSeq, stationId: move.to }; opts.push(`AG ${f.bottleneckSeq} auf ${move.to} ${stShort(move.to)} verlagern (${move.text.replace(/^AG \d+ auf \S+: /, '')})`); }
-      for (const a of alternatives) if (a.kind === 'express' || a.kind === 'overtime' || a.kind === 'material') opts.push(a.text);
-      opts.push(`Teillieferung mit ${o.customer} abstimmen`);
-      text = `Ursache: ${cause}. ${why}Empfehlung: ${opts.join(', ')}.`;
-    }
+    const why = o.priority === 'eil' ? 'Auftrag ist bereits Eilauftrag.' : !w || !w.ok ? '' : prioOk ? '' : sideTxt ? `Ein Eilauftrag würde den Verzug nur verschieben (${sideTxt}).`
+      : w.gainSec < 60 ? `Ein Eilauftrag bringt nichts – vor ${o.id} liegt nur bereits laufende bzw. ohnehin früher fertige Arbeit.` : w.gainSec < 900 ? `Ein Eilauftrag bringt kaum etwas (nur ${U.fmtDur(w.gainSec)} früher).` : '';
+    const pa = alternatives.find(a => a.kind === 'priority'); if (pa) pa.note = why || null;
+    const etaOf = (t) => t && t.target ? U.fmtDayClock(t.target.after) : null;
+    if (prioOk) { action = { type: 'setPriority', orderId: o.id, priority: 'eil' }; primary = `Als Eilauftrag kennzeichnen (fertig ca. ${etaOf(w)}, kein anderer Auftrag wird spät)`; }
+    else if (move) { action = { type: 'moveOp', orderId: o.id, seq: f.bottleneckSeq, stationId: move.to }; primary = `AG ${f.bottleneckSeq} auf ${move.to} ${stShort(move.to)} verlagern`; }
+    else if (causeKind === 'ext') primary = `Expressdurchlauf bei ${shortName((ext.ext && ext.ext.partner) || 'dem Fremdbearbeiter')} anfragen`;
+    else if (causeKind === 'material') primary = `Liefertermin ${S.materials[r0.material.id].name} beschleunigen`;
+    else if (bnTxt && lateSec != null && lateSec <= 0) primary = `Engpass ${bnTxt} ohne Unterbrechung laufen lassen`;
+    else if (bnTxt && lateSec != null && lateSec <= 8 * 3600) primary = `Überstunden am Engpass ${bnTxt} einplanen`;
+    else if (bnTxt) primary = `Teillieferung mit ${shortName(o.customer)} abstimmen`;
+    if (!cause || !primary) text = `Ursache: ${cause || lateTxt} – Optionen im Copilot prüfen.`;
+    else text = `Ursache: ${cause}. Empfehlung: ${primary}.`;
+    const others = alternatives.filter(a => a.ok && a.kind !== 'priority' && !(action && a.action && a.action.type === action.type)).map(a => a.text);
+    const detail = `${lateTxt}. Ursache: ${cause || 'nicht eindeutig'}. ${why ? why + ' ' : ''}${w && w.ok ? 'Was-wäre-wenn Eilauftrag: ' + w.text + '. ' : ''}${primary ? 'Empfehlung: ' + primary + '. ' : ''}${others.length ? 'Weitere Optionen: ' + others.join('; ') + '.' : ''}`.trim();
     const label = action ? (action.type === 'setPriority' ? 'Als Eilauftrag' : `AG ${action.seq} auf ${action.stationId} verlagern`) : null;
-    return { orderId: o.id, risk, lateSec, eta, due: o.due, cause: cause || lateTxt, causeKind, bottleneckStation: bnId, text, action, actionLabel: label,
+    return { orderId: o.id, risk, lateSec, eta, due: o.due, cause: cause || lateTxt, causeKind, bottleneckStation: bnId, text, detail, action, actionLabel: label,
       actions: action ? [{ label, action }, open] : [open], alternatives, sideEffects,
       whatIf: w && w.ok ? { recommend: w.recommend, gainSec: w.gainSec, newlyLate: w.newlyLate, laterLate: w.laterLate, text: w.text } : null };
   }
