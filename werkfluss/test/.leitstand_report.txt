@@ -1,0 +1,79 @@
+I built both files: the Leitstand view (`40_leitstand.js`) and the machine detail drawer (`42_machine.js`). I tested them in isolation and in a build with every module currently in `src/`. The console showed no errors in any scenario, and the page never scrolled sideways at 1440, 1920 or 400 px. The scenarios were Mo 08:40, a tool-break fault, the noon break, shortly before shift end, the late shift, the unattended night run ("Geisterschicht"), Tuesday morning and a simulation reset. A Leitstand update takes about 1.7 ms, and nothing in the page changes while the simulation is paused. Scroll position and keyboard focus are kept.
+
+## Leitstand (`40_leitstand.js`)
+- **Header:** company and site (follows the settings), current shift with time left or "Pause bis …", Schichtleitung, "x von y im Dienst", and a TV-Modus button.
+- **KPI strip:**
+  - OEE heute with a sparkline from shift start, a dashed 75 % target line, points above or below target, shift OEE, and the V × L × Q breakdown.
+  - Fertige Teile (`goodFinished`), with Gutteile per Arbeitsgang, scrap and FPY underneath.
+  - Termintreue with counts of late and tight orders and the worst delay. Clicking it opens the order view.
+  - Stillstandkosten heute with the biggest contributor. Clicking it opens that machine.
+  - Energie: current kW, a 4-hour sparkline, kWh and average today.
+  - Offene Meldungen, split by severity and by role.
+- **Machine tiles:** all 13, in material-flow order, each labelled with its hall area. Each tile shows:
+  - Name, id and connection badge.
+  - A large state pill with "seit …", and the engine's cause on up to 2 lines.
+  - Order number and part name, with an Eil / verspätet / knapp tag; the operation and the customer.
+  - "Teil x von y" with a progress bar and "fertig ca. …".
+  - The most critical tool: name, wear bar and status ("noch 2 Teile · Wechsel ca. 09:24", "Standzeit erschöpft …", "gebrochen …"), coloured by urgency.
+  - The operator line: autonomous run, who is attending, or "wartet auf Bediener" with where that person is, plus a count of others at the machine.
+  - A 4-hour state band and input/output buffer fill.
+  - Fault and waiting tiles get a coloured stripe. Fault tiles are tinted red.
+  - A tile opens with a click or Enter/Space. The selected tile is highlighted.
+- **Above the grid:** state counts that also act as filters, and a sort switch "Materialfluss | Handlungsbedarf".
+- **Jetzt wichtig:** open and acknowledged critical/warning notifications. Each shows the recommendation, the notification's own action buttons (via `WF.app.runAction`) and Quittieren. Acknowledged items stay visible, dimmed, as "Ursache besteht noch". Below that, an "Als Nächstes · 2 h" list shows planned tool changes, operations finishing, breaks and shift end.
+- **KI-Schichtbriefing:** uses `WF.ai.briefing()` if it exists, synchronous or Promise. Otherwise it builds a rule-based briefing from `snapshot()` and live machine data. It refreshes every 15 sim-minutes, at most every 5 s real time, or every 2 min real time in AI mode.
+- **Gerade passiert:** the last 12 meaningful events, each with a coloured icon and a link to the entity.
+- **TV mode:** no controls, larger type and compact tiles, so all 13 tiles fit on a 1080p screen. Esc or "TV beenden" exits, and leaving the view also switches TV mode off.
+- **Phone:** one column, KPI strip in two columns, "Jetzt wichtig" above the tiles.
+
+## Machine drawer (`42_machine.js`)
+`update(el)` only re-renders a section when its content changes; fast values like part progress and remaining time are patched directly.
+- **Status:** large pill, "seit", cause and phase; an 8-hour state band with time axis and legend; the people at the machine.
+  - Fault box: alarm code and text, likely cause, who is repairing and "fertig ca.", tool-break detail, and "Sofort beheben (Demo)".
+  - First-piece box: stage, who, how long.
+  - Box for an ordered preventive tool change.
+- **Actions:**
+  - "Vorbeugenden Werkzeugwechsel einplanen" is only enabled when a tool will not last until the end of the operation. It opens a dialog to pick tools (none picked = the engine chooses), "next part boundary" or "shortly before shift end", and a reason.
+  - "Störung simulieren" opens a dialog that explains it is a demo function and lists the machine's alarm codes.
+  - "In der Halle zeigen" only appears once the Halle view exists.
+- **Auftrag & Fortschritt:** links to the order, risk, due date and forecast, operation data, the routing chain with finished steps ticked (clickable), operation and current-part progress with remaining time including loading, and "Teilende".
+- **Werkzeuge:** table with slot, name, kind and time per part, wear bar, "noch N Teile" against what is still needed, status chip, and the planned change (time, person, stage). Clicking a row shows that tool's `explain` text in one "WARUM?" box, together with the general tool rule.
+- **Live-Signale:**
+  - Level 2/3: operating mode, signal light, spindle speed and load with sparklines, override, coolant, part counter, power, NC program, tool in spindle; extra fields for the measuring room, washer and assembly.
+  - Level 1: power and current with sparklines, signal light, runtime today.
+  - Level 0: last tablet report and a "Jetzt anbinden" button that opens Anbindung.
+- **Puffer, Heute, Warteschlange, Stammdaten, Letzte Ereignisse.** Heute shows OEE with V/L/Q bars, today's state distribution, good parts, scrap, kWh and €.
+
+## Functions other modules can use
+- `WF.leitstand.briefing()` returns the rule-based briefing `{headline, bullets:[{text, sev, ent}], t, mode}`.
+- `WF.leitstand.refreshBriefing()` forces a new briefing.
+- `WF.machineSignals.samples(id)` returns the recorded signal samples `{t, rpm, load, kw, amp, temp}` from the last 30 sim-minutes.
+- The view also provides a nav badge showing the number of open critical notifications.
+
+## Engine data missing or confusing
+1. **No shift lead in the Spätschicht:** no profile person in shift S has the `lead` skill. I show the shift's Einrichter as "Schichtverantwortung … (keine Schichtleitung eingeteilt)".
+2. **No tool slot or pocket numbers:** the T1…Tn in the drawer are just the tool's position in the operation, not a real magazine slot.
+3. **No repair finish time in `machineView.fault`:** I calculate it from `state.people[fault.repairBy].workRem` when that person's `task.type==='repair'` and they are working. `repairBy` is only set once the repair starts.
+4. **No previous/next station for the current operation in `machineView`:** I read them from `state.orders[id].routing`.
+5. **No "planned wait" flag:** `machineView` doesn't say whether `waitOperator` is planned (break or shift end, internally `m.waitCode`). The urgency sort therefore treats break waits the same as real problems.
+6. **`signals.totalCounter` can be lower than `partCounter`:** it counts parts since the simulation start, while `partCounter` includes parts made before it. I don't display it.
+7. **Shift OEE during the Geisterschicht shows about 100 %:** planned time then equals running time. I label it "Geisterschicht".
+8. **First-piece results are known early:** `fpi.value` and `fpi.measOk` are set when the first piece finishes, before it is measured. I deliberately don't show them.
+9. **No `powerKw` in level 2/3 signals:** I use `machineView.powerKw` there, which has no noise.
+10. **Text glitches in engine messages:**
+    - a missing space in the reorder recommendation: "Wien (Beispiel)(Lieferzeit …";
+    - "Bestellt: 40,0 Stk" (a decimal on piece counts);
+    - "für die restlichen 1 Teile" in the tool explanation.
+
+## Screenshots
+All in `/tmp/claude-0/-home-user-Jakob-Robot-Vision/6ef6b142-22da-5500-b3f8-4cbdfc06f256/scratchpad/shots/`:
+- **Leitstand, desktop:** `final-leitstand-1440.png`
+- **Leitstand, phone:** `final-leitstand-400.png`, then `final-leitstand-400-s1.png` … `-s7.png` scrolling down
+- **TV mode:** `final-tv-1920.png`
+- **Drawer during the tool-break fault on M02:** `final-drawer-fault-1440.png`, then `-d1.png` … `-d4.png`
+- **Drawer on a phone (M05):** `final-drawer-400.png`, then `-d1.png` … `-d5.png`
+- **Other states:** `scB.png` (before shift end, sorted by urgency), `scD.png` (Spätschicht), `scE.png` (Geisterschicht), `scH.png` (noon break with waiting machines)
+
+Files are in `/home/user/Jakob_Robot_Vision/werkfluss/src/`:
+- `40_leitstand.js`
+- `42_machine.js`
