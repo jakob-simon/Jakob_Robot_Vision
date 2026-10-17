@@ -315,11 +315,16 @@
   // ================================================================== Terminberatung (eine Regel für Meldung, Auftragsliste und Copilot)
   /** WF.sim.orderAdvice, sonst dieselbe Regel lokal: Eilauftrag nur, wenn er mindestens 15 min bringt und kein anderer
       Auftrag dadurch spät (bzw. später spät) wird – Was-wäre-wenn der Engine, ohne sie eine vorsichtige Schätzung. */
+  let ADVC = { t: -1, m: {} };
   function simAdvice(orderId) {
+    if (ADVC.t !== NOW()) ADVC = { t: NOW(), m: {} };
+    if (orderId in ADVC.m) return ADVC.m[orderId];
+    let r = null;
     if (WF.sim && typeof WF.sim.orderAdvice === 'function') {
-      try { const r = WF.sim.orderAdvice(orderId); if (r) return r; } catch (e) { if (G.console) console.warn('[ai] orderAdvice', e); }
+      try { r = WF.sim.orderAdvice(orderId); } catch (e) { r = null; if (G.console) console.warn('[ai] orderAdvice', e); }
     }
-    return fallbackAdvice(orderId);
+    if (!r) r = fallbackAdvice(orderId);
+    return (ADVC.m[orderId] = r);
   }
   function fallbackAdvice(orderId) {
     const c = data(), o = c.ov(orderId);
@@ -819,6 +824,42 @@
     if (ops.length) steps.push(`Einlegen/Prüfen an ${listJoin(ops.slice(0, 4).map(m => m.id + (m.order ? ' (' + m.order.id + (risk(m) === 0 ? ', verspätet' : risk(m) === 1 ? ', knapp' : '') + ')' : '')))}`);
     return steps.length ? `Zum Schichtbeginn ${clk(sh.endsAt)}: ${steps.map((x, i) => (i + 1) + ') ' + x).join('; ')}.` : null;
   }
+  /** „Jetzt tun“: konkrete Eingriffe, wichtigste zuerst – je Punkt Text (Handlung zuerst, ID vorn), kurze Fassung,
+      Bezug und optionale Aktion. Eine Rangfolge für Lage, Briefing, Übergabe und „Was muss ich jetzt tun?“. */
+  function todoList(c) {
+    const out = [], sh = WF.sim.shift(), mvs = c.mvs();
+    const push = (x) => { if (!out.some(y => y.key === x.key)) out.push(x); };
+    for (const m of mvs.filter(x => x.state === 'fault')) {
+      const fi = faultInfo(m), hit = affectedOrders(c, m.id).filter(x => x.o.risk !== 'ok');
+      push({ key: 'fault:' + m.id, rank: 0, sev: 'crit', entity: { kind: 'machine', id: m.id },
+        text: `${m.id}: Störung ${m.fault.code} beheben – ${fi.working ? 'Reparatur läuft (' + sn(fi.person.name) + ')' : fi.person ? sn(fi.person.name) + ' ist unterwegs' : 'Instandhaltung hinschicken'}, Ende ca. ${clk(fi.endT)}${hit.length ? '; betroffen: ' + listJoin(hit.slice(0, 2).map(x => x.o.id)) : ''}.`,
+        short: `Störung an ${m.id} beheben.`, actions: m.fault.manual ? [{ label: `Störung an ${m.id} beheben (Demo)`, desc: 'Beendet die simulierte Störung sofort.', action: { type: 'repair', machineId: m.id }, icon: 'wrench' }] : [] });
+    }
+    for (const m of mvs.filter(x => WAIT[x.state] && x.sinceSec >= 300 && !noStaff(x)).sort((x, y) => y.sinceSec - x.sinceSec).slice(0, 2)) {
+      push({ key: 'wait:' + m.id, rank: 1, sev: 'warn', entity: { kind: 'machine', id: m.id }, text: `${m.id}: ${waitAdvice(c, m)}`, short: `${m.id} wieder anlaufen lassen (${lc1(stLabel(m.state))}).` });
+    }
+    const open = c.open().filter(o => o.eta != null);
+    for (const o of open.filter(x => x.risk === 'spät').sort((x, y) => x.slackSec - y.slackSec).slice(0, 2)) {
+      const adv = adviceText(c, o);
+      push({ key: 'late:' + o.id, rank: 2, sev: 'warn', entity: { kind: 'order', id: o.id }, text: `${o.id} (${durR(-o.slackSec)} Verzug): ${adv.text}`, short: `${o.id}: ${adv.eilOk ? 'als Eilauftrag kennzeichnen' : /Teillieferung/.test(adv.text) ? 'Teillieferung mit ' + custShort(o.customer) + ' klären' : 'Hebel prüfen'}.`, actions: adv.actions });
+    }
+    if (sh.id) {
+      for (const g of plannedChanges(c, c.t + 3600).filter(x => !x.by && x.stage !== 'später').slice(0, 1)) {
+        push({ key: 'tool:' + g.machine, rank: 3, sev: 'tool', entity: { kind: 'machine', id: g.machine }, text: `${g.machine}: Einrichter:in für den Werkzeugwechsel ca. ${clk(g.t)} einplanen (${g.tools.map(x => toolShort(x.name)).join(' + ')}) – noch niemand zugeteilt.`, short: `Werkzeugwechsel ${g.machine} ${clk(g.t)} besetzen.` });
+      }
+    }
+    for (const n of c.notifs().filter(x => x.status !== 'resolved' && String(x.key).indexOf('spc:') === 0).slice(0, 1)) {
+      const ax = (n.actions || []).find(x => x.action.type === 'applyOffset'), mid = n.spc ? n.spc.machineId : n.entity && n.entity.id;
+      push({ key: 'spc:' + mid, rank: 4, sev: 'warn', entity: mid ? { kind: 'machine', id: mid } : null, text: `${mid}: SPC-Korrektur übernehmen – das Maß läuft zur Toleranzgrenze.`, short: `SPC-Korrektur an ${mid}.`, actions: ax ? [{ label: `${ax.label} (${mid})`, desc: n.suggestion, action: ax.action, icon: 'gauge' }] : [] });
+    }
+    for (const m of mvs.filter(x => x.fpi && x.fpi.waitingSec >= 600).slice(0, 1)) push({ key: 'fpi:' + m.id, rank: 4, sev: 'warn', entity: { kind: 'machine', id: m.id }, text: `${m.id}: Erstteil prüfen – die Maschine steht seit ${durR(m.fpi.waitingSec)} bis zur Freigabe.`, short: `Erstteil ${m.id} prüfen.` });
+    for (const mt of Object.values(S().materials).filter(x => x.onHand < x.min && !x.onOrder).slice(0, 1)) push({ key: 'mat:' + mt.id, rank: 5, sev: 'warn', entity: { kind: 'material', id: mt.id }, text: `${mt.name} nachbestellen – ${matQty(mt, mt.onHand)} (Min. ${matQty(mt, mt.min)}), nicht bestellt.`, short: `${mt.name} nachbestellen.`, actions: [reorderAction(mt)] });
+    for (const n of c.notifs().filter(x => x.status === 'open' && String(x.key).indexOf('ghost:') === 0).slice(0, 1)) {
+      const ga = (n.actions || []).find(x => x.action.type === 'planToolChange'), mid = n.entity && n.entity.id;
+      push({ key: 'ghost:' + mid, rank: 5, sev: 'warn', entity: mid ? { kind: 'machine', id: mid } : null, text: `${mid}: vor Schichtende vorbeugend Werkzeug wechseln – sonst steht die Maschine in der Geisterschicht.`, short: `Vorbeugender Wechsel an ${mid}.`, actions: ga ? [{ label: `${ga.label} (${mid})`, desc: n.suggestion, action: ga.action, icon: 'wrench' }] : [] });
+    }
+    return out.sort((x, y) => x.rank - y.rank);
+  }
   function freePeopleFor(mid) {
     const st = station(mid), skill = st && st.skill;
     return Object.values(S().people).filter(p => p.onDuty && !p.endShift && p.state === 'idle' && !p.task && (p.machines.indexOf(mid) >= 0 || (skill && p.skills.indexOf(skill) >= 0)));
@@ -833,24 +874,36 @@
     const late = open.filter(o => o.risk === 'spät').sort((x, y) => x.slackSec - y.slackSec);
     const tight = open.filter(o => o.risk === 'knapp').sort((x, y) => x.slackSec - y.slackSec);
     const scope = customer ? `für ${custShort(customer)}` : '';
+    a.eyebrow = 'Termine' + (customer ? ' · ' + custShort(customer) : '') + ' · ' + pl(open.length, 'offener Auftrag', 'offene Aufträge');
     if (!late.length && !tight.length) {
       const min = open.slice().sort((x, y) => x.slackSec - y.slackSec)[0];
-      a.md.push(`**Alle ${open.length} offenen Aufträge ${scope} liegen im Plan** (Puffer überall mehr als 4 h).`.replace('  ', ' '));
-      if (min) a.md.push('', `Geringster Puffer: **${min.id}** ${min.part.name} (${custShort(min.customer)}) – Prognose ${dueTxt(min.eta)}, Termin ${dueTxt(min.due)}, Puffer ${dur0(min.slackSec)}.`);
+      a.sev = 'ok';
+      a.head = `Alle ${open.length} offenen Aufträge ${scope} liegen im Plan`.replace(/\s+/g, ' ');
+      a.md.push('Puffer überall mehr als 4 h.');
+      if (min) a.md.push('', `Geringster Puffer: **${min.id}** ${min.part.name} (${custShort(min.customer)}) – Prognose ${dueTxt(min.eta)}, Termin ${dueTxt(min.due)}, ${slackTxt(min.slackSec)}.`);
       a.md.push('', '> **Empfehlung:** Keine Termin-Maßnahme nötig. Engpass im Blick behalten – „Was ist der Engpass?“ zeigt, wo die nächste Verzögerung entstehen würde.');
     } else {
-      a.md.push(`**${late.length ? pl(late.length, 'Auftrag', 'Aufträge') + ' verspätet' : 'Kein Auftrag verspätet'}${tight.length ? ', ' + nm(tight.length) + ' knapp' : ''}** (Puffer unter 4 h) – von ${open.length} offenen Aufträgen${scope ? ' ' + scope : ''}.`, '');
-      const lines = late.map(o => `- **${o.id}** ${o.part.name} (${custShort(o.customer)}): Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)} → **${dur0(o.slackSec)} Verzug**${o.priority === 'eil' ? ' (bereits Eilauftrag)' : ''}. ${orderWhy(c, o)}`)
-        .concat(tight.map(o => `- **${o.id}** ${o.part.name} (${custShort(o.customer)}): Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)} – nur **${dur0(o.slackSec)} Puffer**. ${orderWhy(c, o)}`));
+      a.sev = late.length ? 'warn' : 'info';
+      a.head = `${late.length ? pl(late.length, 'Auftrag', 'Aufträge') + ' verspätet' : 'Kein Auftrag verspätet'}${tight.length ? ', ' + nm(tight.length) + ' knapp' : ''}`;
+      a.md.push(`Knapp = weniger als 4 h Puffer bis zum Liefertermin; von ${open.length} offenen Aufträgen${scope ? ' ' + scope : ''}.`, '');
+      a.stats = [
+        { l: 'Verspätet', v: nm(late.length), s: late[0] ? late[0].id + ' · ' + durR(-late[0].slackSec) : 'kein Auftrag', c: late.length ? 'crit' : 'ok' },
+        { l: 'Knapp', v: nm(tight.length), s: tight[0] ? tight[0].id + ' · ' + slackTxt(tight[0].slackSec) : 'kein Auftrag', c: tight.length ? 'warn' : 'ok' },
+        { l: 'Im Plan', v: nm(open.length - late.length - tight.length), s: 'Puffer > 4 h', c: 'ok' },
+      ];
+      const lines = late.map(o => `- **${o.id}** ${o.part.name} (${custShort(o.customer)}): Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)} → **${durR(-o.slackSec)} Verzug**${o.priority === 'eil' ? ' (bereits Eilauftrag)' : ''}. ${orderWhy(c, o)}`)
+        .concat(tight.map(o => `- **${o.id}** ${o.part.name} (${custShort(o.customer)}): Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)} – nur **${slackTxt(o.slackSec)}**. ${orderWhy(c, o)}`));
       SLOT(a, 'risk', lines.join('\n'), late.concat(tight).map(o => Object.assign({ id: o.id, part: o.part.name, cust: custShort(o.customer), late: o.slackSec < 0, slack: o.slackSec, eta: dueTxt(o.eta), due: dueTxt(o.due), eil: o.priority === 'eil' }, orderWhyParts(c, o))));
       const recs = [];
-      if (late.length) { const adv = orderAdvice(c, late[0]); recs.push(adv.text); if (adv.action) addAction(a, adv.action); }
+      if (late.length) { const adv = adviceText(c, late[0]); recs.push(`${late[0].id}: ${adv.text}`); for (const x of adv.actions) addAction(a, x); }
       if (tight.length) {
-        const bms = [...new Set(tight.map(bnMachine).filter(Boolean))];
-        recs.push(`${listJoin(tight.map(o => o.id))}: ${tight.length === 1 ? 'Termin hält' : 'Termine halten'} knapp – ${bms.length ? (bms.length === 1 ? 'Engpass ' : 'Engpässe ') + listJoin(bms) + ' ohne Unterbrechung laufen lassen und Störungen dort zuerst beheben' : 'Engpass ohne Unterbrechung laufen lassen'}.`);
+        const watch = tight.map(o => { const dc = delayCauses(c, o); return dc && dc.main && dc.main.station ? dc.main.station : bnMachine(o); }).filter(Boolean);
+        const bms = [...new Set(watch)];
+        recs.push(`${listJoin(tight.map(o => o.id))}: ${tight.length === 1 ? 'Termin hält' : 'Termine halten'} knapp – ${bms.length ? listJoin(bms) + ' ohne Unterbrechung laufen lassen und Störungen dort zuerst beheben' : 'Engpass ohne Unterbrechung laufen lassen'}.`);
       }
       a.md.push('', '> **Empfehlung:** ' + recs.join(' '));
-      a.impact = { title: 'Prognose gegen Termin', rows: late.concat(tight).slice(0, 6).map(o => ({ id: o.id, label: custShort(o.customer), before: o.eta, after: null, due: o.due })) };
+      // Termin-Diagramm nur für Claude-Grafik [[termine]]; offline zeigen die Risiko-Karten dieselben Zahlen
+      a.impact = { title: 'Prognose gegen Termin', hidden: true, rows: late.concat(tight).slice(0, 6).map(o => ({ id: o.id, label: custShort(o.customer), before: o.eta, after: null, due: o.due })) };
       a.entity = { kind: 'order', id: (late[0] || tight[0]).id };
     }
     a.sources = ['Prognose / Plantafel (veröffentlichte Liefertermine)', 'Arbeitsgang-Kette je Auftrag', srcStand()];
@@ -860,31 +913,50 @@
   }
 
   // ------------------------------------------------------------------ Engpass
+  /** Arbeitsvorrat je Arbeitsplatz – eine Rechnung mit Leitstand/Analyse: WF.sim.occupancy() (Schichttage), sonst eigene Schätzung */
+  function loadRows(c) {
+    const perDay = staffedPerDay();
+    let occ = null, wc = null;
+    if (typeof WF.sim.workContent === 'function') { try { wc = WF.sim.workContent(); if (wc && wc.w) wc = wc.w; } catch (e) { wc = null; } }
+    if (!wc && typeof WF.sim.occupancy === 'function') { try { occ = WF.sim.occupancy(); } catch (e) { occ = null; } }
+    let rows;
+    if (wc) rows = PROF().machines.map(id => ({ id, st: station(id), auto: station(id).loading === 'auto', days: (wc[id] || 0) / perDay, work: wc[id] || 0 }));
+    else if (occ && occ.byMachine) rows = PROF().machines.map(id => ({ id, st: station(id), auto: station(id).loading === 'auto', days: occ.byMachine[id] || 0, work: (occ.byMachine[id] || 0) * perDay }));
+    else rows = machineLoad(c).map(x => ({ id: x.id, st: x.st, auto: x.auto, days: x.work / perDay, work: x.work }));
+    return rows.filter(x => x.work > 0).sort((x, y) => y.work - x.work);
+  }
+  const hTxt = (sec) => nm(sec / 3600, sec < 36000 ? 1 : 0) + ' h';
   function ansBottleneck(c) {
     const a = A('bottleneck');
-    const loads = machineLoad(c);
     const open = c.open();
-    const bnOf = (id) => open.filter(o => o.bottleneck && o.bottleneck.indexOf(id + ' ') === 0);
-    const score = (x) => x.days + bnOf(x.id).reduce((s2, o) => s2 + (o.risk === 'spät' ? 1 : o.risk === 'knapp' ? 0.4 : 0), 0);
-    const ranked = loads.filter(x => x.work > 0).sort((x, y) => score(y) - score(x));
-    const top = ranked[0];
-    if (!top) { a.md.push('**Kein Engpass:** Kein Arbeitsplatz hat offene Arbeitsgänge.'); a.sources = ['Plantafel', srcStand()]; return done(a); }
-    const mv = c.mv(top.id), bn = bnOf(top.id);
-    const capTxt = top.auto ? 'läuft auch unbemannt, 24 h/Tag' : 'bei zwei Schichten';
-    a.md.push(`**Engpass: ${mName(top.id)}** – Arbeitsinhalt ca. **${durR(top.work)}** (≈ ${daysTxt(top.days)} ${capTxt}), laut Plantafel belegt bis ${dueTxt(top.until)}.`);
-    if (bn.length) a.md.push(`Dort liegt der längste Arbeitsgang von ${listJoin(bn.map(o => o.id + (o.risk !== 'ok' ? ' (' + o.riskLabel.toLowerCase() + ')' : '')))}.`);
+    const bnOf = (id) => open.filter(o => bnMachine(o) === id);
+    const rows = loadRows(c);
+    let eng = null;
+    if (typeof WF.sim.bottleneck === 'function') { try { eng = WF.sim.bottleneck(); } catch (e) { eng = null; } }
+    let top = eng ? rows.find(x => x.id === eng.stationId) : null;
+    if (!top) { // gleiche Regel wie die Engine: unter den Plätzen, die gefährdete Aufträge begrenzen, der mit dem größten Vorrat
+      const risky = rows.filter(x => bnOf(x.id).some(o => o.risk === 'spät' || o.risk === 'knapp'));
+      top = risky[0] || rows[0];
+    }
+    a.eyebrow = 'Engpass · Plantafel';
+    if (!top) { a.head = 'Kein Engpass'; a.md.push('Kein Arbeitsplatz hat offene Arbeitsgänge.'); a.sources = ['Plantafel', srcStand()]; return done(a); }
+    const mv = c.mv(top.id), bn = bnOf(top.id), riskBn = bn.filter(o => o.risk !== 'ok');
+    const until = Math.max(...(c.fc().machines[top.id] || []).map(e => e.end), c.t);
+    a.sev = riskBn.some(o => o.risk === 'spät') ? 'warn' : riskBn.length ? 'info' : 'ok';
+    a.head = `Engpass: ${mName(top.id)} – ${hTxt(top.work)} Arbeitsvorrat`;
+    a.md.push(`≈ ${daysTxt(top.days)} bei zwei Schichten, laut Plantafel belegt bis ${dueTxt(until)}${top.auto ? ' (läuft auch unbemannt)' : ''}.${bn.length ? ` Dort liegt der längste Arbeitsgang von ${listJoin(bn.slice(0, 3).map(o => o.id + (o.risk !== 'ok' ? ' (' + o.riskLabel.toLowerCase() + ')' : '')))}${bn.length > 3 ? ' u. a.' : ''}.` : ''}`);
+    if (rows[0] && rows[0].id !== top.id) a.md.push('', `Terminkritisch ist ${top.id}, nicht der Platz mit dem größten Vorrat (${mName(rows[0].id)}, ${hTxt(rows[0].work)}): dort hängt kein gefährdeter Auftrag.`);
     a.md.push('');
-    a.md.push(`- Arbeitsvorrat: ${top.ops.slice().sort((x, y) => (y.active ? 1 : 0) - (x.active ? 1 : 0)).slice(0, 4).map(x => `${x.orderId} AG ${x.seq} ${durR(x.sec)}${x.active ? ' (läuft)' : ''}`).join(', ')}.`);
     if (mv) {
-      if (mv.order) a.md.push(`- Jetzt: ${stLabel(mv.state)} – ${mv.order.id} AG ${mv.order.seq}, Teil ${mv.partsDone}/${mv.partsTotal}, ${nm(mv.order.cycleMin, mv.order.cycleMin < 10 ? 1 : 0)} min je Teil; Arbeitsgang fertig ca. ${tc(mv.etaOpEnd)}.`);
+      if (mv.order) a.md.push(`- Jetzt: ${stLabel(mv.state)} – ${mv.order.id} AG ${mv.order.seq}, ${nm(mv.partsDone)}/${nm(mv.partsTotal)} fertig${mv.partNo != null ? ', Teil ' + mv.partNo + ' läuft' : ''}, ${nm(mv.order.cycleMin, mv.order.cycleMin < 10 ? 1 : 0)} min je Teil; Arbeitsgang fertig ca. ${tc(mv.etaOpEnd)}.`);
       else a.md.push(`- Jetzt: ${stLabel(mv.state)} – ${mv.cause}.`);
     }
-    const others = ranked.slice(1, 4);
-    if (others.length) a.md.push(`- Danach am stärksten belastet: ${others.map(x => `${mName(x.id)} ${durR(x.work)} (≈ ${daysTxt(x.days)})`).join('; ')}.`);
-    const loadRows = loads.filter(x => x.work > 0).slice(0, 6);
-    if (loadRows.length > 1) {
-      a.md.push('', '### Arbeitsinhalt je Arbeitsplatz');
-      SLOT(a, 'bars3', loadRows.map(x => `- ${mName(x.id)}: ${durR(x.work)} (≈ ${daysTxt(x.days)})`).join('\n'), { unit: 'Tage', rows: loadRows.map(x => ({ ent: { kind: 'machine', id: x.id }, label: x.st.short, v: x.days, vTxt: '≈ ' + daysTxt(x.days), sub: durR(x.work) + (x.auto ? ' · läuft auch unbemannt (24 h/Tag)' : ' · zwei Schichten') + (bnOf(x.id).length ? ' · Engpass von ' + listJoin(bnOf(x.id).map(o => o.id)) : ''), c: x.id === top.id ? 'var(--st-wait)' : 'var(--info)' })) });
+    const others = rows.filter(x => x.id !== top.id).slice(0, 3);
+    if (others.length) a.md.push(`- Danach am stärksten belastet: ${others.map(x => `${mName(x.id)} ${hTxt(x.work)}`).join('; ')}.`);
+    const loadR = rows.slice(0, 6);
+    if (loadR.length > 1) {
+      a.md.push('', '### Arbeitsvorrat je Arbeitsplatz');
+      SLOT(a, 'bars3', loadR.map(x => `- ${mName(x.id)}: ${hTxt(x.work)} (≈ ${daysTxt(x.days)})`).join('\n'), { unit: 'h', rows: loadR.map(x => ({ ent: { kind: 'machine', id: x.id }, label: x.st.short, v: x.work, vTxt: hTxt(x.work), sub: '≈ ' + daysTxt(x.days) + (x.auto ? ' · läuft auch unbemannt' : '') + (bnOf(x.id).some(o => o.risk !== 'ok') ? ' · begrenzt ' + listJoin(bnOf(x.id).filter(o => o.risk !== 'ok').map(o => o.id)) : ''), c: x.id === top.id ? 'var(--st-wait)' : 'var(--info)' })) });
       a.md.push('');
     }
     const waits = c.mvs().filter(m => WAIT[m.state] || m.state === 'fault');
@@ -893,18 +965,18 @@
     const recs = [];
     recs.push(top.auto
       ? `${top.id} läuft auch unbemannt – Werkzeug- und Materialreichweite für die Geisterschicht sichern, Rüsten dort möglichst vermeiden.`
-      : `${top.id} läuft nur bemannt – Bedienung in Pausen und zum Schichtwechsel sicherstellen; jede Stunde Stillstand dort verschiebt ${bn.length ? listJoin(bn.map(o => o.id)) : 'die nachfolgenden Aufträge'}.`);
-    const movable = top.ops.filter(x => !x.active).map(x => ({ x, ok: capableAlts(x.orderId, x.seq, top.id) })).filter(y => y.ok.length);
+      : `${top.id} läuft nur bemannt – Bedienung in Pausen und zum Schichtwechsel sicherstellen; jede Stunde Stillstand dort verschiebt ${riskBn.length ? listJoin(riskBn.map(o => o.id)) : 'die nachfolgenden Aufträge'}.`);
+    const ld = machineLoad(c).find(x => x.id === top.id);
+    const movable = (ld ? ld.ops : []).filter(x => !x.active).map(x => ({ x, ok: capableAlts(x.orderId, x.seq, top.id) })).filter(y => y.ok.length);
     recs.push(!alt.length ? `Keine Alternativmaschine im Werk (einzige ${station(top.id).name}).` : movable.length ? `Entlastung möglich: ${movable.slice(0, 2).map(y => `${y.x.orderId} AG ${y.x.seq} auf ${listJoin(y.ok)}`).join('; ')} verlagern (dort neu rüsten).` : `Gleichartige Maschinen (${listJoin(alt)}) können die eingeplanten Arbeitsgänge nicht übernehmen (Gewicht, Durchmesser bzw. Stangenmaterial).`);
-    for (const y of movable.slice(0, 1)) addAction(a, { label: `${y.x.orderId} AG ${y.x.seq} auf ${y.ok[0]} verlagern`, desc: `Entlastet ${top.id} um ca. ${durShortTxt(y.x.sec)} – auf ${station(y.ok[0]).short} wird neu gerüstet`, action: { type: 'moveOp', orderId: y.x.orderId, seq: y.x.seq, stationId: y.ok[0] }, icon: 'route' });
+    for (const y of movable.slice(0, 1)) addAction(a, { label: `${y.x.orderId} AG ${y.x.seq} auf ${y.ok[0]} verlagern`, desc: `Entlastet ${top.id} um ca. ${hTxt(y.x.sec)} – auf ${station(y.ok[0]).short} wird neu gerüstet`, action: { type: 'moveOp', orderId: y.x.orderId, seq: y.x.seq, stationId: y.ok[0] }, icon: 'route' });
     a.md.push('', '> **Empfehlung:** ' + recs.join(' '));
-    a.stats = [{ l: top.id + ' ' + top.st.short, v: durShortTxt(top.work), s: 'Engpass · ≈ ' + daysTxt(top.days), c: 'warn' }].concat(others.slice(0, 2).map(x => ({ l: x.id + ' ' + x.st.short, v: durShortTxt(x.work), s: '≈ ' + daysTxt(x.days) })));
-    a.sources = ['Arbeitsinhalt offener Arbeitsgänge (Taktzeit, Rüsten)', 'Plantafel', 'Engpass je Auftrag (Prognose)', 'Schichtkalender', srcStand()];
+    a.stats = [{ l: top.id + ' ' + top.st.short, v: hTxt(top.work), s: 'Engpass · ≈ ' + daysTxt(top.days), c: 'warn' }].concat(others.slice(0, 2).map(x => ({ l: x.id + ' ' + x.st.short, v: hTxt(x.work), s: '≈ ' + daysTxt(x.days) })));
+    a.sources = ['Arbeitsvorrat offener Arbeitsgänge (Taktzeit, Rüsten)', 'Plantafel', 'Engpass-Definition der Prognose', 'Schichtkalender', srcStand()];
     a.entity = { kind: 'machine', id: top.id };
     a.followups = [`Was passiert, wenn ${top.id} 2 h ausfällt?`, 'Welche Aufträge sind gefährdet und warum?', `Was macht ${top.id} gerade?`];
     return done(a);
   }
-  const durShortTxt = (sec) => { const h = sec / 3600; return h >= 10 ? nm(h, 0) + ' h' : h >= 1 ? nm(h, 1) + ' h' : nm(sec / 60) + ' min'; };
 
   // ------------------------------------------------------------------ Maschine
   /** Personenzeile ohne Doppelungen („Legt Teil in M06 ein · an M06“ → nur Tätigkeit) */
@@ -927,29 +999,46 @@
     const pc0 = changes.length ? changes[0].plannedChange : null;
     const chgTxt = pc0 ? `${grp.map(t => toolShort(t.name)).join(' + ')} ${pc0.text}${pc0.by ? ' – ' + pc0.by + (pc0.stage && pc0.stage !== 'offen' ? ', ' + pc0.stage : '') : pc0.stage === 'später' ? ' (wird rechtzeitig angekündigt)' : WF.sim.shift().id ? ' – Einrichter:in noch nicht zugeteilt' : ''}${pc0.waitFromT && !/steht ab|wartet/.test(pc0.text) ? '; Maschine wartet ab ca. ' + clk(pc0.waitFromT) + ' auf den Wechsel' : ''}` : null;
     const since = `seit ${durR(mv.sinceSec)} (${clk(mv.since)})`;
+    a.eyebrow = 'Arbeitsplatz · ' + trimTxt(mv.name, 52);
+    a.sev = fi ? 'crit' : waiting ? 'warn' : mv.state === 'running' ? 'ok' : 'info';
+    // erwarteter Wechsel, wenn noch keiner angekündigt ist: Reststandzeit nach dem laufenden Teil bis zur Wechselgrenze × Taktzeit
+    const cycS = o ? ((o.cycleMin || 0) + (st.loading === 'perPart' ? (st.loadMin || 1) : 0)) * 60 : 0;
+    const base = mv.partEndT || c.t;
+    const expect = !o || !(cycS > 0) ? [] : opTools.filter(t => !t.plannedChange && t.status !== 'changing' && t.remainingParts != null && isFinite(t.remainingParts) && t.neededParts != null && t.remainingParts < t.neededParts).map(t => {
+      const rAfter = t.remainingPartsAfterPart != null ? t.remainingPartsAfterPart : t.remainingParts;
+      const k = Math.max(0, rAfter - (t.changeAtParts || 0));
+      return { t, k, afterPart: (mv.partNo != null ? mv.partNo : mv.partsDone) + k, tAt: k === 0 ? base : st.loading === 'auto' ? base + k * cycS : addWork(base, k * cycS) };
+    }).sort((x, y) => x.tAt - y.tAt);
+    const expTxt = (x) => `${toolShort(x.t.name)} ca. ${tc(x.tAt)} (nach Teil ~${x.afterPart})`;
     // Kernaussage – passend zur Frage
-    if (focus === 'why' && !waiting && !fi && mv.state === 'running') a.md.push(`**${mName(id)} wartet nicht – sie produziert** ${since}.`, `${uc1(mv.cause)}.`);
+    if (focus === 'why' && !waiting && !fi && mv.state === 'running') { a.head = `${mName(id)} wartet nicht – sie produziert`; a.md.push(`${uc1(since)}. ${uc1(mv.cause)}.`); }
     else if (focus === 'tools') {
-      if (chgTxt) a.md.push(`**Nächster Werkzeugwechsel an ${mName(id)}: ${grp.map(t => toolShort(t.name)).join(' + ')} ${pc0.text}**${pc0.by ? ' – ' + pc0.by + (pc0.stage && pc0.stage !== 'offen' ? ' (' + pc0.stage + ')' : '') : ''}.`);
-      else if (opTools.some(t => t.status === 'changing')) a.md.push(`**An ${mName(id)} wird gerade gewechselt:** ${opTools.filter(t => t.status === 'changing').map(t => toolShort(t.name)).join(', ')}.`);
-      else if (opTools.length) a.md.push(`**An ${mName(id)} ist im laufenden Arbeitsgang kein Werkzeugwechsel angekündigt.**`);
-      else a.md.push(`**${mName(id)}: ${st.kind === 'machine' ? 'kein eingerichteter Arbeitsgang – Werkzeuge werden beim nächsten Rüsten bestückt' : 'Arbeitsplatz ohne Schneidwerkzeug'}.**`);
+      if (chgTxt) { a.head = `Nächster Werkzeugwechsel an ${id}: ${grp.map(t => toolShort(t.name)).join(' + ')} ${pc0.text}`; a.md.push(pc0.by ? `${pc0.by}${pc0.stage && pc0.stage !== 'offen' ? ' – ' + pc0.stage : ''}.` : pc0.stage === 'später' ? 'Einrichter:in wird rechtzeitig vorher angekündigt.' : WF.sim.shift().id ? 'Einrichter:in noch nicht zugeteilt.' : 'Wechsel mit der nächsten Schicht.'); }
+      else if (opTools.some(t => t.status === 'changing')) { a.head = `An ${mName(id)} wird gerade gewechselt`; a.md.push(`${opTools.filter(t => t.status === 'changing').map(t => toolShort(t.name)).join(', ')}.`); }
+      else if (expect.length) {
+        const x = expect[0], lim = x.t.planWearPct != null ? ` ab ca. ${nm(x.t.planWearPct, 0)} % Verschleiß` : '';
+        a.head = `Voraussichtlich ca. ${tc(x.tAt)}: ${toolShort(x.t.name)} an ${id}`;
+        a.md.push(`Nach Teil ~${x.afterPart} von ${nm(mv.partsTotal)} – noch nicht angekündigt; die Ankündigung mit Uhrzeit und Einrichter:in kommt${lim} (${teile(x.t.changeAtParts || 0)} Reststandzeit als Wechselgrenze).${expect[1] ? ' Danach ' + expTxt(expect[1]) + '.' : ''}`);
+      } else if (opTools.length) { a.head = `Kein Werkzeugwechsel bis Ende ${o ? o.id + ' AG ' + o.seq : 'des Arbeitsgangs'}`; a.md.push(`Die Standzeiten an ${mName(id)} reichen für die restlichen ${teile(Math.max(0, mv.partsTotal - mv.partsDone))}.`); }
+      else { a.head = `${mName(id)}: ${st.kind === 'machine' ? 'kein eingerichteter Arbeitsgang' : 'Arbeitsplatz ohne Schneidwerkzeug'}`; if (st.kind === 'machine') a.md.push('Werkzeuge werden beim nächsten Rüsten bestückt.'); }
       a.md.push(`${mv.stateLabel} ${since}: ${mv.cause}.`);
     } else if (focus === 'impact' && !fi) {
       const aff = affectedOrders(c, id), crit = aff.filter(x => x.o.risk !== 'ok');
       const one = aff.length === 1 ? aff[0].o : null;
-      a.md.push(!aff.length ? `**An ${mName(id)} ist nichts eingeplant – kein Einfluss auf Termine.**`
-        : one ? `**An ${mName(id)} hängt ${one.id} – ${one.slackSec >= 0 ? (one.risk === 'ok' ? 'Termin hält mit ' + dur0(one.slackSec) + ' Puffer' : 'knapp, nur ' + dur0(one.slackSec) + ' Puffer') : dur0(one.slackSec) + ' Verzug'}.**`
-        : `**An ${mName(id)} hängen ${aff.length} Aufträge${crit.length ? `, davon ${crit.length} mit Terminrisiko (${crit.map(x => x.o.id).join(', ')})` : ' – alle mit ausreichend Puffer'}.**`, `${mv.stateLabel} ${since}: ${mv.cause}.`);
+      a.head = !aff.length ? `An ${mName(id)} ist nichts eingeplant – kein Einfluss auf Termine`
+        : one ? `An ${mName(id)} hängt ${one.id} – ${one.slackSec >= 0 ? (one.risk === 'ok' ? 'Termin hält, ' + slackTxt(one.slackSec) : 'knapp, ' + slackTxt(one.slackSec)) : durR(-one.slackSec) + ' Verzug'}`
+        : `An ${mName(id)} hängen ${aff.length} Aufträge${crit.length ? `, ${crit.length} mit Terminrisiko` : ' – alle mit Puffer'}`;
+      a.md.push(`${mv.stateLabel} ${since}: ${mv.cause}.`);
     } else if (focus === 'people') {
       const op = mv.operator;
-      a.md.push(op ? `**${op.responsible ? 'Zuständig für' : 'An'} ${mName(id)}: ${op.name}** (${op.role}) – ${actWhere(op.activity, op.where)}.` : `**${mName(id)}: ${st.loading === 'auto' ? 'läuft autonom' : 'niemand Zuständiges im Dienst'}.**`, `${mv.stateLabel} ${since}: ${mv.cause}.`);
-    } else if (focus === 'eta' && o && mv.etaOpEnd) a.md.push(`**${mName(id)}: ${o.id} AG ${o.seq} fertig ca. ${tc(mv.etaOpEnd)}** – ${mv.partsDone}/${mv.partsTotal} Teile, ${lc1(mv.stateLabel)} ${since}.`, `${uc1(mv.cause)}.`);
-    else a.md.push(`**${mName(id)}** (${mv.name}) – **${mv.stateLabel}** ${since}.`, `${waiting || fi ? 'Ursache: ' : ''}${uc1(mv.cause)}.`);
+      a.head = op ? `${op.responsible ? 'Zuständig für' : 'An'} ${id}: ${op.name}` : `${mName(id)}: ${st.loading === 'auto' ? 'läuft autonom' : 'niemand Zuständiges im Dienst'}`;
+      a.md.push(`${op ? op.role + ' – ' + actWhere(op.activity, op.where) + '. ' : ''}${mv.stateLabel} ${since}: ${mv.cause}.`);
+    } else if (focus === 'eta' && o && mv.etaOpEnd) { a.head = `${id}: ${o.id} AG ${o.seq} fertig ca. ${tc(mv.etaOpEnd)}`; a.md.push(`${nm(mv.partsDone)}/${nm(mv.partsTotal)} Teile, ${lc1(mv.stateLabel)} ${since}. ${uc1(mv.cause)}.`); }
+    else { a.head = `${mName(id)}: ${mv.stateLabel}${fi ? ' – ' + mv.fault.code : waiting ? '' : mv.order ? ' – ' + mv.order.id : ''}`; a.md.push(`${uc1(since)}. ${waiting || fi ? 'Ursache: ' : ''}${uc1(mv.cause)}.`); }
     if (focus === 'full') {
       const crit = affectedOrders(c, id).filter(x => x.o.risk !== 'ok');
       const v = fi ? `Störung – Reparatur bis ca. ${clk(fi.endT)}` : waiting ? `steht (${stLabel(mv.state)})` : mv.state === 'idle' ? 'ohne Auftrag' : SETUPISH[mv.state] ? lc1(mv.stateLabel) + ' – Serie folgt' : 'läuft planmäßig';
-      a.md.push(`**Einschätzung:** ${v}${crit.length ? '; Terminrisiko bei ' + listJoin(crit.map(x => `${x.o.id} (${x.o.slackSec >= 0 ? 'Puffer ' + dur0(x.o.slackSec) : dur0(x.o.slackSec) + ' Verzug'})`)) : '; keine gefährdeten Termine an ' + id}.`);
+      a.md.push(`**Einschätzung:** ${v}${crit.length ? '; Terminrisiko bei ' + listJoin(crit.map(x => `${x.o.id} (${slackTxt(x.o.slackSec)})`)) : '; keine gefährdeten Termine an ' + id}.`);
     }
     if (waiting && noStaff(mv) && !WF.sim.shift().id) a.md.push(`Niemand im Dienst – nächste Schicht ab ${dueTxt(WF.sim.shift().endsAt)}.`);
     a.md.push('');
@@ -978,7 +1067,9 @@
       if (chgTxt) a.md.push(`- **Nächster Werkzeugwechsel:** ${chgTxt}.`);
       else {
         const crit = opTools.slice().sort((x, y) => (x.remainingParts == null ? 1e9 : x.remainingParts) - (y.remainingParts == null ? 1e9 : y.remainingParts))[0];
-        if (crit && crit.status !== 'changing' && crit.explain) a.md.push(`- **Werkzeug:** ${explainTxt(crit.explain)}`);
+        const ex = expect[0];
+        if (ex) a.md.push(`- **Nächster Werkzeugwechsel (erwartet):** ${expTxt(ex)} – wird ab der Wechselgrenze mit Uhrzeit und Einrichter:in angekündigt.`);
+        else if (crit && crit.status !== 'changing' && crit.explain) a.md.push(`- **Werkzeug ${toolShort(crit.name)}:** ${explainTxt(crit.explain)}`);
       }
       const chg = opTools.filter(t => t.status === 'changing');
       if (chg.length) a.md.push(`- Gerade im Wechsel: ${chg.map(t => toolShort(t.name)).join(', ')} – ${explainTxt(chg[0].explain)}`);
@@ -997,7 +1088,7 @@
       if (mv.inCap > 0 || mv.outCap > 0) a.md.push(`- Puffer: ${mv.inCap > 0 ? `Eingang ${mv.input.length}/${mv.inCap} Behälter (${stk(qty(mv.input))}), ` : ''}Ausgang ${mv.output.length}/${mv.outCap}${mv.inCap > 0 ? '' : ' Behälter'} (${stk(qty(mv.output))}).`);
       if (mv.barStockM != null) a.md.push(`- Stangenmagazin: ${nm(mv.barStockM, 1)} m ${mv.barMaterial || ''} (nachgeladen wird ab ${nm(mv.barReorderM, 1)} m).`);
       if (mv.queue && mv.queue.length) a.md.push(`- Als Nächstes: ${mv.queue.slice(0, 2).map(q => `${q.orderId} AG ${q.seq} „${q.op}“ (${q.why})`).join('; ')}.`);
-      const todayTxt = `- Heute: OEE ${pct(mv.oeeToday && mv.oeeToday.oee, 0)}, ${pl(mv.goodToday, 'Gutteil', 'Gutteile')}, ${nm(mv.scrapToday)} Ausschuss, Stillstandskosten ${eur(mv.lossEurToday)} (Satz ${eur(mv.rate)}/h).`;
+      const todayTxt = `- Heute: OEE ${pct(mv.oeeToday && mv.oeeToday.oee, oeeDec(mv.oeeToday && mv.oeeToday.oee))}, ${pl(mv.goodToday, 'Gutteil', 'Gutteile')}, ${nm(mv.scrapToday)} Ausschuss, Stillstandskosten ${eur(mv.lossEurToday)} (Satz ${eur(mv.rate)}/h).`;
       if (!focus || focus === 'full') {
         // Kennzahlen-Leiste statt Textzeile (im kopierten Text bleibt die Zeile erhalten)
         const oee = mv.oeeToday && mv.oeeToday.oee;
@@ -1006,7 +1097,7 @@
             return { l: 'Status', v: short, s: rest + 'seit ' + durR(mv.sinceSec), c: mv.state === 'fault' ? 'crit' : WAIT[mv.state] ? 'warn' : mv.state === 'running' ? 'ok' : 'info' }; })(),
           o ? { l: 'AG ' + o.seq + ' · Teile', v: nm(mv.partsDone) + '/' + nm(mv.partsTotal), s: mv.etaOpEnd ? 'fertig ca. ' + tc(mv.etaOpEnd) : o.id }
             : mv.queue && mv.queue.length ? { l: 'Als Nächstes', v: mv.queue[0].orderId, s: (mv.queue[0].why || 'AG ' + mv.queue[0].seq).replace(/^Teile\s+/, '') } : { l: 'Auftrag', v: '–', s: 'nichts eingeplant' },
-          { l: 'OEE heute', v: oee != null ? pct(oee, 0) : '–', s: pl(mv.goodToday, 'Gutteil', 'Gutteile') + (mv.scrapToday ? ' · ' + nm(mv.scrapToday) + ' Ausschuss' : ''), c: oee == null ? '' : oee >= TARGET_OEE ? 'ok' : 'warn' },
+          oeeStat(oee, pl(mv.goodToday, 'Gutteil', 'Gutteile') + (mv.scrapToday ? ' · ' + nm(mv.scrapToday) + ' Ausschuss' : ''), oeeDec(oee)),
           { l: 'Stillstand', v: eur(mv.lossEurToday), s: 'heute · ' + eur(mv.rate) + '/h', c: 'info' },
         ];
         SLOT(a, 'today', todayTxt, null);
@@ -1017,7 +1108,7 @@
       const aff = affectedOrders(c, id);
       if (aff.length) {
         a.md.push('', '### Auswirkung auf Termine');
-        for (const x of aff.slice(0, 5)) a.md.push(`- **${x.o.id}** (${custShort(x.o.customer)}, AG ${x.seq}${x.active ? ', läuft hier' : ', ab ca. ' + tc(x.start)}): Prognose ${dueTxt(x.o.eta)}, Termin ${dueTxt(x.o.due)} – ${x.o.slackSec >= 0 ? 'Puffer ' + dur0(x.o.slackSec) : dur0(x.o.slackSec) + ' Verzug'}.`);
+        for (const x of aff.slice(0, 5)) a.md.push(`- **${x.o.id}** (${custShort(x.o.customer)}, AG ${x.seq}${x.active ? ', läuft hier' : ', ab ca. ' + tc(Math.max(c.t, x.start))}): Prognose ${dueTxt(x.o.eta)}, Termin ${dueTxt(x.o.due)} – ${slackTxt(x.o.slackSec)}.`);
         if (fi || waiting) a.md.push(`Die Prognose enthält ${fi ? 'die Reparatur bis ca. ' + clk(fi.endT) : 'die bisherige Wartezeit'} bereits.`);
         a.impact = { title: 'Termine an ' + id, rows: aff.slice(0, 6).map(x => ({ id: x.o.id, label: 'AG ' + x.seq, before: x.o.eta, after: null, due: x.o.due })) };
       } else a.md.push('', `Keine offenen Arbeitsgänge an ${id} eingeplant – kein Einfluss auf Termine.`);
@@ -1025,20 +1116,7 @@
     // Empfehlung
     let rec = null;
     if (fi) {
-      const aff = affectedOrders(c, id);
-      const hit = aff.filter(x => x.active || x.start <= fi.endT), later = aff.filter(x => !x.active && x.start > fi.endT);
-      const parts = [`${fi.working ? 'Reparatur läuft' : fi.person ? sn(fi.person.name) + ' ist unterwegs' : 'Instandhaltung zu ' + id + ' schicken'} – Ende ca. ${clk(fi.endT)}, in der Prognose bereits enthalten.`];
-      if (hit.length) {
-        const tight = hit.filter(x => x.o.risk !== 'ok');
-        parts.push(`Direkt betroffen: ${listJoin(hit.map(x => x.o.id + (x.o.slackSec < 0 ? ' (bereits ' + dur0(x.o.slackSec) + ' Verzug)' : ' (Puffer ' + dur0(x.o.slackSec) + ')')))}.`);
-        if (tight.length && tight[0].o.slackSec >= 0) parts.push(`Dauert die Reparatur mehr als ca. ${dur0(tight[0].o.slackSec)} länger, kippt ${tight[0].o.id}.`);
-        else if (!tight.length) parts.push('Termine halten – keine weitere Maßnahme nötig.');
-      } else parts.push('Kein laufender Auftrag betroffen.');
-      const d0 = Math.floor(c.t / DAY) * DAY;
-      const nF = (S().events || []).filter(e => e.type === 'fault' && e.t >= d0 && e.entity && e.entity.id === id).length;
-      if (nF > 1) parts.push(`Schon die ${nF}. Störung heute an ${id} – Ursache (${fi.f.cause}) dauerhaft abstellen.`);
-      if (later.length) parts.push(`${later[0].o.id} beginnt hier erst ca. ${tc(later[0].start)} – bis dahin ${durR(later[0].start - fi.endT)} Reserve.`);
-      rec = parts.join(' ');
+      rec = `${fi.working ? 'Reparatur läuft' : fi.person ? sn(fi.person.name) + ' ist unterwegs' : 'Instandhaltung zu ' + id + ' schicken'} – Ende ca. ${clk(fi.endT)}. Auswirkung auf die Termine: „Was bedeutet die Störung an ${id}?“`;
       if (mv.fault.manual) addAction(a, { label: `Störung an ${id} beheben (Demo)`, desc: 'Beendet die simulierte Störung sofort – die Maschine nimmt die Arbeit wieder auf.', action: { type: 'repair', machineId: id }, icon: 'wrench' });
     } else if (waiting) rec = waitAdvice(c, mv);
     else if (mv.state === 'firstPiece') rec = `Erstteil zügig prüfen – ${id} darf bis zur Freigabe nicht weiterfertigen (Stillstand ${eur(mv.rate)}/h).`;
@@ -1046,7 +1124,8 @@
     else if (pc0 && pc0.etaT - c.t < 3600) rec = `Werkzeug für den Wechsel ca. ${clk(pc0.etaT)} vermessen bereitlegen – dann dauert der Stopp nur die reine Wechselzeit.`;
     else if (focus === 'full' || focus === 'impact') {
       const crit = affectedOrders(c, id).filter(x => x.o.risk !== 'ok');
-      rec = crit.length ? orderAdvice(c, crit[0].o).text : `${id} läuft planmäßig – keine Maßnahme nötig.`;
+      if (crit.length) { const adv = adviceText(c, crit[0].o); rec = `${crit[0].o.id}: ${adv.text}`; for (const x of adv.actions) addAction(a, x); }
+      else rec = `${id} läuft planmäßig – keine Maßnahme nötig.`;
     }
     if (rec) a.md.push('', '> **Empfehlung:** ' + rec);
     a.sources = [`Maschinenstatus ${id} (${label('conn', mv.conn.level)})`, 'Werkzeugstandzeiten', 'Prognose / Plantafel', srcStand()];
@@ -1056,6 +1135,122 @@
     fu.push(`Was passiert, wenn ${id} 2 h ausfällt?`);
     if (o) fu.push(`Wo steht ${o.id} gerade?`);
     a.followups = fu.slice(0, 3);
+    return done(a);
+  }
+  // ------------------------------------------------------------------ Störung: was bedeutet sie für die Termine?
+  /** Auswirkung einer Störung je Auftrag an dieser Maschine: Arbeitsgang-Ende und Liefertermin vorher/nachher.
+      „Vorher“ = letzte Prognose, bevor die Maschine gestört war (Prognose-Verlauf); fehlt sie, wird das Arbeitsgang-Ende
+      aus der Reparaturdauer zurückgerechnet und der Liefertermin nur als aktueller Stand genannt. */
+  function faultImpact(c, mid) {
+    const mv = c.mv(mid), fi = faultInfo(mv);
+    if (!fi) return null;
+    const f = mv.fault, t0 = f.t0 != null ? f.t0 : c.t - (f.sinceSec || 0);
+    const before = etaBefore(t0, mid);
+    const lost = Math.max(0, fi.endT - t0);
+    const rows = affectedOrders(c, mid).map(x => {
+      const o = x.o, fo = c.fc().orders[o.id] || {};
+      const etaA = fo.etaRaw != null ? fo.etaRaw : o.eta, etaB = before && before.eta[o.id] != null ? before.eta[o.id] : null;
+      const opA = x.active && mv.etaOpEnd ? mv.etaOpEnd : x.opEnd != null ? x.opEnd : x.end;
+      const opB = before && before.opEnd[o.id + '/' + x.seq] != null ? before.opEnd[o.id + '/' + x.seq] : x.active ? opA - lost : null;
+      return { o, seq: x.seq, active: x.active, start: x.start, opA, opB, etaA, etaB, dEta: etaB != null ? etaA - etaB : null, dOp: opB != null ? opA - opB : null, slack: o.due - etaA };
+    });
+    return { mv, fi, f, t0, before, lost, rows };
+  }
+  /** Wie lange reicht der Vorrat des Nachfolgers, wenn diese Maschine steht? (Teile im Eingang × Taktzeit) */
+  function successorCover(c, o, seq) {
+    const i = o.ops.findIndex(op => op.seq === seq), nx = i >= 0 ? o.ops[i + 1] : null;
+    if (!nx || !S().machines[nx.station] || nx.complete) return null;
+    const mvN = c.mv(nx.station), st = station(nx.station);
+    const runs = mvN && mvN.order && mvN.order.id === o.id && mvN.order.seq === nx.seq;
+    const parts = (nx.waiting || 0) + (runs ? 0 : 0);
+    const per = ((nx.cycleMin || 0) + (st.loading === 'perPart' ? (st.loadMin || 1) : 0)) * 60;
+    const sec = parts * per + (runs && mvN.partRemainSec ? mvN.partRemainSec : 0);
+    return sec > 0 ? { station: nx.station, seq: nx.seq, parts, sec, runs } : { station: nx.station, seq: nx.seq, parts: 0, sec: 0, runs };
+  }
+  function etaLine(r) {
+    if (r.dEta == null) return `Prognose ${dueTxt(r.etaA)} (${slackTxt(r.slack)}) – Reparatur ist eingerechnet`;
+    if (Math.abs(r.dEta) < 60) return `Liefertermin bleibt ${dueTxt(r.etaA)} (${slackTxt(r.slack)})`;
+    return `Liefertermin ${dueTxt(r.etaB)} → **${dueTxt(r.etaA)}** (${deltaTxt(r.dEta)}; ${slackTxt(r.slack)})`;
+  }
+  function ansFault(c, mid, named) {
+    const a = A('fault');
+    named = (named || []).filter(id => S().orders[id]);
+    let fx = faultImpact(c, mid), note = '';
+    if (!fx) { // genannte Maschine ist nicht gestört – betrifft eine andere Störung den genannten Auftrag?
+      const other = c.mvs().filter(m => m.state === 'fault' && (!named.length || named.some(oid => { const ov = c.ov(oid); return ov && ov.ops.some(op => op.station === m.id && !op.complete); })));
+      if (other.length) { note = `${mName(mid)} hat keine Störung – gestört ist ${mName(other[0].id)}${named.length ? ', und das betrifft ' + listJoin(named) : ''}.`; mid = other[0].id; fx = faultImpact(c, mid); }
+    }
+    a.entity = { kind: 'machine', id: mid };
+    if (!fx) {
+      const mv = c.mv(mid);
+      a.eyebrow = 'Arbeitsplatz · ' + trimTxt(mv.name, 52); a.sev = 'ok';
+      a.head = `${mName(mid)} hat keine Störung`;
+      a.md.push(`${mv.stateLabel} seit ${durR(mv.sinceSec)}: ${mv.cause}.`);
+      for (const oid of named) {
+        const ov = c.ov(oid), on = ov.ops.find(op => op.station === mid && !op.complete);
+        a.md.push('', on ? `${oid} AG ${on.seq} „${on.op}“ läuft über ${mid} – ${on.state === 'active' ? 'gerade in Bearbeitung' : 'Start laut Plantafel ca. ' + tc(Math.max(c.t, on.plannedStart || c.t))}; ${slackTxt(ov.slackSec)}.` : `${oid} läuft nicht über ${mid} (Route: ${ov.ops.map(op => op.station === 'EXT' ? 'Härterei/extern' : op.station).filter(x => x !== 'VERSAND').join(' → ')}).`);
+      }
+      a.md.push('', `> **Hinweis:** Wie sich ein Ausfall auswirken würde, rechnet „Was passiert, wenn ${mid} 2 h ausfällt?“ durch.`);
+      addAction(a, { label: `Störung an ${mid} auslösen (Demo)`, desc: 'Alarm aus dem Störungskatalog – Meldung, Instandhaltung und Prognose reagieren live.', action: { type: 'triggerFault', machineId: mid }, icon: 'alert', danger: true });
+      a.sources = [`Maschinenstatus ${mid}`, 'Prognose / Plantafel', srcStand()];
+      a.followups = [`Was passiert, wenn ${mid} 2 h ausfällt?`, named[0] ? `Wo steht ${named[0]} gerade?` : 'Wie läuft die Schicht?'];
+      return done(a);
+    }
+    const { mv, fi, f, t0, rows } = fx;
+    a.eyebrow = 'Störung · ' + trimTxt(mv.name, 52);
+    a.sev = 'crit';
+    a.head = `Störung ${mName(mid)}: ${f.code} ${f.text}`;
+    const standSec = Math.max(0, c.t - t0);
+    if (note) a.md.push(note, '');
+    a.md.push(`Seit ${clk(t0)} – ${fi.who}. Erfahrungswert ${f.repairMin[0]}–${f.repairMin[1]} min, Ende ca. **${clk(fi.endT)}**. Wahrscheinliche Ursache: ${f.cause}.${f.partScrapped ? ' Das laufende Teil ist Ausschuss.' : ''}${f.toolName ? ' Werkzeug ' + toolShort(f.toolName) + ' gebrochen – wird nach der Reparatur gewechselt.' : ''}`);
+    // Aufträge: genannte zuerst, dann der laufende, dann alle mit spürbarer Verschiebung (≥ 5 min)
+    const order = (r) => (named.indexOf(r.o.id) >= 0 ? 0 : r.active ? 1 : 2);
+    const shown = rows.filter(r => named.indexOf(r.o.id) >= 0 || r.active || (r.dEta != null && Math.abs(r.dEta) >= 300) || (r.slack < 4 * 3600 && r.start <= fi.endT)).sort((x, y) => order(x) - order(y) || x.start - y.start);
+    const rest = rows.filter(r => shown.indexOf(r) < 0);
+    const act = rows.find(r => r.active);
+    const focusR = shown[0] || act || null;
+    a.stats = [
+      { l: 'Reparatur bis', v: clk(fi.endT), s: fi.working ? sn(fi.person.name) + ' repariert' : fi.person ? sn(fi.person.name) + ' unterwegs' : 'noch niemand zugeteilt', c: 'crit' },
+      { l: 'Stillstand', v: durR(standSec + fi.rem), s: eur(mv.rate) + '/h · ca. ' + eur(mv.rate * (standSec + fi.rem) / 3600), c: 'warn' },
+    ];
+    if (act) a.stats.push({ l: `AG ${act.seq} fertig`, v: tc(act.opA), s: act.dOp != null ? (Math.abs(act.dOp) < 60 ? NOCHG : 'statt ' + tc(act.opB) + ' (' + deltaTxt(act.dOp) + ')') : act.o.id, c: act.dOp != null && act.dOp >= 300 ? 'warn' : '' });
+    if (focusR) a.stats.push({ l: 'Liefertermin ' + focusR.o.id, v: tc(focusR.etaA), s: focusR.dEta != null && Math.abs(focusR.dEta) >= 60 ? deltaTxt(focusR.dEta) + ' · ' + slackTxt(focusR.slack) : slackTxt(focusR.slack), c: focusR.slack < 0 ? 'crit' : focusR.slack < 4 * 3600 ? 'warn' : 'ok' });
+    a.md.push('', '### Auswirkung auf Aufträge');
+    const notOn = named.filter(oid => !rows.some(r => r.o.id === oid));
+    for (const oid of notOn) { const ov = c.ov(oid); a.md.push(`- **${oid}** läuft nicht über ${mid} – keine Auswirkung (${slackTxt(ov.slackSec)}).`); }
+    for (const r of shown.slice(0, 5)) {
+      const why = [];
+      if (r.active) {
+        const cov = successorCover(c, r.o, r.seq);
+        if (cov && cov.sec > 0 && (r.dEta == null || Math.abs(r.dEta) < 60)) why.push(`${cov.station} hat noch ca. ${durR(cov.sec)} Arbeit im Eingang – erst wenn ${mid} länger steht, fehlt dort Nachschub`);
+        else if (r.dEta != null && Math.abs(r.dEta) < 60) { const dc = delayCauses(c, r.o); if (dc && dc.main && dc.main.station !== mid) why.push(`der Termin hängt an ${dc.main.short}, nicht an ${mid}`); }
+      }
+      a.md.push(`- **${r.o.id}** ${r.o.part.name} (${custShort(r.o.customer)}), AG ${r.seq}: ${r.active ? `fertig ca. ${tc(r.opA)}${r.opB != null && Math.abs(r.opA - r.opB) >= 60 ? ' statt ' + tc(r.opB) + ' (' + deltaTxt(r.opA - r.opB) + ')' : ''}` : `Start an ${mid} ca. ${tc(Math.max(c.t, r.start))}`}; ${etaLine(r)}${why.length ? ' – ' + why.join('; ') : ''}.`);
+    }
+    if (rest.length) a.md.push(`- ${pl(rest.length, 'weiterer Auftrag', 'weitere Aufträge')} an ${mid} (${listJoin(rest.slice(0, 3).map(r => r.o.id))}${rest.length > 3 ? ' u. a.' : ''}) ${rest.length === 1 ? 'startet' : 'starten'} später; Liefertermine ${rest.some(r => r.dEta == null) ? 'mit ausreichend Puffer' : NOCHG}.`);
+    if (!rows.length) a.md.push(`- An ${mid} ist kein offener Arbeitsgang eingeplant – kein Einfluss auf Termine.`);
+    const imp = shown.filter(r => r.etaA != null).slice(0, 5);
+    if (imp.length) a.impact = { title: `Liefertermine · Störung ${mid}`, rows: imp.map(r => ({ id: r.o.id, label: 'AG ' + r.seq, before: r.etaB != null ? r.etaB : r.etaA, after: r.etaB != null ? r.etaA : null, due: r.o.due })) };
+    // Empfehlung: Jetzt tun
+    const recs = [];
+    recs.push(fi.working ? `Reparatur läuft (${sn(fi.person.name)}) – Ende ca. ${clk(fi.endT)}.` : fi.person ? `${sn(fi.person.name)} ist unterwegs – Ende ca. ${clk(fi.endT)}.` : `Instandhaltung zu ${mid} schicken – noch niemand zugeteilt.`);
+    if (!fi.working) recs.push(`Ursache prüfen: ${f.cause}.`);
+    const crit = rows.filter(r => r.slack < 4 * 3600 && (r.active || r.start <= fi.endT));
+    if (act) {
+      const cov = successorCover(c, act.o, act.seq);
+      if (act.dEta != null && act.dEta >= 60) recs.push(`${act.o.id} verschiebt sich um ${durR(act.dEta)}${act.slack < 0 ? ' und ist jetzt ' + durR(-act.slack) + ' zu spät' : ''} – ${act.slack < 0 ? 'Kunde ' + custShort(act.o.customer) + ' informieren bzw. Teillieferung abstimmen' : 'jede weitere Minute Stillstand geht vom Puffer ab'}.`);
+      else if (cov && cov.sec > 0) recs.push(`${act.o.id} hält, solange ${cov.station} Nachschub hat (ca. ${durR(cov.sec)} im Eingang)${act.slack < 4 * 3600 ? '; danach geht jede Minute Stillstand vom Puffer (' + slackTxt(act.slack) + ') ab' : ''}.`);
+      else if (act.slack < 4 * 3600) recs.push(`${act.o.id} ist knapp (${slackTxt(act.slack)}) – Reparatur hat Vorrang vor allen anderen Aufgaben.`);
+      else recs.push('Termine halten – keine weitere Maßnahme nötig.');
+    } else if (!crit.length) recs.push('Termine halten – keine weitere Maßnahme nötig.');
+    const d0 = Math.floor(c.t / DAY) * DAY;
+    const nF = (S().events || []).filter(e => e.type === 'fault' && e.t >= d0 && e.entity && e.entity.id === mid).length;
+    if (nF > 1) recs.push(`Schon die ${nF}. Störung heute an ${mid} – Ursache dauerhaft abstellen.`);
+    a.md.push('', '> **Empfehlung:** ' + recs.join(' '));
+    if (f.manual) addAction(a, { label: `Störung an ${mid} beheben (Demo)`, desc: 'Beendet die simulierte Störung sofort – die Maschine nimmt die Arbeit wieder auf.', action: { type: 'repair', machineId: mid }, icon: 'wrench' });
+    if (focusR) addAction(a, { label: `${focusR.o.id} öffnen`, desc: 'Arbeitsgang-Kette und Behälter im Detail', action: { type: 'select', kind: 'order', id: focusR.o.id }, icon: 'list', quiet: true });
+    a.sources = [`Störung ${f.code} (${label('conn', mv.conn.level)})`, 'Instandhaltung (Aufgabe, Erfahrungswert)', fx.before ? 'Prognose vor der Störung (' + clk(fx.before.fcT) + ') und jetzt' : 'Prognose / Plantafel', srcStand()];
+    a.followups = [focusR ? `Wo steht ${focusR.o.id} gerade?` : `Was macht ${mid} gerade?`, `Was passiert, wenn ${mid} 2 h ausfällt?`, 'Welche Aufträge sind gefährdet und warum?'];
     return done(a);
   }
   /** Regeltext der Engine lesbarer machen („≤ 0 Teile Reststandzeit“ = Wechsel, sobald kein weiteres Teil mehr reicht) */
@@ -1079,33 +1274,61 @@
   // ------------------------------------------------------------------ Auftrag
   function ansOrder(c, id, focus) {
     const a = A('order'), o = c.ov(id);
-    if (!o) { a.md.push(`Auftrag ${id} ist nicht bekannt.`); return done(a); }
+    if (!o) { a.head = `Auftrag ${id} ist nicht bekannt`; return done(a); }
     a.entity = { kind: 'order', id };
-    a.md.push(`**${o.id}** ${o.part.name} (${o.part.no}) für ${o.customer} – ${stk(o.qty)}, Termin **${dueTxt(o.due)}**${o.priority === 'eil' ? ', **Eilauftrag**' : ''}.`);
+    a.eyebrow = 'Auftrag · ' + trimTxt(custShort(o.customer) + ' · ' + o.part.name, 60);
     if (o.status === 'fertig') {
-      a.md.push(`Fertig ${dueTxt(o.doneT)} – ${o.onTime ? 'termingerecht und vollständig' : o.shortQty > 0 ? 'Teillieferung, Fehlmenge ' + stk(o.shortQty) : 'nach dem Termin'} (${stk(o.shippedQty)} versandt).`);
+      a.sev = o.onTime ? 'ok' : 'warn';
+      a.head = `${o.id} ist fertig – ${o.onTime ? 'termingerecht und vollständig' : o.shortQty > 0 ? 'Teillieferung, ' + stk(o.shortQty) + ' fehlen' : 'nach dem Termin'}`;
+      a.md.push(`${o.part.name} (${o.part.no}) für ${o.customer}: fertig ${dueTxt(o.doneT)}, Termin ${dueTxt(o.due)}; ${stk(o.shippedQty)} von ${stk(o.qty)} versandt.`);
       a.sources = ['Auftrag ' + id, srcStand()];
       return done(a);
     }
-    const slackTxt = o.slackSec >= 0 ? `Puffer ${dur0(o.slackSec)}` : `**${dur0(o.slackSec)} Verzug**`;
-    a.md.push(`Prognose fertig **${dueTxt(o.eta)}** – ${slackTxt} (${o.riskLabel}); Fortschritt ${pct(o.progress)}${o.shippedQty ? ', ' + stk(o.shippedQty) + ' versandt' : ''}.${o.etaPending ? ` Eine Neuberechnung (${dueTxt(o.etaPending)}) wird gerade bestätigt.` : ''}`);
-    a.md.push('', '### Arbeitsgänge');
-    const routeTxt = [], route = [];
+    const late = o.slackSec != null && o.slackSec < 0;
+    a.sev = late ? 'crit' : o.risk === 'knapp' ? 'warn' : 'ok';
+    a.head = focus === 'eta' ? `${o.id} fertig ca. ${dueTxt(o.eta)} – ${late ? durR(-o.slackSec) + ' nach dem Termin' : slackTxt(o.slackSec)}`
+      : late ? `${o.id} ist ${durR(-o.slackSec)} zu spät` : o.risk === 'knapp' ? `${o.id} hält knapp – ${slackTxt(o.slackSec)}` : `${o.id} liegt im Plan – fertig ca. ${dueTxt(o.eta)}`;
+    a.md.push(`${o.part.name} (${o.part.no}) für ${o.customer} – ${stk(o.qty)}, Termin ${dueTxt(o.due)}${o.priority === 'eil' ? ', **Eilauftrag**' : ''}; Prognose ${dueTxt(o.eta)}.${o.etaPending ? ` Eine Neuberechnung (${dueTxt(o.etaPending)}) wird gerade bestätigt.` : ''}`);
+    const nDone = o.ops.filter(op => op.complete && op.station !== 'VERSAND').length, nAll = o.ops.filter(op => op.station !== 'VERSAND').length;
+    a.stats = [
+      { l: 'Prognose', v: tc(o.eta), s: 'Liefertermin-Prognose', c: late ? 'crit' : o.risk === 'knapp' ? 'warn' : 'ok' },
+      { l: 'Termin', v: tc(o.due), s: o.priority === 'eil' ? 'Eilauftrag' : custShort(o.customer) },
+      { l: late ? 'Verzug' : 'Puffer', v: o.slackSec == null ? '–' : o.slackSec < 60 && o.slackSec >= 0 ? '0 min' : durR(Math.abs(o.slackSec)), s: o.riskLabel, c: late ? 'crit' : o.risk === 'knapp' ? 'warn' : 'ok' },
+      { l: 'Fortschritt', v: pct(o.progress), s: `${nDone}/${nAll} Arbeitsgänge${o.shippedQty ? ' · ' + stk(o.shippedQty) + ' versandt' : ''}` },
+    ];
+    // Störung auf dem Weg des Auftrags: zuerst nennen (Reparatur, vorher/nachher)
     for (const op of o.ops) {
-      const isM = !!S().machines[op.station];
+      if (op.complete || op.state !== 'active' || !S().machines[op.station]) continue;
+      const fx = faultImpact(c, op.station); if (!fx) continue;
+      const r = fx.rows.find(x => x.o.id === o.id);
+      a.md.push('', `**Störung an ${op.station} (${fx.f.code} ${fx.f.text})** – ${fx.fi.working ? 'Reparatur ' + sn(fx.fi.person.name) : fx.fi.person ? sn(fx.fi.person.name) + ' unterwegs' : 'noch niemand zugeteilt'}, Ende ca. ${clk(fx.fi.endT)}.${r ? ` AG ${op.seq} fertig ca. ${tc(r.opA)}${r.opB != null && Math.abs(r.opA - r.opB) >= 60 ? ' statt ' + tc(r.opB) : ''}; ${etaLine(r)}.` : ''}`);
+      if (r && r.etaB != null && Math.abs(r.dEta) >= 60) a.impact = { title: 'Liefertermin vor / nach der Störung', rows: [{ id: o.id, label: 'AG ' + op.seq, before: r.etaB, after: r.etaA, due: o.due }] };
+    }
+    // Warum knapp/spät: Ursachen aus der Kette (Warten, Bearbeitung, Fremdbearbeitung, Stopp)
+    const dc = o.risk !== 'ok' || focus === 'why' ? delayCauses(c, o) : null;
+    if (dc && dc.items.length) {
+      a.md.push('', late ? '### Warum verspätet' : o.risk === 'knapp' ? '### Warum knapp' : '### Was den Termin bestimmt');
+      for (const x of dc.items) a.md.push(`- ${x === dc.main ? '**' + uc1(x.text) + '**' : uc1(x.text)}`);
+    }
+    a.md.push('', '### Arbeitsgänge');
+    const fops = (c.fc().orders[o.id] || {}).ops || [];
+    const routeTxt = [], route = [];
+    o.ops.forEach((op, i) => {
+      const isM = !!S().machines[op.station], fe = fops[i] || null;
       const r = { seq: op.seq, op: op.op, station: op.station, st: 'plan', pill: 'geplant', sub: '', pct: null, c: 'var(--faint)' };
-      if (op.station === 'VERSAND' && !op.complete && op.state === 'open') {
+      if (op.station === 'VERSAND' && !op.complete) {
         routeTxt.push(`- AG ${op.seq} ${op.op}: nach Abschluss ca. ${tc(o.eta)}`);
-        Object.assign(r, { st: 'ship', pill: 'Versand', sub: `nach Abschluss ca. ${tc(o.eta)}`, c: 'var(--muted)' }); route.push(r); continue;
+        Object.assign(r, { st: 'ship', pill: 'Versand', sub: `nach Abschluss ca. ${tc(o.eta)}`, c: 'var(--muted)' }); route.push(r); return;
       }
       const where = op.station === 'EXT' ? 'extern' : op.station === 'VERSAND' ? 'Versand' : mName(op.station);
+      const startEnd = fe ? `Start ca. ${tc(Math.max(c.t, fe.start))} · fertig ca. ${tc(Math.max(c.t, op.station === 'EXT' && fe.lastReturn != null ? fe.lastReturn : fe.end))}` : '';
       let s;
       if (op.complete) {
         s = `fertig (${nm(op.good)}/${nm(op.targetIn)}${op.scrap ? ', ' + nm(op.scrap) + ' Ausschuss' : ''})`;
         Object.assign(r, { st: 'done', pill: 'fertig', sub: `${nm(op.good)}/${nm(op.targetIn)} gut${op.scrap ? ' · ' + nm(op.scrap) + ' Ausschuss' : ''}${op.endT ? ' · ' + tc(op.endT) : ''}`, c: 'var(--st-run)', pct: 1 });
       } else if (op.state === 'active') {
         const mv = isM ? c.mv(op.station) : null;
-        const stopTxt = mv && (WAIT[mv.state] || mv.state === 'fault') ? mv.cause : '';
+        const stopTxt = mv && (WAIT[mv.state] || mv.state === 'fault') ? causeCore(mv) : '';
         s = `**${mv ? stLabel(mv.state) : 'in Bearbeitung'}** – ${nm(op.good + op.scrap)}/${nm(op.target)}${stopTxt ? ': ' + stopTxt : ''}${mv && mv.etaOpEnd ? ', fertig ca. ' + tc(mv.etaOpEnd) : ''}`;
         const col = mv ? ((WF.STATE[mv.state] || {}).color || 'var(--st-run)') : 'var(--st-run)';
         Object.assign(r, { st: 'act', pill: mv ? stLabel(mv.state) : 'in Bearbeitung', c: col, pct: op.target ? Math.min(1, (op.good + op.scrap) / op.target) : null,
@@ -1115,39 +1338,39 @@
         Object.assign(r, { st: 'ext', pill: 'extern', c: 'var(--info)', sub: `${op.ext ? (op.ext.partner ? op.ext.partner + ' · ' : '') + op.ext.returnText : 'in Fremdbearbeitung'}` });
       } else if (op.state === 'waiting') {
         const b = isM ? blockerOn(c, op.station, o.id, op.seq) : null;
-        s = `wartet${op.waiting ? ' (' + stk(op.waiting) + ' im Eingang)' : ''}${op.good ? ', ' + nm(op.good) + ' fertig' : ''}${b ? ' – ' + b.text : ''}${op.plannedStart ? '; geplant ' + tc(op.plannedStart) + '–' + tc(op.plannedEnd) : ''}`;
         const bl = b ? (b.running.length ? `nach ${b.running[0].orderId} AG ${b.running[0].seq} (läuft bis ${tc(b.running[0].end)})` : `nach ${listJoin(b.before.slice(0, 2).map(e => e.orderId + ' AG ' + e.seq))}`) : '';
+        s = `wartet${op.waiting ? ' (' + stk(op.waiting) + ' im Eingang)' : ''}${op.good ? ', ' + nm(op.good) + ' fertig' : ''}${bl ? ' – ' + bl : ''}${startEnd ? '; ' + startEnd : ''}`;
         Object.assign(r, { st: 'wait', pill: 'wartet', c: 'var(--st-wait)', pct: op.target && op.good ? Math.min(1, op.good / op.target) : null,
-          sub: [op.waiting ? stk(op.waiting) + ' im Eingang' : '', op.good ? nm(op.good) + ' fertig' : '', bl, op.plannedStart ? 'geplant ' + tc(op.plannedStart) + ' – ' + tc(op.plannedEnd) : ''].filter(Boolean).join(' · ') });
+          sub: [op.waiting ? stk(op.waiting) + ' im Eingang' : '', op.good ? nm(op.good) + ' fertig' : '', bl, startEnd].filter(Boolean).join(' · ') });
       } else {
-        s = op.plannedStart ? `geplant ${tc(op.plannedStart)} – ${tc(op.plannedEnd)}` : 'offen';
-        Object.assign(r, { sub: op.plannedStart ? `${tc(op.plannedStart)} – ${tc(op.plannedEnd)}` : 'noch nicht eingeplant', pill: op.station === 'EXT' ? 'extern' : 'geplant' });
+        s = startEnd || 'noch nicht eingeplant';
+        Object.assign(r, { sub: startEnd || 'noch nicht eingeplant', pill: op.station === 'EXT' ? 'extern' : 'geplant' });
         if (op.station === 'EXT' && op.ext && op.ext.partner) r.sub = op.ext.partner + ' · ' + r.sub;
       }
       r.where = where;
       routeTxt.push(`- AG ${op.seq} ${op.op} · ${where}: ${s}`);
       route.push(r);
-    }
+    });
     SLOT(a, 'route', routeTxt.join('\n'), route);
     const cont = o.containers.filter(x => x.state !== 'shipped' && x.state !== 'scrap');
-    if (cont.length && focus !== 'eta') {
+    if (cont.length && focus !== 'eta' && focus !== 'why') {
       // je Ort zusammenfassen: „WFL M80 · Eingang: 5 Stk (2 Behälter)“
       const byW = [];
       for (const x of cont) { const g = byW.find(y => y.w === x.where); if (g) { g.q += x.qty; g.n++; } else byW.push({ w: x.where, q: x.qty, n: 1 }); }
       a.md.push('', `Behälter: ${byW.slice(0, 4).map(g => `${g.w} ${stk(g.q)}${g.n > 1 ? ' (' + g.n + ' Behälter)' : ''}`).join('; ')}${byW.length > 4 ? ' (+' + (byW.length - 4) + ' Orte)' : ''}.`);
     }
-    if (o.bottleneck) a.md.push('', `Engpass laut Prognose: ${o.bottleneck}.`);
-    let advTxt = '';
+    if (!dc && o.bottleneck) a.md.push('', `Längster Arbeitsgang im Plan: ${o.bottleneck}.`);
+    let eilOk = false;
     if (o.risk !== 'ok') {
-      const adv = orderAdvice(c, o); advTxt = adv.text;
+      const adv = adviceText(c, o); eilOk = adv.eilOk;
       a.md.push('', '> **Empfehlung:** ' + adv.text);
-      addAction(a, adv.action);
+      for (const x of adv.actions) addAction(a, x);
     } else a.md.push('', `> **Einschätzung:** Termin hält nach aktueller Prognose – keine Maßnahme nötig.`);
-    a.impact = { title: 'Prognose gegen Termin', rows: [{ id: o.id, label: custShort(o.customer), before: o.eta, after: null, due: o.due }] };
-    a.sources = ['Auftrag ' + id + ' (Arbeitsgang-Kette)', 'Prognose / Plantafel', 'Behälterorte', srcStand()];
-    const cur = curOp(o);
-    a.followups = [cur && S().machines[cur.station] ? `Was macht ${cur.station} gerade?` : 'Welche Aufträge sind gefährdet und warum?', o.bottleneck ? `Was passiert, wenn ${o.bottleneck.split(' ')[0]} 2 h ausfällt?` : 'Was ist der Engpass?'];
-    if (o.priority !== 'eil' && o.risk !== 'ok' && !/nur verschieben|hilft hier nicht|bringt hier nichts/.test(advTxt)) a.followups.unshift(`${o.id} als Eilauftrag kennzeichnen`);
+    a.sources = ['Auftrag ' + id + ' (Arbeitsgang-Kette)', 'Prognose / Plantafel', 'Was-wäre-wenn Eilauftrag', srcStand()];
+    const cur = curOp(o), bm = dc && dc.main && dc.main.station ? dc.main.station : bnMachine(o);
+    a.followups = [cur && S().machines[cur.station] ? `Was macht ${cur.station} gerade?` : 'Welche Aufträge sind gefährdet und warum?', bm && S().machines[bm] ? `Was passiert, wenn ${bm} 2 h ausfällt?` : 'Was ist der Engpass?'];
+    if (focus !== 'why' && o.risk !== 'ok') a.followups.unshift(`Warum ist ${o.id} ${late ? 'verspätet' : 'knapp'}?`);
+    if (eilOk) a.followups.unshift(`${o.id} als Eilauftrag kennzeichnen`);
     return done(a);
   }
   function ansCustomer(c, customer) {
@@ -1579,45 +1802,71 @@
       if (!prev || after > prev.after) byOrder[o.id] = { o, e: p.e, p, after, before: o.eta };
     }
     for (const k in byOrder) rows.push(byOrder[k]);
-    rows.sort((x, y) => (y.after - y.o.due) - (x.after - x.o.due));
-    const flips = rows.filter(r => r.before <= r.o.due && r.after > r.o.due), stillLate = rows.filter(r => r.before > r.o.due);
+    // nur Aufträge, deren Liefertermin sich spürbar (≥ 5 min) verschiebt
+    const moved = rows.filter(r => r.after - r.before >= 300);
+    const quiet = rows.length - moved.length;
+    moved.sort((x, y) => (y.after - y.o.due) - (x.after - x.o.due));
+    const flips = moved.filter(r => r.before <= r.o.due && r.after > r.o.due), stillLate = moved.filter(r => r.before > r.o.due);
+    a.eyebrow = `Was-wäre-wenn · Ausfall ${id}`;
+    a.sev = flips.length ? 'crit' : stillLate.length ? 'warn' : 'ok';
     // Kernaussage: Annahme + Ergebnis
-    let result;
-    if (!list.length) result = `**Kein Einfluss auf Termine** – an ${id} ist in der Plantafel nichts eingeplant${mv.state === 'idle' ? ' (' + lc1(String(mv.cause).replace(/^Frei\s*[–-]\s*/i, '')) + ')' : ''}.`;
-    else if (!rows.length) result = `**Kein Einfluss auf Termine** – der nächste Arbeitsgang an ${id} beginnt erst ${tc(list[0].start)}, nach dem Ausfall.`;
-    else if (flips.length) result = `**${pl(flips.length, 'Termin kippt', 'Termine kippen')}:** ${listJoin(flips.map(r => `${r.o.id} (${dur0(r.o.due - r.after)} Verzug)`))}${stillLate.length ? `; ${listJoin(stillLate.map(r => r.o.id))} ${stillLate.length === 1 ? 'ist' : 'sind'} schon verspätet` : ''}.`;
-    else if (stillLate.length) result = `**Kein weiterer Termin kippt**; ${listJoin(stillLate.map(r => r.o.id))} ${stillLate.length === 1 ? 'ist' : 'sind'} schon verspätet und ${stillLate.length === 1 ? 'verschiebt sich' : 'verschieben sich'} weiter.`;
-    else result = `**Kein Termin kippt** – ${rows.length === 1 ? rows[0].o.id + ' behält' : 'alle ' + rows.length + ' betroffenen Aufträge behalten'} Puffer${rows.length === 1 ? ' (' + dur0(rows[0].o.due - rows[0].after) + ')' : ''}.`;
-    a.md.push(`**Annahme:** ${mName(id)} fällt ab jetzt (${clk(t)}) für ${durR(N)} aus – bis ca. ${tc(T1)}.${mv.state === 'fault' ? ` ${id} ist bereits gestört (${mv.fault.code}); betrachtet wird ein zusätzlicher Ausfall.` : ''}`, result, '');
-    for (const r of rows) {
-      const o = r.o, dl = r.after - r.before, newSlack = o.due - r.after;
+    if (!list.length) a.head = `Kein Einfluss auf Termine – an ${id} ist nichts eingeplant`;
+    else if (!rows.length) a.head = `Kein Einfluss auf Termine – ${id} beginnt den nächsten Arbeitsgang erst ${tc(list[0].start)}`;
+    else if (flips.length) a.head = `${pl(flips.length, 'Termin kippt', 'Termine kippen')}: ${listJoin(flips.map(r => r.o.id))}`;
+    else if (stillLate.length) a.head = `Kein weiterer Termin kippt – ${listJoin(stillLate.map(r => r.o.id))} ${stillLate.length === 1 ? 'verschiebt sich' : 'verschieben sich'} weiter`;
+    else if (moved.length) a.head = `Kein Termin kippt – ${moved.length === 1 ? moved[0].o.id + ' behält' : 'alle ' + moved.length + ' Aufträge behalten'} Puffer`;
+    else a.head = `Kein Liefertermin verschiebt sich spürbar`;
+    a.md.push(`Annahme: ${mName(id)} fällt ab jetzt (${clk(t)}) für ${durR(N)} aus – bis ca. ${tc(T1)}.${mv.state === 'fault' ? ` ${id} ist bereits gestört (${mv.fault.code}); betrachtet wird ein zusätzlicher Ausfall.` : ''}`, '');
+    const lostTxt = durR(auto ? N : lostWork);
+    a.stats = [
+      { l: 'Ausfall', v: durR(N), s: `${auto ? 'Maschinenzeit' : 'Arbeitszeit'} ${lostTxt}`, c: 'info' },
+      { l: 'Kosten', v: eur(cost), s: `${eur(mv.rate)}/h Stundensatz`, c: 'warn' },
+      { l: 'Termine', v: flips.length ? pl(flips.length, 'kippt', 'kippen') : 'halten', s: moved.length ? `${moved.length} von ${rows.length} verschoben` : NOCHG, c: flips.length ? 'crit' : stillLate.length ? 'warn' : 'ok' },
+    ];
+    for (const r of moved) {
+      const o = r.o, newSlack = o.due - r.after;
       let verdict;
-      if (r.before > o.due) verdict = `bleibt verspätet (${dur0(newSlack)} Verzug statt ${dur0(o.due - r.before)})`;
-      else if (newSlack < 0) verdict = `**kippt: ${dur0(newSlack)} Verzug** (bisher ${dur0(o.due - r.before)} Puffer)`;
-      else verdict = `hält (Puffer ${dur0(newSlack)} statt ${dur0(o.due - r.before)})`;
-      const shiftTxt = dl >= 60 ? `Prognose ${dueTxt(r.before)} → **${dueTxt(r.after)}**` : `Prognose bleibt ${dueTxt(r.before)} (Verschiebung wird von Folgeschritten aufgefangen)`;
-      a.md.push(`- **${o.id}** ${o.part.name} (${custShort(o.customer)}), AG ${r.e.seq}${r.e.active ? ' läuft hier' : ' ab ' + tc(r.e.start)}: ${shiftTxt}; Termin ${dueTxt(o.due)} ${verdict}.`);
+      if (r.before > o.due) verdict = `bleibt verspätet (${durR(-newSlack)} statt ${durR(r.before - o.due)} Verzug)`;
+      else if (newSlack < 0) verdict = `**kippt: ${durR(-newSlack)} Verzug** (bisher ${slackTxt(o.due - r.before)})`;
+      else verdict = `hält (${slackTxt(newSlack)} statt ${durR(o.due - r.before)})`;
+      a.md.push(`- **${o.id}** ${o.part.name} (${custShort(o.customer)}), AG ${r.e.seq}${r.e.active ? ' läuft hier' : ' ab ' + tc(Math.max(t, r.e.start))}: Prognose ${dueTxt(r.before)} → **${dueTxt(r.after)}** (${deltaTxt(r.after - r.before)}); Termin ${dueTxt(o.due)} ${verdict}.`);
     }
+    if (quiet > 0 && rows.length) a.md.push(`- ${pl(quiet, 'weiterer Auftrag', 'weitere Aufträge')} an ${id}: ${NOCHG} am Liefertermin (unter 5 min – Folgeschritte fangen die Verschiebung auf).`);
     if (rows.length) {
       const nParts = mv.order && mv.order.cycleMin && mv.state === 'running' ? Math.min(Math.max(0, mv.partsTotal - mv.partsDone), Math.floor((auto ? N : lostWork) / (mv.order.cycleMin * 60 + (st.loading === 'perPart' ? (st.loadMin || 1) * 60 : 0)))) : 0;
-      a.md.push(`- Kosten: ca. **${eur(cost)}** Stillstand (${eur(mv.rate)}/h × ${durR(auto ? N : lostWork)} ${auto ? 'Maschinenzeit' : 'Arbeitszeit'})${nParts > 0 && mv.order ? `, ca. ${teile(nParts)} ${mv.order.id} weniger bis ${clk(T1)}` : ''}.`);
+      a.md.push(`- Kosten: ca. **${eur(cost)}** Stillstand (${eur(mv.rate)}/h × ${lostTxt} ${auto ? 'Maschinenzeit' : 'Arbeitszeit'})${nParts > 0 && mv.order ? `, ca. ${teile(nParts)} ${mv.order.id} weniger bis ${clk(T1)}` : ''}.`);
     }
-    // Empfehlung
+    // Empfehlung: zuerst die Ausfallzeit an derselben Maschine aufholen, Eilauftrag nur nach der Engine-Regel und nie für
+    // zwei Aufträge, die sich noch einen Arbeitsplatz teilen
     const recs = [];
     if (flips.length || stillLate.length) {
       const crit = flips.concat(stillLate);
-      const alt = altMachines(id);
-      const ne = crit.filter(r => r.o.priority !== 'eil');
-      const altOk = [...new Set(crit.flatMap(r => capableAlts(r.o.id, r.e.seq, id)))];
-      recs.push(`Bei echtem Ausfall: ${ne.length ? listJoin(ne.map(r => r.o.id)) + ' als Eilauftrag kennzeichnen (holt an den Folgearbeitsplätzen Zeit auf)' : 'Kunden früh informieren'}${altOk.length ? `, Verlagerung auf ${listJoin(altOk)} prüfen` : alt.length ? '' : ''}${st.loading !== 'auto' ? ', Ausfallzeit mit Überstunden an ' + id + ' aufholen' : ''}.`);
-      for (const r of ne) addAction(a, { label: `${r.o.id} als Eilauftrag`, desc: `Vorbeugend: ${r.o.id} wird an allen Arbeitsplätzen beim nächsten Auftragswechsel vorgezogen.`, action: { type: 'setPriority', orderId: r.o.id, priority: 'eil' }, icon: 'bolt' });
-    } else if (rows.length) recs.push(`Die Puffer reichen – ein Ausfall von ${durR(N)} kostet vor allem Maschinenzeit (ca. ${eur(cost)}).${st.loading !== 'auto' && mv.operator ? ' Bediener:in während des Ausfalls an einer anderen Maschine einsetzen.' : ''}`);
+      const shiftEnd = (() => { const W = workWindows(), base = Math.floor(t / WEEK) * WEEK, d0 = Math.floor(t / DAY) * DAY; let e = null; for (const w of W) { const b = base + w[1]; if (b >= d0 && b <= d0 + DAY) e = b; } return e; })();
+      if (!auto) recs.push(`ca. ${durR(Math.max(900, lostWork))} Überstunden an ${id}${shiftEnd ? ' (nach Schichtende ' + clk(shiftEnd) + ' bzw. am Samstag)' : ''} holen den Ausfall auf.`);
+      else recs.push(`${id} läuft auch unbemannt – den Ausfall über Nacht bzw. am Wochenende aufholen (Standzeit und Material sichern).`);
+      const altOk = [...new Set(crit.flatMap(r => capableAlts(r.o.id, r.e.seq, id)))].filter(x => { const v = c.mv(x); return v && v.state !== 'fault'; });
+      if (altOk.length) recs.push(`Verlagerung auf ${listJoin(altOk.slice(0, 2))} prüfen (dort neu rüsten).`);
+      const remainSt = (o) => new Set(o.ops.filter(op => !op.complete && S().machines[op.station]).map(op => op.station));
+      const eilFor = [];
+      for (const r of crit.filter(x => x.o.priority !== 'eil')) {
+        const adv = simAdvice(r.o.id);
+        if (!(adv && adv.action && adv.action.type === 'setPriority')) continue;
+        if (eilFor.some(y => [...remainSt(y.o)].some(sid => remainSt(r.o).has(sid)))) continue;
+        eilFor.push(r);
+      }
+      const noEil = crit.filter(r => r.o.priority !== 'eil' && eilFor.indexOf(r) < 0);
+      if (eilFor.length) recs.push(`Zusätzlich ${listJoin(eilFor.map(r => r.o.id))} als Eilauftrag – laut Was-wäre-wenn holt ${eilFor.length === 1 ? 'er' : 'jeder'} Zeit auf, ohne andere Aufträge spät zu machen.`);
+      if (noEil.length) recs.push(`Eilauftrag für ${listJoin(noEil.map(r => r.o.id))} bringt nichts bzw. ginge zulasten anderer Aufträge.`);
+      for (const r of eilFor) addAction(a, { label: `${r.o.id} als Eilauftrag`, desc: `Vorbeugend: ${r.o.id} wird an allen Arbeitsplätzen beim nächsten Auftragswechsel vorgezogen.`, action: { type: 'setPriority', orderId: r.o.id, priority: 'eil' }, icon: 'bolt' });
+      if (flips.length) recs.push(`Bei echtem Ausfall ${listJoin([...new Set(flips.map(r => custShort(r.o.customer)))])} früh informieren.`);
+    } else if (moved.length) recs.push(`Die Puffer reichen – ein Ausfall von ${durR(N)} kostet vor allem Maschinenzeit (ca. ${eur(cost)}).${st.loading !== 'auto' && mv.operator ? ' Bediener:in während des Ausfalls an einer anderen Maschine einsetzen.' : ''}`);
+    else if (rows.length) recs.push(`Keine Termin-Maßnahme nötig – die Verschiebung fangen Folgeschritte und Puffer auf; es bleiben ca. ${eur(cost)} Stillstandskosten.`);
     else recs.push('Keine Maßnahme nötig.');
-    a.md.push('', '> **Empfehlung:** ' + recs.join(' '));
+    a.md.push('', '> **Empfehlung:** ' + uc1(recs.join(' ')));
     a.md.push('', `~ Schätzung aus der Plantafel: Arbeitsgänge an ${id} verschieben sich um die Ausfallzeit (${auto ? 'Kalenderzeit – läuft auch unbemannt' : 'Arbeitszeit – läuft nur bemannt'}), Folgeschritte um die verlorene Arbeitszeit. Wartezeiten (z. B. Härterei-Lieferfenster) können einen Teil auffangen.`);
     if (!mv.fault && mv.state !== 'setup' && mv.state !== 'toolchange') addAction(a, { label: `Störung an ${id} jetzt auslösen (Demo)`, desc: `Simuliert einen Alarm aus dem Störungskatalog (Reparatur laut Katalog, nicht ${durR(N)}) – Meldung, Instandhaltung und Prognose reagieren live.`, action: { type: 'triggerFault', machineId: id }, icon: 'alert', danger: true });
-    a.impact = rows.length ? { title: `Ausfall ${id} · ${durR(N)}`, rows: rows.slice(0, 6).map(r => ({ id: r.o.id, label: 'AG ' + r.e.seq, before: r.before, after: r.after, due: r.o.due })) } : null;
-    a.sources = [`Plantafel ${id} (${list.length} Arbeitsgänge)`, 'Prognose je Auftrag', 'Schichtkalender', `Stundensatz ${eur(mv.rate)}/h`, srcStand()];
+    a.impact = moved.length ? { title: `Ausfall ${id} · ${durR(N)}`, rows: moved.slice(0, 6).map(r => ({ id: r.o.id, label: 'AG ' + r.e.seq, before: r.before, after: r.after, due: r.o.due })) } : null;
+    a.sources = [`Plantafel ${id} (${list.length} Arbeitsgänge)`, 'Prognose je Auftrag', 'Was-wäre-wenn Eilauftrag', 'Schichtkalender', `Stundensatz ${eur(mv.rate)}/h`, srcStand()];
     a.followups = [`Was macht ${id} gerade?`, 'Welche Aufträge sind gefährdet und warum?'];
     return done(a);
   }
@@ -1664,8 +1913,7 @@
   function ansHandover(c) {
     const a = A('handover'), t = c.t, k = c.k(), sh = WF.sim.shift(), W = nextShiftWindow();
     const mvs = c.mvs();
-    a.md.push(`### Schichtübergabe ${W.cur} → ${W.next}`);
-    a.md.push(`~ Stand ${WF.sim.clock()}${sh.id ? ' · Schichtende ' + clk(sh.endsAt) : ''} · ${W.next} ${tc(W.from)}–${clk(W.to)} · aus Live-Daten erstellt`, '');
+    a.md.push(`Stand ${WF.sim.clock()}${sh.id ? ' · Schichtende ' + clk(sh.endsAt) : ''} · ${W.next} ${tc(W.from)}–${clk(W.to)} · aus Live-Daten erstellt.`, '');
     // Lage
     const prod = mvs.filter(m => m.state === 'running').length;
     const ss = S().shiftStats || {};
@@ -1694,9 +1942,11 @@
     if (nowFin.length) a.md.push(`- Noch in dieser Schicht fertig: ${nowFin.slice(0, 5).map(o => `${o.id} ca. ${tc(o.eta)}`).join(', ')}.`);
     if (nextFin.length) a.md.push(`- Bis Ende ${W.next} fertig: ${nextFin.slice(0, 5).map(o => `${o.id} ca. ${tc(o.eta)}`).join(', ')}.`);
     // Werkzeugwechsel nächste Schicht
-    const ch = plannedChanges(c, W.to).filter(g => g.t >= W.from - 600 && g.stage !== 'später');
+    const all = plannedChanges(c, W.to).filter(g => g.stage !== 'später');
+    const ch = all.filter(g => g.t >= W.from), nowCh = sh.id ? all.filter(g => g.t < W.from) : [];
     const est = estimateChanges(c, W.from, W.to);
     a.md.push('', `### Werkzeugwechsel ${W.next} (${tc(W.from)}–${clk(W.to)})`);
+    if (nowCh.length) a.md.push(`- Noch in dieser Schicht: ${nowCh.slice(0, 4).map(g => `${clk(g.t)} ${g.machine} ${g.tools.map(x => toolShort(x.name)).join(' + ')}${g.by ? ' (' + sn(g.by) + ')' : ''}`).join('; ')}.`);
     for (const g of ch.slice(0, 6)) a.md.push(`- ${tc(g.t)} ${mName(g.machine)}: ${g.tools.map(x => toolShort(x.name)).join(' + ')} nach Teil ${g.afterPart}${g.manual ? ' (vorbeugend beauftragt)' : ''}`);
     const nEst = est.reduce((s2, x) => s2 + x.n, 0);
     if (nEst) a.md.push(`- Voraussichtlich ${pl(nEst, 'Wechsel', 'Wechsel')} insgesamt (Schätzung aus Reststandzeit und Taktzeit): ${est.slice(0, 5).map(x => `${x.id} ${x.names.join(', ')}`).join('; ')}.`);
@@ -1727,6 +1977,15 @@
     a.md.push(`- ${W.next}: ${nxt.length} Personen (${roleSummary(nxt)}).`);
     if (W.nextShift === 'S' && !nxt.some(p => /^Instandhalt/.test(p.role))) a.md.push('- In der Spätschicht keine Instandhaltung – Reparaturen übernimmt der Einrichter (' + (nxt.filter(p => p.skills.indexOf('repair') >= 0).map(p => sn(p.name)).join(', ') || '–') + ').');
     if (W.ghostFrom != null) { const au = mvs.filter(m => m.loading === 'auto' && m.order && m.state === 'running'); a.md.push(`- Unbemannt weiter (Geisterschicht): ${au.length ? au.map(m => mName(m.id)).join(', ') : 'keine Maschine'}.`); }
+    // Offen für die nächste Schicht: dieselbe Rangfolge wie „Jetzt tun“
+    const todo = todoList(c);
+    a.md.push('', `### Offen für die ${W.next}`);
+    if (todo.length) todo.slice(0, 5).forEach((x, i) => a.md.push(`${i + 1}. ${x.text}`));
+    else a.md.push('1. Keine offenen Eingriffe – laufende Aufträge planmäßig weiterführen.');
+    a.eyebrow = `Schichtübergabe · ${W.cur} → ${W.next}`;
+    a.head = `Übergabe an die ${W.next}: ${todo.length ? pl(todo.length, 'offener Punkt', 'offene Punkte') : 'keine offenen Punkte'}${ord.length ? ', ' + pl(ord.length, 'Termin', 'Termine') + ' im Blick' : ''}`;
+    a.sev = mvs.some(m => m.state === 'fault') ? 'crit' : todo.length || ord.length ? 'warn' : 'ok';
+    a.stats = [oeeStat(k.oee, sh.id && k.oeeShift != null ? 'Schicht ' + pct(k.oeeShift, 1) : 'Ziel ' + pct(TARGET_OEE)), { l: 'Gutteile Schicht', v: nm(ss.good || 0), s: nm(ss.scrap || 0) + ' Ausschuss' }, { l: 'Termine', v: ord.length ? nm(ord.length) : '0', s: ord.length ? 'knapp oder spät' : 'alle im Plan', c: ord.some(o => o.slackSec < 0) ? 'crit' : ord.length ? 'warn' : 'ok' }];
     a.sources = ['Maschinenstatus', 'Meldungen', 'Prognose', 'Werkzeugplanung', 'Material & Bestellungen', 'Schichtplan', srcStand()];
     a.followups = ['Welche Aufträge sind gefährdet und warum?', 'Welche Werkzeugwechsel stehen in der Schicht an?', 'Was ist der Engpass?'];
     a.copyable = true;
@@ -1737,15 +1996,17 @@
   function ansBriefing(c) {
     const a = A('briefing'), b = briefing(), t = c.t, sh = WF.sim.shift(), k = c.k();
     const until = t + 2 * 3600;
-    a.md.push(`### Schichtbriefing ${U.fmtDayClock(t)} · ${sh.id ? sh.name + ' bis ' + clk(sh.endsAt) : 'Geisterschicht'}`, `**${b.headline}**`, '');
     const ov = ansOverview(c);
+    a.eyebrow = `Schichtbriefing · ${U.fmtDayClock(t)} · ${sh.id ? sh.name + ' bis ' + clk(sh.endsAt) : 'Geisterschicht'}`;
+    a.head = ov.head; a.sev = ov.sev;
+    a.md.push(b.headline.replace(/^[^:]+:\s*/, '').replace(/^./, ch => ch.toUpperCase()), '');
     a.stats = ov.stats;
     // Termine
     const open = c.open().filter(o => o.eta != null);
     const late = open.filter(o => o.risk === 'spät').sort((x, y) => x.slackSec - y.slackSec), tight = open.filter(o => o.risk === 'knapp').sort((x, y) => x.slackSec - y.slackSec);
     a.md.push('### Termine');
     if (!late.length && !tight.length) a.md.push(`- Alle ${open.length} offenen Aufträge im Plan.`);
-    for (const o of late.concat(tight).slice(0, 4)) a.md.push(`- **${o.id}** ${o.part.name} (${custShort(o.customer)}): ${o.slackSec < 0 ? '**' + dur0(o.slackSec) + ' Verzug**' : 'nur ' + dur0(o.slackSec) + ' Puffer'} – Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)}${o.bottleneck ? '; Engpass ' + o.bottleneck.split(' (')[0] : ''}.`);
+    for (const o of late.concat(tight).slice(0, 4)) { const dc = delayCauses(c, o); a.md.push(`- **${o.id}** ${o.part.name} (${custShort(o.customer)}): ${o.slackSec < 0 ? '**' + durR(-o.slackSec) + ' Verzug**' : 'nur ' + slackTxt(o.slackSec)} – Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)}${dc && dc.main ? '; Ursache: ' + dc.main.short : ''}.`); }
     const fin = open.filter(o => o.eta <= until).sort((x, y) => x.eta - y.eta);
     if (fin.length) a.md.push(`- Fertig in den nächsten 2 h: ${fin.map(o => `${o.id} ca. ${clk(o.eta)}`).join(', ')}.`);
     // Nächste 2 Stunden
@@ -1766,21 +2027,15 @@
     // Material & Qualität
     a.md.push('', '### Material & Qualität');
     for (const x of b.bullets.filter(x => x.category === 'material' || x.category === 'qualitaet' || x.category === 'stoerung')) a.md.push(`- ${x.text}`);
-    // Empfehlungen
+    // Jetzt tun (dieselbe Rangfolge wie Lage und Übergabe)
     const recs = [];
-    const fl = c.mvs().filter(m => m.state === 'fault');
-    if (fl.length) { const fi = faultInfo(fl[0]); recs.push(`Störung ${mName(fl[0].id)}: ${fi.working ? 'Reparatur läuft' : 'Instandhaltung hinschicken'} (Ende ca. ${clk(fi.endT)}).`); }
     if (!sh.id && morningPlan(c)) recs.push(morningPlan(c));
-    if (late.length) { const adv = orderAdvice(c, late[0]); recs.push(adv.text); addAction(a, adv.action); }
-    const bms = [...new Set(tight.map(bnMachine).filter(Boolean))];
-    if (tight.length && bms.length) recs.push(`Knappe Termine (${listJoin(tight.slice(0, 3).map(o => o.id))}) absichern: ${listJoin(bms)} ohne Unterbrechung laufen lassen.`);
-    if (ch.some(g => !g.by) && sh.id) { const g = ch.find(x => !x.by); recs.push(`Werkzeug für ${g.machine} (${clk(g.t)}) vermessen bereitlegen.`); }
-    const low = Object.values(S().materials).filter(mt => mt.onHand < mt.min && !mt.onOrder);
-    if (low.length) { recs.push(`${listJoin(low.map(mt => mt.name))} nachbestellen.`); for (const mt of low) addAction(a, reorderAction(mt)); }
-    const qb = b.bullets.find(x => x.category === 'qualitaet' && x.sev === 'warn');
-    if (qb && /SPC-Trend an/.test(qb.text)) { const mid = (qb.entity || '').split('|')[1]; recs.push(`${mid}: Korrekturintervall verkürzen oder Werkzeug vorbeugend früher wechseln.`); }
+    const todo = todoList(c);
+    for (const x of todo.slice(0, 4)) { recs.push(x.text); for (const ac of x.actions || []) addAction(a, ac); }
+    const bms = [...new Set(tight.map(o => { const dc = delayCauses(c, o); return dc && dc.main && dc.main.station ? dc.main.station : bnMachine(o); }).filter(Boolean))];
+    if (tight.length && bms.length && recs.length < 4) recs.push(`${listJoin(tight.slice(0, 3).map(o => o.id))}: knappe Termine absichern – ${listJoin(bms)} ohne Unterbrechung laufen lassen.`);
     if (!recs.length) recs.push('Keine akuten Eingriffe nötig – Fokus auf die anstehenden Werkzeugwechsel und den Engpass.');
-    a.md.push('', '### Empfehlungen');
+    a.md.push('', '### Jetzt tun');
     recs.slice(0, 4).forEach((r, i) => a.md.push(`${i + 1}. ${r}`));
     a.sources = ['Briefing-Regeln aus Live-Daten', 'Prognose / Plantafel', 'Werkzeugplanung', 'Schichtplan', 'Material', srcStand()];
     a.followups = ['Schreib mir die Schichtübergabe', 'Was ist der Engpass?', 'Wo verlieren wir heute Geld?'];
@@ -1792,30 +2047,38 @@
   const cleanSuggestion = (t) => String(t || '').replace(/\.\s*Empfehlung:\s*/g, /nächste Schicht/.test(t) ? '. Zu Schichtbeginn: ' : '. ').replace(/^Empfehlung:\s*/, '');
   function ansNotification(c, n) {
     const a = A('notification');
-    if (!n) { a.md.push('Diese Benachrichtigung ist nicht mehr vorhanden.'); return done(a); }
+    if (!n) { a.head = 'Diese Benachrichtigung ist nicht mehr vorhanden'; return done(a); }
     const sev = (WF.SEV[n.sev] || WF.SEV.info).label;
     const st = n.status === 'resolved' ? 'erledigt' + (n.resolveNote ? ' – ' + n.resolveNote : '') : n.status === 'ack' ? 'quittiert' + (n.ackBy ? ' von ' + n.ackBy : '') : 'offen';
-    a.md.push(`**${n.title}**`, `~ ${sev} · ${n.role} · ${tc(n.t)} · ${st}`, '', n.body || '');
+    a.eyebrow = `Meldung · ${sev} · ${n.role} · ${tc(n.t)} · ${st}`;
+    a.head = n.title;
+    a.sev = n.sev === 'crit' ? 'crit' : n.sev === 'warn' ? 'warn' : n.sev === 'ok' ? 'ok' : 'info';
+    if (n.body) a.md.push(n.body);
     const key = String(n.key || ''), kind = key.split(':')[0];
     const ent = n.entity;
     let sub = null;
-    if (ent && ent.kind === 'machine' && S().machines[ent.id]) sub = ansMachine(c, ent.id, kind === 'tool' || kind === 'ghost' ? 'tools' : 'impact');
-    else if (ent && ent.kind === 'order' && S().orders[ent.id]) sub = ansOrder(c, ent.id);
+    if (ent && ent.kind === 'machine' && S().machines[ent.id]) sub = kind === 'fault' && S().machines[ent.id].state === 'fault' ? ansFault(c, ent.id) : ansMachine(c, ent.id, kind === 'tool' || kind === 'ghost' ? 'tools' : 'impact');
+    else if (ent && ent.kind === 'order' && S().orders[ent.id]) sub = ansOrder(c, ent.id, kind === 'late' ? 'why' : null);
     else if (ent && ent.kind === 'material' && S().materials[ent.id]) sub = ansMaterial(c, [ent.id]);
     else if (ent && ent.kind === 'agv') sub = ansLogistics(c, [ent.id]);
     a.md.push('', '### Ursache und Einordnung');
     if (kind === 'ghost' && n.ghost) a.md.push(`- Standzeit von ${toolShort((PROF().toolTypeById[n.ghost.tool] || {}).name || n.ghost.tool)} reicht unbemannt bis ca. ${clk(n.ghost.stopT)}; danach Stillstand bis ${dueTxt(n.ghost.until)}.${n.ghost.gainSec ? ' Ein vorbeugender Wechsel bringt +' + durR(n.ghost.gainSec) + ' unbemannte Laufzeit.' : ''}`);
     if (kind === 'spc' && n.spc) a.md.push(`- Werkzeugverschleiß verschiebt das Maß; Mittelwert der letzten 8 Teile wandert zur Toleranzgrenze. Vorgeschlagene Korrektur ${nm(n.spc.value, 4)} mm.`);
     const own = /^(fault|late|wait)$/.test(kind);
-    let ownRec = null;
     if (sub) {
-      const lines = sub.md.slice(1).filter(l => { const r = l.indexOf('> **Empfehlung') === 0 || l.indexOf('> **Einschätzung') === 0; if (r && l.indexOf('> **Empfehlung') === 0) ownRec = l; return !r; });
-      a.md.push(...lines); if (sub.slots) a.slots = Object.assign(a.slots || {}, sub.slots); a.impact = sub.impact; a.entity = sub.entity; for (const x of sub.actions) addAction(a, x);
+      if (sub.head) a.md.push(`**${sub.head}.**`);
+      a.md.push(...sub.md.filter(l => !REC_RE.test(l)));
+      if (sub.slots) a.slots = Object.assign(a.slots || {}, sub.slots);
+      if (!a.stats && sub.stats) a.stats = sub.stats;
+      a.impact = sub.impact; a.entity = sub.entity;
+      for (const x of sub.actions) addAction(a, x);
     }
-    if (own && ownRec && n.status !== 'resolved') a.md.push('', ownRec);
+    if (own && sub && sub.rec && n.status !== 'resolved') a.md.push('', `> **${sub.rec.label}:** ${sub.rec.text}`);
     else if (n.suggestion) a.md.push('', '> **Empfehlung:** ' + cleanSuggestion(n.suggestion));
     for (const x of n.actions || []) {
       if (!x.action || x.action.type === 'select') continue;
+      // Eilauftrag nur, wenn die Terminberatung ihn empfiehlt (eine Regel)
+      if (x.action.type === 'setPriority' && x.action.priority === 'eil') { const adv = simAdvice(x.action.orderId); if (!(adv && adv.action && adv.action.type === 'setPriority')) continue; }
       addAction(a, { label: x.label, desc: 'Vorschlag aus der Meldung', action: x.action, icon: x.action.type === 'reorder' ? 'box' : x.action.type === 'setPriority' ? 'bolt' : x.action.type === 'applyOffset' ? 'gauge' : 'wrench' });
     }
     if (n.status === 'open') addAction(a, { label: 'Meldung quittieren', desc: 'Als gesehen markieren (bleibt bis zur Klärung sichtbar).', action: { type: 'ack', id: n.id, by: 'Schichtleitung' }, icon: 'check', quiet: true });
@@ -1876,8 +2139,12 @@
       if (o.status === 'fertig') { a.md.push(`${o0} ist bereits fertig.`); return done(a); }
       if (!normal && o.priority === 'eil') { a.md.push(`${o0} ist bereits Eilauftrag.`); return done(a); }
       a.md.push(normal ? `**${o0} wieder auf normale Priorität setzen** – die Maschinen planen ihn wieder nach Termin ein.` : `**${o0} als Eilauftrag kennzeichnen:** ${o.part.name} (${custShort(o.customer)}), Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)} – ${o.slackSec >= 0 ? 'Puffer ' + dur0(o.slackSec) : dur0(o.slackSec) + ' Verzug'}. Jede Maschine zieht ihn beim nächsten Auftragswechsel vor; laufende Teile werden nicht unterbrochen.`);
-      if (!normal) { const adv = orderAdvice(c, o); if (/hilft hier nicht|bringt hier nichts|nur verschieben/.test(adv.text)) a.md.push('', '> **Hinweis:** ' + adv.text); else if (/Achtung/.test(adv.text)) a.md.push('', '> **Hinweis:** ' + adv.text.slice(adv.text.indexOf('Achtung'))); }
-      addAction(a, { label: normal ? `${o0} normal priorisieren` : `${o0} als Eilauftrag`, desc: normal ? 'Priorität normal – Einplanung wieder nach Termin' : 'Priorität Eil – Vorrang beim nächsten Auftragswechsel', action: { type: 'setPriority', orderId: o0, priority: normal ? 'normal' : 'eil' }, icon: 'bolt' });
+      let eilOk = true;
+      if (!normal) { const adv = adviceText(c, o); eilOk = adv.eilOk; a.md.push('', `> **${eilOk ? 'Empfehlung' : 'Hinweis'}:** ${adv.text}`); }
+      a.head = normal ? `${o0} wieder auf normale Priorität setzen?` : `${o0} als Eilauftrag kennzeichnen?`;
+      a.eyebrow = 'Aktion · Priorität'; a.sev = !normal && !eilOk ? 'warn' : 'info';
+      a.md[0] = a.md[0].replace(/^\*\*[^*]+\*\*:?\s*/, '');
+      addAction(a, { label: normal ? `${o0} normal priorisieren` : eilOk ? `${o0} als Eilauftrag` : `Trotzdem als Eilauftrag`, desc: normal ? 'Priorität normal – Einplanung wieder nach Termin' : 'Priorität Eil – Vorrang beim nächsten Auftragswechsel', action: { type: 'setPriority', orderId: o0, priority: normal ? 'normal' : 'eil' }, icon: 'bolt' });
       a.entity = { kind: 'order', id: o0 };
       a.followups = [`Wo steht ${o0} gerade?`, 'Welche Aufträge sind gefährdet und warum?'];
     } else if (kind === 'reorder') {
@@ -1922,7 +2189,7 @@
       a.md.push('');
       if (cur.state === 'active') { const mvF = c.mv(cur.station); if (mvF && mvF.partEndT) a.md.push(`- ${cur.station} bearbeitet den Arbeitsgang gerade – verlagert werden kann erst an der nächsten Teilegrenze (ca. ${clk(mvF.partEndT)}); dann wandern die restlichen ${teile(Math.max(0, mvF.partsTotal - mvF.partsDone - 1))}.`); }
       const lt = machineLoad(c).find(x => x.id === target), lf = machineLoad(c).find(x => x.id === cur.station);
-      if (lt && lf) a.md.push(`- Belastung: ${mName(cur.station)} ${durShortTxt(lf.work)} · ${mName(target)} ${durShortTxt(lt.work)} Arbeitsinhalt.`);
+      if (lt && lf) a.md.push(`- Belastung: ${mName(cur.station)} ${hTxt(lf.work)} · ${mName(target)} ${hTxt(lt.work)} Arbeitsinhalt.`);
       addAction(a, { label: `AG ${cur.seq} auf ${target} verlagern`, desc: `${o0} · ${cur.op}`, action: { type: 'moveOp', orderId: o0, seq: cur.seq, stationId: target }, icon: 'route' });
       a.entity = { kind: 'order', id: o0 };
       a.followups = [`Wo steht ${o0} gerade?`, `Was macht ${target} gerade?`];
@@ -2103,10 +2370,11 @@
     // Termine
     if (late.length) {
       const o = late[0];
-      B.push({ cat: 'termine', sev: 'warn', entity: ent('order', o.id), text: `Termin: ${o.id} (${custShort(o.customer)}) ${dur0(o.slackSec)} zu spät – Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)}${o.bottleneck ? ', Engpass ' + o.bottleneck.split(' (')[0] : ''}${late.length > 1 ? `; außerdem verspätet: ${late.slice(1, 3).map(x => x.id).join(', ')}` : ''}${tight.length ? `; knapp: ${tight.slice(0, 2).map(x => x.id + ' (' + dur0(x.slackSec) + ')').join(', ')}` : ''}.` });
+      const dc = delayCauses(c, o);
+      B.push({ cat: 'termine', sev: 'warn', entity: ent('order', o.id), text: `Termin: ${o.id} (${custShort(o.customer)}) ${durR(-o.slackSec)} zu spät – Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)}${dc && dc.main ? '; Ursache: ' + dc.main.short : ''}${late.length > 1 ? `; außerdem verspätet: ${late.slice(1, 3).map(x => x.id).join(', ')}` : ''}${tight.length ? `; knapp: ${tight.slice(0, 2).map(x => x.id + ' (' + durR(x.slackSec) + ')').join(', ')}` : ''}.` });
     } else if (tight.length) {
       const o = tight[0];
-      B.push({ cat: 'termine', sev: 'info', entity: ent('order', o.id), text: `Termine halten; am knappsten ${o.id} (${custShort(o.customer)}) mit ${dur0(o.slackSec)} Puffer bis ${dueTxt(o.due)}${tight.length > 1 ? `, außerdem knapp: ${tight.slice(1, 3).map(x => x.id).join(', ')}` : ''}.` });
+      B.push({ cat: 'termine', sev: 'info', entity: ent('order', o.id), text: `Termine halten; am knappsten ${o.id} (${custShort(o.customer)}) mit ${slackTxt(o.slackSec)} bis ${dueTxt(o.due)}${tight.length > 1 ? `, außerdem knapp: ${tight.slice(1, 3).map(x => x.id).join(', ')}` : ''}.` });
     } else {
       const nx = open.slice().sort((x, y) => x.eta - y.eta)[0];
       B.push({ cat: 'termine', sev: 'ok', entity: nx ? ent('order', nx.id) : null, text: `Alle ${open.length} offenen Aufträge im Plan${nx ? `; als Nächstes fertig: ${nx.id} ${nx.part.name} ca. ${tc(nx.eta)}` : ''}.` });
@@ -2116,21 +2384,19 @@
       const m = waits[0];
       B.push({ cat: 'engpass', sev: 'warn', entity: ent('machine', m.id), text: `${mName(m.id)} ${lc1(stLabel(m.state))} seit ${durR(m.sinceSec)}: ${m.cause}${waits.length > 1 ? ` (auch ${waits.slice(1, 3).map(x => x.id).join(', ')})` : ''}.` });
     } else {
-      const loads = machineLoad(c);
-      const bnOf = (id) => open.filter(o => o.bottleneck && o.bottleneck.indexOf(id + ' ') === 0);
-      const sc = (x) => x.days + bnOf(x.id).reduce((s2, o) => s2 + (o.risk === 'spät' ? 1 : o.risk === 'knapp' ? 0.4 : 0), 0);
-      const top = loads.filter(x => x.work > 0).sort((x, y) => sc(y) - sc(x))[0];
+      const ab = ansBottleneck(c), top = ab.entity && ab.entity.kind === 'machine' ? ab.entity.id : null;
       if (top) {
-        const bn = bnOf(top.id);
-        B.push({ cat: 'engpass', sev: bn.some(o => o.risk === 'spät') ? 'warn' : 'info', entity: ent('machine', top.id), text: `Engpass ${mName(top.id)}: Arbeitsinhalt ca. ${durShortTxt(top.work)} (≈ ${daysTxt(top.days)}), belegt bis ${tc(top.until)}${bn.length ? ` – längster Arbeitsgang von ${bn.slice(0, 3).map(o => o.id).join(', ')}` : ''}.` });
+        const bn = open.filter(o => bnMachine(o) === top && o.risk !== 'ok');
+        const row = loadRows(c).find(x => x.id === top);
+        B.push({ cat: 'engpass', sev: bn.some(o => o.risk === 'spät') ? 'warn' : 'info', entity: ent('machine', top), text: `Engpass ${mName(top)}: ${row ? hTxt(row.work) + ' Arbeitsvorrat (≈ ' + daysTxt(row.days) + ')' : 'größter Arbeitsvorrat'}${bn.length ? ` – begrenzt ${bn.slice(0, 3).map(o => o.id).join(', ')}` : ''}.` });
       }
     }
     // Werkzeugwechsel nächste 2 h
     const ch = plannedChanges(c, t + 2 * 3600);
     if (ch.length) {
-      const txt = ch.slice(0, 3).map(g => `${clk(g.t)} ${g.machine} ${toolShort(g.tools[0].name)}${g.tools.length > 1 ? ' +' + (g.tools.length - 1) : ''}${g.by ? ' (' + g.by + ')' : ''}`).join('; ');
-      const waitAt = ch.find(g => g.waitFromT);
-      B.push({ cat: 'werkzeug', sev: waitAt ? 'warn' : 'tool', entity: ent('machine', ch[0].machine), text: `Werkzeugwechsel bis ${clk(t + 7200)}: ${txt}${ch.length > 3 ? ` (+${ch.length - 3})` : ''}${waitAt ? ` – ${waitAt.machine} wartet ab ${clk(waitAt.waitFromT)} auf den Einrichter` : ''}.` });
+      const txt = ch.slice(0, 3).map(g => `${clk(g.t)} ${g.machine} ${toolShort(g.tools[0].name)}${g.tools.length > 1 ? ' +' + (g.tools.length - 1) : ''}${g.by ? ' (' + sn(g.by) + ')' : sh.id && g.stage !== 'später' ? ' (noch niemand zugeteilt)' : ''}`).join('; ');
+      const waitAt = ch.find(g => g.waitFromT), open1 = sh.id && ch.find(g => !g.by && g.stage !== 'später' && g.t - t <= 3600);
+      B.push({ cat: 'werkzeug', sev: waitAt || open1 ? 'warn' : 'tool', entity: ent('machine', (open1 || ch[0]).machine), text: `Werkzeugwechsel bis ${clk(t + 7200)}: ${txt}${ch.length > 3 ? ` (+${ch.length - 3})` : ''}${waitAt ? ` – ${waitAt.machine} wartet ab ${clk(waitAt.waitFromT)} auf den Einrichter` : ''}.` });
     } else {
       const due = mvs.filter(m => m.state === 'waitTool');
       B.push({ cat: 'werkzeug', sev: due.length ? 'warn' : 'ok', entity: due.length ? ent('machine', due[0].id) : null, text: due.length ? `${mName(due[0].id)} wartet auf Werkzeug: ${due[0].cause}.` : `Kein Werkzeugwechsel in den nächsten 2 Stunden – Standzeiten reichen.` });
@@ -2140,7 +2406,8 @@
     const starved = mvs.filter(m => m.state === 'starved' && /material|rohteil|stange/i.test(m.cause));
     if (low.length) {
       const mt = low[0];
-      B.push({ cat: 'material', sev: mt.onOrder ? 'info' : 'warn', entity: ent('material', mt.id), text: `Material: ${mt.name} ${matQty(mt, mt.onHand)} unter Mindestbestand ${matQty(mt, mt.min)} – ${mt.onOrder ? matQty(mt, mt.onOrder) + ' bestellt' + (openPurchases(mt.id)[0] ? ', Lieferung ca. ' + dueTxt(openPurchases(mt.id)[0].etaT) : '') : 'Bestellvorschlag ' + matQty(mt, mt.reorderQty) + ' bei ' + mt.supplier.replace(' (Beispiel)', '')}${low.length > 1 ? ` (auch ${low.slice(1).map(x => x.name).join(', ')})` : ''}.` });
+      const p0 = openPurchases(mt.id)[0];
+      B.push({ cat: 'material', sev: mt.onOrder ? 'info' : 'warn', entity: ent('material', mt.id), text: `Material ${mt.name.replace(/\s+Zuschnitt\b/, '')}: ${matQty(mt, mt.onHand)} (Min. ${matQty(mt, mt.min)}) – ${mt.onOrder ? matQty(mt, mt.onOrder) + ' bestellt' + (p0 ? ', Lieferung ' + dueTxt(p0.etaT) : '') : 'nicht bestellt – Vorschlag ' + matQty(mt, mt.reorderQty) + ' bei ' + mt.supplier.replace(' (Beispiel)', '')}${low.length > 1 ? ` (auch ${low.slice(1).map(x => x.name).join(', ')})` : ''}.` });
     } else if (starved.length) {
       B.push({ cat: 'material', sev: 'warn', entity: ent('machine', starved[0].id), text: `Material: ${mName(starved[0].id)} – ${starved[0].cause}.` });
     } else {
@@ -2160,6 +2427,7 @@
       if (spc.length) B.push({ cat: 'qualitaet', sev: 'warn', entity: spc[0].entity ? ent(spc[0].entity.kind, spc[0].entity.id) : null, text: `Qualität: ${spc[0].title} – Korrektur empfohlen; FPY heute ${pct(k.fpy, 1)}.` });
       else if (repM) B.push({ cat: 'qualitaet', sev: 'warn', entity: ent('machine', repM), text: `Qualität: SPC-Trend an ${mName(repM)} heute ${rep[repM].length}× – Drift kommt nach jeder Korrektur zurück (Werkzeugverschleiß); FPY ${pct(k.fpy, 1)}, ${nm(k.scrap)} Ausschuss.` });
       else if (fpiW.length) B.push({ cat: 'qualitaet', sev: 'warn', entity: ent('machine', fpiW[0].id), text: `Qualität: Erstteil ${mName(fpiW[0].id)} wartet seit ${durR(fpiW[0].fpi.waitingSec)} auf die Prüfung – Maschine steht bis zur Freigabe.` });
+      else if (!(k.good + k.scrap > 0)) B.push({ cat: 'qualitaet', sev: 'ok', entity: null, text: 'Qualität: heute noch keine Teile gefertigt – keine SPC-Warnung offen.' });
       else B.push({ cat: 'qualitaet', sev: k.scrap > 0 && k.fpy < 0.97 ? 'warn' : 'ok', entity: null, text: `Qualität: keine Störung, FPY ${pct(k.fpy, 1)} bei ${nm(k.scrap)} Ausschuss${k.scrap ? ' (' + Object.keys(k.scrapBy || {}).filter(x => k.scrapBy[x]).map(x => x + ' ' + k.scrapBy[x]).join(', ') + ')' : ''}, keine SPC-Warnung.` });
     }
     const RANK = { crit: 0, warn: 1, tool: 2, info: 3, ok: 4 };
@@ -2168,7 +2436,13 @@
     const oeeTxt = k.oee != null ? `OEE ${pct(k.oee, 1)} ${k.oee >= TARGET_OEE ? 'über' : 'unter'} Ziel ${pct(TARGET_OEE)}` : 'noch keine OEE-Bezugszeit';
     const head = `${sh.id ? sh.name : 'Geisterschicht'}: ${prod} von ${mvs.length} Arbeitsplätzen produzieren, ${oeeTxt}` +
       (faults.length ? `, ${pl(faults.length, 'Störung', 'Störungen')}` : '') + (late.length ? `, ${pl(late.length, 'Termin', 'Termine')} verspätet` : tight.length ? `, ${nm(tight.length)} knapp` : ', Termine im Plan') + '.';
-    return { headline: head, bullets: B.slice(0, 5).map(b => ({ sev: b.sev, text: b.text, entity: b.entity || undefined, category: b.cat })), generatedT: t, mode: 'regelbasiert' };
+    const bullets = B.slice(0, 5).map(b => ({ sev: b.sev, text: b.text, entity: b.entity || undefined, category: b.cat }));
+    // Jetzt tun: die zwei wichtigsten Eingriffe (Handlung zuerst, mit Bezug und – wo möglich – Aktion)
+    const todo = sh.id || !morningPlan(c) ? todoList(c).slice(0, 2) : [];
+    if (todo.length) bullets.push({ sev: todo[0].sev === 'crit' ? 'crit' : 'warn', category: 'todo', text: 'Jetzt tun: ' + todo.map(x => x.short || x.text).join(' '), entity: todo[0].entity ? ent(todo[0].entity.kind, todo[0].entity.id) : undefined,
+      actions: todo.flatMap(x => x.actions || []).slice(0, 2).map(x => ({ label: x.label, action: x.action })) });
+    else if (!sh.id && morningPlan(c)) bullets.push({ sev: 'info', category: 'todo', text: 'Jetzt tun: ' + morningPlan(c) });
+    return { headline: head, bullets, todo: todo.map(x => ({ text: x.text, short: x.short, entity: x.entity, actions: (x.actions || []).map(y => ({ label: y.label, action: y.action })) })), generatedT: t, mode: 'regelbasiert' };
   }
 
   // ================================================================== Live-Modus (Claude über `sample`)

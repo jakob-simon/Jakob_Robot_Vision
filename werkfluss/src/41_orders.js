@@ -420,7 +420,8 @@
   .or-step.s-open .or-st-ic::before{content:'';width:8px;height:8px;border-radius:50%;border:1.5px solid var(--line2)}
   .or-step.s-open .or-st-l{color:var(--muted)}
   .or-step.s-open .or-st-s{color:var(--faint)}
-  .or-step.bn::after{content:'Engpass';position:absolute;top:-7px;right:8px;font:600 8.5px/1 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;padding:2px 5px 2px;border-radius:4px;color:var(--text2);background:var(--card);border:1px solid var(--line2);white-space:nowrap}
+  .or-step.bn::after{content:'Kritisch';position:absolute;top:-7px;right:8px;font:600 8.5px/1 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;padding:2px 5px 2px;border-radius:4px;color:var(--text2);background:var(--card);border:1px solid var(--line2);white-space:nowrap}
+  .or-step.bn.plant::after{content:'Engpass';color:var(--st-wait);border-color:color-mix(in srgb,var(--st-wait) 45%,transparent)}
   @keyframes orPulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--c) 60%,transparent)}50%{box-shadow:0 0 0 4px color-mix(in srgb,var(--c) 0%,transparent)}}
   .or-lk{position:relative;flex:0 0 18px;align-self:center;height:2px;background:var(--line2);margin:0 -1px}
   .or-chain.many .or-lk{flex-basis:13px}
@@ -1103,9 +1104,10 @@
       else if (ct.state === 'ready' && ct.srcSeq != null) (ready[ct.srcSeq] = ready[ct.srcSeq] || []).push(ct);
     }
     const bn = atRisk(v) ? bnSeq(v) : null;
+    const pbw = bn != null ? plantBottleneck() : null, bnPlant = !!(pbw && pbw.stationId && v.bottleneckStation === pbw.stationId);
     ops.forEach((op, i) => {
       const ch = c.chips[i]; const vis = opVis(op);
-      setCls(ch.el, 'or-step s-' + vis.k + (bn === op.seq && op.state !== 'done' ? ' bn' : ''));
+      setCls(ch.el, 'or-step s-' + vis.k + (bn === op.seq && op.state !== 'done' ? (bnPlant ? ' bn plant' : ' bn') : ''));
       setVar(ch.el, '--c', vis.c);
       setHTML(ch.ic, vis.k === 'done' ? ICON_DONE : vis.k === 'ext' ? ICON_EXT : '');
       setText(ch.sq, String(op.seq));
@@ -1151,7 +1153,7 @@
       else if (op.plannedStart != null) h += row('Start ca.', tShort(op.plannedStart, now));
       if (op.plannedEnd != null) h += row(op.station === 'VERSAND' ? 'Komplett ca.' : 'Fertig ca.', tShort(op.station === 'VERSAND' && v.eta != null ? v.eta : op.plannedEnd, now));
     }
-    if (bnSeq(v) === op.seq && v.status !== 'fertig') h += `<div class="or-tip-n">Engpass laut Prognose: längster Arbeitsgang dieses Auftrags</div>`;
+    if (bnSeq(v) === op.seq && v.status !== 'fertig') h += `<div class="or-tip-n">Begrenzt den Durchlauf: längster Arbeitsgang dieses Auftrags</div>`;
     return h;
   }
   let listTipNode = null;
@@ -1238,7 +1240,12 @@
     }
     const showBn = atRisk(v) && !!v.bottleneck;
     setHidden(r.bn, !showBn);
-    if (showBn) { setHTML(r.bnT, `Engpass <b>${esc(v.bottleneck.replace(/\s*\(.*$/, ''))}</b>${bnSeq(v) ? ' · AG ' + bnSeq(v) : ''}`); setAttr(r.bn, 'title', 'Engpass laut Prognose (längste Durchlaufzeit): ' + v.bottleneck); }
+    if (showBn) {
+      // „Engpass“ nur für den Werks-Engpass (Engine: bottleneck()); sonst begrenzt der Arbeitsgang nur diesen Auftrag
+      const bw = plantBottleneck(), plant = bw && bw.stationId && (v.bottleneckStation || '').toString() === bw.stationId;
+      setHTML(r.bnT, `${plant ? 'Werks-Engpass' : 'begrenzt durch'} <b>${esc(v.bottleneck.replace(/\s*\(.*$/, ''))}</b>${bnSeq(v) ? ' · AG ' + bnSeq(v) : ''}`);
+      setAttr(r.bn, 'title', (plant ? 'Werks-Engpass – begrenzt auch diesen Auftrag: ' : 'Längster Arbeitsgang dieses Auftrags laut Prognose: ') + v.bottleneck);
+    }
   }
   function placeCards(box, list, prevSig) {
     const sig = list.map(v => v.id).join(',');
@@ -2118,7 +2125,7 @@
     if (v.status !== 'fertig' && v.bottleneck) {
       const bw = plantBottleneck(), bst = v.bottleneckStation || f.bottleneckStation;
       const plant = bw && bst && bw.stationId === bst;
-      notes += `<div class="or-hero-n${plant && atRisk(v) ? ' warn' : ''}">${icon('gauge', 15)}<span>Engpass laut Prognose: <b>${esc(v.bottleneck)}</b>${f.bottleneckSec ? ' – längster Arbeitsgang mit ca. ' + esc(durLong(f.bottleneckSec)) + ' Durchlauf' : ''}${plant ? ' · zugleich <b>Engpass im Werk</b>' : ''}</span></div>`;
+      notes += `<div class="or-hero-n${plant && atRisk(v) ? ' warn' : ''}">${icon('gauge', 15)}<span>Durchlauf begrenzt durch <b>${esc(v.bottleneck)}</b>${f.bottleneckSec ? ' – längster Arbeitsgang mit ca. ' + esc(durLong(f.bottleneckSec)) + ' Durchlauf' : ''}${plant ? ' · zugleich <b>Werks-Engpass</b>' : ''}</span></div>`;
     }
     return `<div class="or-hero" style="--rc:${rb.c}">${top}${d}${bar}${notes}</div>`;
   }

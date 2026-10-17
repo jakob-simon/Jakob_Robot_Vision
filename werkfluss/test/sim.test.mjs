@@ -2136,7 +2136,7 @@ function reviewPhase() {
           const eil = (nn.actions || []).find((a) => a.action && a.action.type === 'setPriority');
           lateChecked++; R();
           if (eil && !(nn.whatIf && nn.whatIf.recommend && !nn.whatIf.newlyLate.length)) fail('review', `${nn.key} offers 'Als Eilauftrag' although the what-if says ${short(nn.whatIf)}`, 'lateeil');
-          if (!eil && !/Überstunden|Teillieferung|Eilauftrag|Expressdurchlauf|Copilot/.test(nn.suggestion || '')) fail('review', `${nn.key}: recommendation without alternative („${(nn.suggestion || '').slice(0, 80)}“)`, 'latealt');
+          if (!eil && !/Überstunden|Teillieferung|Eilauftrag|Expressdurchlauf|Copilot|Unterbrechung|Liefertermin|verlagern/.test(nn.suggestion || '')) fail('review', `${nn.key}: recommendation without alternative („${(nn.suggestion || '').slice(0, 80)}“)`, 'latealt');
           if (/verlagern/.test(nn.suggestion || '') && !(nn.actions || []).some((a) => a.action && a.action.type === 'moveOp')) fail('review', `${nn.key} says 'verlagern' without a moveOp action („${nn.suggestion.slice(0, 90)}“)`, 'latemove');
         }
         // eine Empfehlungsquelle: orderAdvice
@@ -2144,6 +2144,8 @@ function reviewPhase() {
           const a = SIM.orderAdvice(id); if (!a) continue;
           R();
           if (typeof a.text !== 'string' || !a.text || !Array.isArray(a.alternatives) || !Array.isArray(a.sideEffects) || !Array.isArray(a.actions)) { fail('review', `orderAdvice('${id}') malformed: ${short(a)}`, 'advshape'); continue; }
+          if (a.text.length > 200) fail('review', `orderAdvice('${id}').text is ${a.text.length} chars (card text must stay compact, ≤ ~180): „${a.text}“`, 'advlen');
+          if (/Engpass/.test(a.text) && !/Werks-Engpass/.test(a.text)) fail('review', `orderAdvice('${id}') calls a per-order step 'Engpass': „${a.text}“`, 'advbn');
           const hasMove = a.alternatives.some((x) => x.kind === 'moveOp');
           if (/verlagern/.test(a.text) && !hasMove) fail('review', `orderAdvice('${id}') says 'verlagern' although no alternative machine exists: „${a.text.slice(0, 100)}“`, 'advmove');
           if (a.action && a.action.type === 'setPriority' && !(a.whatIf && a.whatIf.recommend && !a.whatIf.newlyLate.length && !a.whatIf.laterLate.length)) fail('review', `orderAdvice('${id}') offers Eilauftrag against its what-if ${short(a.whatIf)}`, 'adveil');

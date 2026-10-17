@@ -1291,7 +1291,7 @@
     const waits = Object.values(mvs).filter(mv => WAIT[mv.state] && mv.sinceSec >= 300).sort((a, b) => b.sinceSec - a.sinceSec);
     for (const mv of waits.slice(0, 2)) bullets.push({ sev: 'warn', ent: 'machine|' + mv.id, text: `${mv.id} ${mv.short} ${WF.STATE[mv.state].label.toLowerCase()} seit ${U.fmtDur(mv.sinceSec)} – ${mv.cause}.` });
     const late = snap.orders.filter(o => o.st !== 'fertig' && o.risk === 'spät');
-    for (const o of late.slice(0, 2)) bullets.push({ sev: 'warn', ent: 'order|' + o.id, text: `${o.id} (${custShort(o.cust)}) gefährdet: Prognose ${o.eta}, Termin ${o.due}${o.bottleneck ? ' – Engpass ' + o.bottleneck : ''}.` });
+    for (const o of late.slice(0, 2)) bullets.push({ sev: 'warn', ent: 'order|' + o.id, text: `${o.id} (${custShort(o.cust)}) gefährdet: Prognose ${o.eta}, Termin ${o.due}${o.bottleneck ? ' – begrenzt durch ' + o.bottleneck : ''}.` });
     const changes = [];
     for (const id in mvs) {
       for (const t of mvs[id].tools) { const pc = t.plannedChange; if (pc && pc.etaT != null && pc.etaT - now <= 3600 && pc.etaT >= now && (t.status === 'planned' || t.status === 'due')) { changes.push({ t: pc.etaT, text: `${id} ${toolShort(t.name)} ca. ${U.fmtClock(pc.etaT)}` }); break; } }

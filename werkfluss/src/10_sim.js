@@ -17,8 +17,9 @@
      state (Getter, Objekt-Identität bleibt über Resets erhalten) · history · t · speedHint
      clock() → "Mo 08:45" · shift() → {id,name,inBreak,endsAt,breakEndsAt}
      machineView(id) · orderView(id) · forecast() · kpis() · snapshot() · LABELS / label(group, key)
+     bottleneck() · occupancy() · workContent() · whatIf(spec) · whatIfPriority(orderId) · orderAdvice(orderId)
      actions.{triggerFault, repair, ack, resolve, reorder, setPriority, addOrder, moveOp, connectMachine,
-       applyOffset, planToolChange, run, reset} → {ok,msg,…}; addOrder → Auftrags-ID (String) bzw. {ok:false,msg}
+       applyOffset, planToolChange, planRemake, releaseIntake, run, reset} → {ok,msg,…}; addOrder → Auftrags-ID (String) bzw. {ok:false,msg}
      runAction({type,…}) führt Benachrichtigungs-Aktionen aus (reorder, setPriority, applyOffset, planToolChange, select …)
 
    Bewusste Ergänzungen gegenüber SPEC (alle sichtbar begründet):
@@ -56,6 +57,13 @@
        Veröffentlichte Liefertermine (eta) werden geglättet: Sprünge > 15 min erst nach Bestätigung (5-min-Takt).
        „Termin gefährdet“ erst, wenn zwei Prüfungen (10 min) hintereinander spät sind.
      - Arbeitsgang verlagern (moveOp) prüft Leistungsgrenzen je Maschinentyp (Gewicht, Ø, Stange, 5-Achs).
+     - Auftragseingang (Dauerbetrieb): Vorlagen aus profile.orderTemplates werden zu Schichtbeginn und bei wenig Vorrat
+       belastungsorientiert freigegeben (eigener RNG); Kanban-Abruf, wenn Bestand + Bestellungen den Bedarf nicht decken;
+       fertige Aufträge werden nach 72 h archiviert (begrenzter Zustand).
+     - Wendeschneidplatten: Schneide wenden durch den Bediener (1–2 min), Tausch erst nach der letzten Schneide.
+     - Geisterschicht-OEE: autonome Maschinen mit freigegebenem Arbeitsgang haben nachts geplante Zeit; Leistung zählt das
+       laufende Teil anteilig (beim Lesen). Engpass = bottleneck() (eine Definition), Empfehlungen aus Was-wäre-wenn (orderAdvice).
+     - Ausschuss nach AG 10: sofort „Menge gefährdet“ mit Nachfertigung (planRemake).
 */
 (function () {
   'use strict';
@@ -917,7 +925,7 @@
     notify({ key: 'intake:' + id, sev: 'info', role: 'Schichtleitung', entity: { kind: 'order', id }, autoResolveT: S.t + (cfg.notifyMin || 30) * 60,
       title: `Auftragseingang ${id}: ${qty} Stk ${o.part.name}`,
       body: `${o.customer} – Termin ${U.fmtDayClock(due)}${eil ? ' (Eilauftrag)' : ''}. Arbeitsplan: ${plan}.${matTxt}`,
-      suggestion: `Freigegeben aus dem Auftragsvorrat (${why}). Die Maschinen planen den Auftrag nach Termin ein – Prognose und Engpass in der Auftragsliste.`,
+      suggestion: `Freigegeben aus dem Auftragsvorrat (${why}). Die Maschinen planen den Auftrag nach Termin ein – Prognose und begrenzender Arbeitsgang in der Auftragsliste.`,
       actions: [{ label: 'Auftrag öffnen', action: { type: 'select', kind: 'order', id } }] });
     return id;
   }
@@ -3219,7 +3227,7 @@
           actions: [{ label: 'Maschine öffnen', action: { type: 'select', kind: 'machine', id: m.id } }] });
         else notify({ key: 'fpi:' + m.id, sev: 'warn', role: 'QS', entity: { kind: 'machine', id: m.id }, title: `Erstteilprüfung ${m.id} wartet seit ${U.fmtDur(S.t - m.fpi.t0)}`,
           body: `Das Erstteil von ${m.id} ${m.short} liegt seit ${U.fmtClock(m.fpi.t0)} bereit; die Maschine darf bis zur Freigabe nicht weiterfertigen (Stillstand ${U.fmtEur(m.rate)} / h).`,
-          suggestion: `${tk && tk.assignee ? pname(tk.assignee) + ' ist unterwegs.' : 'QS-Prüfer:in ist ' + availability(tk).text + '.'} Empfehlung: Erstteilprüfungen vor Losprüfungen ziehen; bei Engpass zweite Person im Messraum einweisen.`,
+          suggestion: `${tk && tk.assignee ? pname(tk.assignee) + ' ist unterwegs.' : 'QS-Prüfer:in ist ' + availability(tk).text + '.'} Empfehlung: Erstteilprüfungen vor Losprüfungen ziehen; bei Überlast zweite Person im Messraum einweisen.`,
           actions: [{ label: 'Maschine öffnen', action: { type: 'select', kind: 'machine', id: m.id } }] });
       }
     }
@@ -3260,7 +3268,7 @@
         finishTask(tk, 'cancelled');
       } else releaseTask(p);
     }
-    if (S.t % 300 === 0) lateCheck();
+    if (S.t % (WARM ? 600 : 300) === 0) lateCheck();   // beim Vorrechnen alle 10 min (gleiche Regel, weniger Prognoseläufe)
     if (S.t % 60 === 0) {
       if (!WARM) S.kpi = kpis();
       for (const id in S.people) { const p = S.people[id]; p.utilToday = p.dutySec > 0 ? Math.min(1, p.workSec / p.dutySec) : 0; }
@@ -3308,6 +3316,7 @@
     // deterministisch: frisch rechnen (unabhängig davon, wann die Oberfläche zuletzt eine Prognose angefordert hat)
     const fc = computeForecast();
     publishEta(fc); applyPub(fc);
+    let plantBn;   // Werks-Engpass (bottleneck()) – nur berechnet, wenn eine Terminwarnung formuliert wird
     for (const id in S.orders) {
       const o = S.orders[id], key = 'late:' + id, f = fc.orders[id];
       if (o.status === 'fertig' || !f) { o.lateStreak = 0; if (hasOpen(key)) resolveKey(key, 'Auftrag fertig'); continue; }
@@ -3317,7 +3326,7 @@
       // gemeldet wird erst, wenn sie in zwei Prüfungen hintereinander (10 min) zu spät liegt
       o.lateStreak = late ? (o.lateStreak || 0) + 1 : 0;
       if (late && (open || o.lateStreak >= 2)) {
-        const bn = f.bottleneck ? ` Engpass: ${f.bottleneck}.` : '';
+        if (plantBn === undefined) { const b = bottleneck(); plantBn = b ? b.stationId : null; }
         const d = f.eta - o.due;
         // Empfehlung aus der Was-wäre-wenn-Rechnung (höchstens alle 30 min neu, bzw. nach Prioritätswechsel)
         const n0 = open ? NIDX[key] : null;
@@ -3325,7 +3334,7 @@
         if (!adv) { const a = orderAdvice(id); adv = { t: S.t, prio: o.priority, suggestion: a.text, actions: a.actions, wi: a.whatIf }; }
         const n = notify({ key, sev: 'warn', role: 'Schichtleitung', entity: { kind: 'order', id },
           title: `Termin gefährdet: ${id} (${shortName(o.customer)})`,
-          body: `Prognose ${U.fmtDayClock(f.eta)} · Termin ${U.fmtDayClock(o.due)} · ${d > 0 ? U.fmtDur(d) + ' zu spät' : 'nur ' + U.fmtDur(-d) + ' Puffer'}${f.bottleneckStation ? ' · Engpass ' + f.bottleneckStation + ' ' + stShort(f.bottleneckStation) + (f.bottleneckSeq != null ? ' (AG ' + f.bottleneckSeq + ')' : '') : ''}`,
+          body: `Prognose ${U.fmtDayClock(f.eta)} · Termin ${U.fmtDayClock(o.due)} · ${d > 0 ? U.fmtDur(d) + ' zu spät' : 'nur ' + U.fmtDur(-d) + ' Puffer'}${f.bottleneckStation ? ' · ' + limitTxt(f, plantBn) : ''}`,
           suggestion: adv.suggestion, actions: adv.actions });
         n.whatIf = adv.wi || null; n.advice = adv;
       } else if (open && !late) resolveKey(key, 'Prognose wieder im Termin');
@@ -3641,7 +3650,8 @@
   }
   const whatIfPriority = (orderId, priority) => whatIf({ type: 'setPriority', orderId, priority: priority || 'eil' });
   /** Empfehlung zu einem Auftrag – EINE Quelle für „Termin gefährdet“, Leitstand und KI (WF.sim.orderAdvice):
-      Ursache aus der Prognose (Engpass-Arbeitsgang, Fremdbearbeitung, Rohmaterial); „Als Eilauftrag“ nur, wenn die
+      Ursache aus der Prognose (begrenzender Arbeitsgang – „Werks-Engpass“ nur, wenn er der Engpass laut bottleneck() ist –,
+      Fremdbearbeitung, Rohmaterial); „Als Eilauftrag“ nur, wenn die
       Was-wäre-wenn-Rechnung einen Gewinn zeigt und kein anderer Auftrag dadurch spät (bzw. noch später) wird; sonst
       Verlagern (nur wenn eine gleichwertige Maschine existiert, frei von Störung und nicht selbst der Engpass), Überstunden
       am Engpass, Expressdurchlauf beim Fremdbearbeiter, Teillieferung. Ohne erkennbare Ursache: neutraler Text. */
@@ -3667,7 +3677,8 @@
       }
     }
     const bnId = f.bottleneckStation || null, bnTxt = bnId ? `${bnId} ${stShort(bnId)}` : null;
-    if (!cause && bnId) { causeKind = 'bottleneck'; cause = `Engpass ${bnTxt}${f.bottleneckSeq != null ? ' (AG ' + f.bottleneckSeq + ')' : ''}`; }
+    const plantB = bnId ? bottleneck() : null, isPlant = !!(plantB && plantB.stationId === bnId);
+    if (!cause && bnId) { causeKind = 'bottleneck'; cause = (isPlant ? '' : 'Durchlauf ') + limitTxt(f, plantB ? plantB.stationId : null); }
     const lateTxt = lateSec == null ? 'keine Prognose' : lateSec > 0 ? `Prognose ${U.fmtDayClock(eta)}, ${U.fmtDur(lateSec)} nach Termin ${U.fmtDayClock(o.due)}` : `Prognose ${U.fmtDayClock(eta)}, Puffer ${U.fmtDur(-lateSec)} bis Termin ${U.fmtDayClock(o.due)}`;
     const alternatives = [];
     // 1) Eilauftrag (Was-wäre-wenn)
@@ -3694,31 +3705,31 @@
       }
     }
     // 3) Überstunden am Engpass, Expressdurchlauf (Fremdbearbeitung), Teillieferung – immer konkret benannt
-    if (bnTxt && causeKind !== 'ext') alternatives.push({ kind: 'overtime', label: `Überstunden an ${bnId}`, ok: true, text: `Überstunden/Zusatzschicht am Engpass ${bnTxt}${lateSec > 0 ? ' (ca. ' + U.fmtDur(lateSec) + ' fehlen)' : ''}`, action: null });
+    if (bnTxt && causeKind !== 'ext') alternatives.push({ kind: 'overtime', label: `Überstunden an ${bnId}`, ok: true, text: `Überstunden/Zusatzschicht ${isPlant ? 'am Werks-Engpass ' : 'an '}${bnTxt}${lateSec > 0 ? ' (ca. ' + U.fmtDur(lateSec) + ' fehlen)' : ''}`, action: null });
     if (ext) alternatives.push({ kind: 'express', label: 'Expressdurchlauf anfragen', ok: true, text: `Expressdurchlauf bei ${shortName((ext.ext && ext.ext.partner) || 'dem Fremdbearbeiter')} anfragen (${(ext.ext && ext.ext.process) || ext.op})`, action: null });
     if (causeKind === 'material') alternatives.push({ kind: 'material', label: 'Liefertermin klären', ok: true, text: `Liefertermin ${S.materials[r0.material.id].name} beim Lieferanten beschleunigen`, action: null });
     alternatives.push({ kind: 'partial', label: 'Teillieferung abstimmen', ok: true, text: `Teillieferung mit ${shortName(o.customer)} abstimmen`, action: null });
     // Hauptaktion und Text
     // text = kompakt (Meldung, Leitstand-Karte): „Ursache: … Empfehlung: <eine Hauptmaßnahme>.“ – Details in detail/alternatives
-    let action = null, text, primary;
+    let action = null, text, primary, pKind = null;
     const sideTxt = w && w.ok && (w.newlyLate.length || w.laterLate.length) ? w.text.split('; ').slice(1).join('; ') : '';
     const why = o.priority === 'eil' ? 'Auftrag ist bereits Eilauftrag.' : !w || !w.ok ? '' : prioOk ? '' : sideTxt ? `Ein Eilauftrag würde den Verzug nur verschieben (${sideTxt}).`
       : w.gainSec < 60 ? `Ein Eilauftrag bringt nichts – vor ${o.id} liegt nur bereits laufende bzw. ohnehin früher fertige Arbeit.` : w.gainSec < 900 ? `Ein Eilauftrag bringt kaum etwas (nur ${U.fmtDur(w.gainSec)} früher).` : '';
     const pa = alternatives.find(a => a.kind === 'priority'); if (pa) pa.note = why || null;
     const etaOf = (t) => t && t.target ? U.fmtDayClock(t.target.after) : null;
-    if (prioOk) { action = { type: 'setPriority', orderId: o.id, priority: 'eil' }; primary = `Als Eilauftrag kennzeichnen (fertig ca. ${etaOf(w)}, kein anderer Auftrag wird spät)`; }
-    else if (move) { action = { type: 'moveOp', orderId: o.id, seq: f.bottleneckSeq, stationId: move.to }; primary = `AG ${f.bottleneckSeq} auf ${move.to} ${stShort(move.to)} verlagern`; }
-    else if (causeKind === 'ext') primary = `Expressdurchlauf bei ${shortName((ext.ext && ext.ext.partner) || 'dem Fremdbearbeiter')} anfragen`;
-    else if (causeKind === 'material') primary = `Liefertermin ${S.materials[r0.material.id].name} beschleunigen`;
-    else if (bnTxt && lateSec != null && lateSec <= 0) primary = `Engpass ${bnTxt} ohne Unterbrechung laufen lassen`;
-    else if (bnTxt && lateSec != null && lateSec <= 8 * 3600) primary = `Überstunden am Engpass ${bnTxt} einplanen`;
-    else if (bnTxt) primary = `Teillieferung mit ${shortName(o.customer)} abstimmen`;
+    if (prioOk) { action = { type: 'setPriority', orderId: o.id, priority: 'eil' }; pKind = 'priority'; primary = `Als Eilauftrag kennzeichnen (fertig ca. ${etaOf(w)}, kein anderer Auftrag wird spät)`; }
+    else if (move) { action = { type: 'moveOp', orderId: o.id, seq: f.bottleneckSeq, stationId: move.to }; pKind = 'moveOp'; primary = `AG ${f.bottleneckSeq} auf ${move.to} ${stShort(move.to)} verlagern`; }
+    else if (causeKind === 'ext') { pKind = 'express'; primary = `Expressdurchlauf bei ${shortName((ext.ext && ext.ext.partner) || 'dem Fremdbearbeiter')} anfragen`; }
+    else if (causeKind === 'material') { pKind = 'material'; primary = `Liefertermin ${S.materials[r0.material.id].name} beschleunigen`; }
+    else if (bnTxt && lateSec != null && lateSec <= 0) { pKind = 'overtime'; primary = `${isPlant ? 'Werks-Engpass ' : ''}${bnTxt} ohne Unterbrechung laufen lassen`; }
+    else if (bnTxt && lateSec != null && lateSec <= 8 * 3600) { pKind = 'overtime'; primary = `Überstunden ${isPlant ? 'am Werks-Engpass ' : 'an '}${bnTxt} einplanen`; }
+    else if (bnTxt) { pKind = 'partial'; primary = `Teillieferung mit ${shortName(o.customer)} abstimmen`; }
     if (!cause || !primary) text = `Ursache: ${cause || lateTxt} – Optionen im Copilot prüfen.`;
     else text = `Ursache: ${cause}. Empfehlung: ${primary}.`;
-    const others = alternatives.filter(a => a.ok && a.kind !== 'priority' && !(action && a.action && a.action.type === action.type)).map(a => a.text);
+    const others = alternatives.filter(a => a.ok && a.kind !== 'priority' && a.kind !== pKind).map(a => a.text);
     const detail = `${lateTxt}. Ursache: ${cause || 'nicht eindeutig'}. ${why ? why + ' ' : ''}${w && w.ok ? 'Was-wäre-wenn Eilauftrag: ' + w.text + '. ' : ''}${primary ? 'Empfehlung: ' + primary + '. ' : ''}${others.length ? 'Weitere Optionen: ' + others.join('; ') + '.' : ''}`.trim();
     const label = action ? (action.type === 'setPriority' ? 'Als Eilauftrag' : `AG ${action.seq} auf ${action.stationId} verlagern`) : null;
-    return { orderId: o.id, risk, lateSec, eta, due: o.due, cause: cause || lateTxt, causeKind, bottleneckStation: bnId, text, detail, action, actionLabel: label,
+    return { orderId: o.id, risk, lateSec, eta, due: o.due, cause: cause || lateTxt, causeKind, bottleneckStation: bnId, text, detail, primaryKind: pKind, action, actionLabel: label,
       actions: action ? [{ label, action }, open] : [open], alternatives, sideEffects,
       whatIf: w && w.ok ? { recommend: w.recommend, gainSec: w.gainSec, newlyLate: w.newlyLate, laterLate: w.laterLate, text: w.text } : null };
   }
@@ -3746,6 +3757,12 @@
     }
   }
 
+  /** begrenzender Arbeitsgang eines Auftrags – „Engpass“ heißt nur der Werks-Engpass (bottleneck()) */
+  function limitTxt(f, plantId) {
+    const sid = f && f.bottleneckStation; if (!sid) return null;
+    const ag = f.bottleneckSeq != null ? ' (AG ' + f.bottleneckSeq + ')' : '';
+    return sid === plantId ? `Werks-Engpass ${sid} ${stShort(sid)}${ag}` : `begrenzt durch ${sid} ${stShort(sid)}${ag}`;
+  }
   /** Terminrisiko – eine Definition für Auftragsliste, KI und Engpass: spät (Prognose nach Termin bzw. fertig mit
       Fehlmenge), knapp (< 4 h Puffer), ok, unbekannt (keine Prognose) */
   function riskOf(o, eta) {
