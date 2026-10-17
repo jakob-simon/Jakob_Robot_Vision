@@ -168,6 +168,29 @@
   }
   const bnMachine = (o) => (o && o.bottleneck ? o.bottleneck.split(' ')[0] : null);
   /** kurze Begründung, warum ein Auftrag knapp/spät ist – aus Arbeitsgang-Kette, Plantafel und Engpass */
+  /** kompakte Bausteine für die Risiko-Karten: wo steht der Auftrag jetzt, was bremst ihn (Engpass + Belegung davor) */
+  function orderWhyParts(c, o) {
+    const cur = curOp(o);
+    let now = '', bn = '';
+    if (cur) {
+      const isM = !!S().machines[cur.station], mv = isM ? c.mv(cur.station) : null;
+      if (cur.state === 'active' && mv) {
+        if (mv.state === 'fault' || WAIT[mv.state]) now = `AG ${cur.seq} an ${cur.station} steht: ${stLabel(mv.state)} – ${mv.cause}`;
+        else now = `AG ${cur.seq} „${cur.op}“ an ${cur.station}${mv.state !== 'running' ? ' (' + stLabel(mv.state) + ')' : ''} · ${nm(cur.good + cur.scrap)}/${nm(cur.target)}${mv.etaOpEnd ? ' · fertig ca. ' + tc(mv.etaOpEnd) : ''}`;
+      } else if (cur.state === 'external' && cur.ext) now = `AG ${cur.seq} ${cur.op}: ${cur.ext.returnText}`;
+      else if (cur.state === 'waiting') {
+        const b = isM ? blockerOn(c, cur.station, o.id, cur.seq) : null;
+        now = `AG ${cur.seq} „${cur.op}“ wartet an ${cur.station}${cur.waiting ? ' · ' + stk(cur.waiting) + ' im Eingang' : ''}${b ? ' · vorher ' + b.before[0].orderId + ' AG ' + b.before[0].seq + (b.before[0].active ? ' (läuft)' : '') + ' bis ca. ' + tc(b.until) : ''}`;
+      } else now = `nächster Schritt AG ${cur.seq} „${cur.op}“ an ${cur.station === 'EXT' ? 'Fremdbearbeitung' : cur.station}${cur.plannedStart ? ' ab ca. ' + tc(cur.plannedStart) : ''}`;
+    }
+    const bm = bnMachine(o);
+    if (o.bottleneck) {
+      const bop = bm ? o.ops.find(op => op.station === bm && !op.complete) : null;
+      const b = bop && bop.state !== 'active' && S().machines[bm] ? blockerOn(c, bm, o.id, bop.seq) : null;
+      bn = `${o.bottleneck}${b ? ' · vorher ' + b.before[0].orderId + ' AG ' + b.before[0].seq + (b.before[0].active ? ' (läuft)' : '') + ' bis ca. ' + tc(b.until) : ''}`;
+    }
+    return { now, bn };
+  }
   function orderWhy(c, o) {
     const parts = [];
     const cur = curOp(o);
@@ -242,7 +265,7 @@
     }
     if (ext) {
       const partner = (ext.ext && ext.ext.partner) || 'der Härterei';
-      return { text: late ? `Termin hängt am Rücklauf aus der Fremdbearbeitung (${ext.op}) – Expressdurchlauf bei ${partner} anfragen oder Teillieferung mit ${custShort(o.customer)} abstimmen.` : `Termin hält knapp; kritisch ist der Rücklauf aus der Fremdbearbeitung (${ext.op}, ${partner}) – Lose pünktlich bereitstellen${protect ? '; ' + protect : ''}.`, action: null };
+      return { text: late ? `Termin hängt am Rücklauf aus der Fremdbearbeitung (${ext.op}) – Expressdurchlauf bei ${partner} anfragen oder Teillieferung mit ${custShort(o.customer)} abstimmen.` : `Termin hält knapp; kritisch ist der Rücklauf aus der Fremdbearbeitung: ${ext.op} bei ${partner} – Lose pünktlich bereitstellen${protect ? '; ' + protect : ''}.`, action: null };
     }
     const gatedTxt = gated ? `die Teile für AG ${gated.op.seq} sind erst ca. ${tc(gated.av)} an ${gated.op.station}, die Aufträge davor laufen bis dahin ohnehin` : null;
     if (!late) return { text: `Termin hält knapp – ${protect || 'Engpass ohne Unterbrechung laufen lassen'}. Ein Eilauftrag bringt hier nichts: ${gatedTxt || 'vor ' + o.id + ' liegt nur bereits laufende Arbeit'}.`, action: null };
@@ -309,7 +332,7 @@
   /** Verlust je Ursache (€): Stillstandskosten je Maschine anteilig auf die Zustände in der Schichtzeit verteilt (Zustandsband) */
   function lossByCause(c) {
     const t = c.t, d0 = Math.floor(t / DAY) * DAY;
-    const byCause = {}, byMachine = [];
+    const byCause = {}, byMachine = [], bySec = {}, byN = {};
     for (const mv of c.mvs()) {
       const sec = {};
       let tot = 0;
@@ -322,11 +345,11 @@
       }
       const loss = mv.lossEurToday || 0;
       const causes = Object.keys(sec).map(k => ({ state: k, sec: sec[k], eur: tot > 0 ? loss * sec[k] / tot : 0 })).sort((a, b) => b.eur - a.eur);
-      for (const x of causes) byCause[x.state] = (byCause[x.state] || 0) + x.eur;
+      for (const x of causes) { byCause[x.state] = (byCause[x.state] || 0) + x.eur; bySec[x.state] = (bySec[x.state] || 0) + x.sec; byN[x.state] = (byN[x.state] || 0) + 1; }
       byMachine.push({ mv, loss, causes, lossSec: tot });
     }
     byMachine.sort((a, b) => b.loss - a.loss);
-    const causes = Object.keys(byCause).map(k => ({ state: k, eur: byCause[k] })).sort((a, b) => b.eur - a.eur);
+    const causes = Object.keys(byCause).map(k => ({ state: k, eur: byCause[k], sec: bySec[k], machines: byN[k] })).sort((a, b) => b.eur - a.eur);
     return { byMachine, causes };
   }
   const CAUSE_LABEL = { setup: 'Rüsten', firstPiece: 'Erstteilprüfung', toolchange: 'Werkzeugwechsel', waitTool: 'Warten auf Werkzeug', waitOperator: 'Warten auf Bediener', starved: 'Warten auf Material', blocked: 'Ausgang voll', fault: 'Störungen' };
@@ -657,8 +680,9 @@
       a.md.push('', '> **Empfehlung:** Keine Termin-Maßnahme nötig. Engpass im Blick behalten – „Was ist der Engpass?“ zeigt, wo die nächste Verzögerung entstehen würde.');
     } else {
       a.md.push(`**${late.length ? pl(late.length, 'Auftrag', 'Aufträge') + ' verspätet' : 'Kein Auftrag verspätet'}${tight.length ? ', ' + nm(tight.length) + ' knapp' : ''}** (Puffer unter 4 h) – von ${open.length} offenen Aufträgen${scope ? ' ' + scope : ''}.`, '');
-      for (const o of late) a.md.push(`- **${o.id}** ${o.part.name} (${custShort(o.customer)}): Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)} → **${dur0(o.slackSec)} Verzug**${o.priority === 'eil' ? ' (bereits Eilauftrag)' : ''}. ${orderWhy(c, o)}`);
-      for (const o of tight) a.md.push(`- **${o.id}** ${o.part.name} (${custShort(o.customer)}): Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)} – nur **${dur0(o.slackSec)} Puffer**. ${orderWhy(c, o)}`);
+      const lines = late.map(o => `- **${o.id}** ${o.part.name} (${custShort(o.customer)}): Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)} → **${dur0(o.slackSec)} Verzug**${o.priority === 'eil' ? ' (bereits Eilauftrag)' : ''}. ${orderWhy(c, o)}`)
+        .concat(tight.map(o => `- **${o.id}** ${o.part.name} (${custShort(o.customer)}): Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)} – nur **${dur0(o.slackSec)} Puffer**. ${orderWhy(c, o)}`));
+      SLOT(a, 'risk', lines.join('\n'), late.concat(tight).map(o => Object.assign({ id: o.id, part: o.part.name, cust: custShort(o.customer), late: o.slackSec < 0, slack: o.slackSec, eta: dueTxt(o.eta), due: dueTxt(o.due), eil: o.priority === 'eil' }, orderWhyParts(c, o))));
       const recs = [];
       if (late.length) { const adv = orderAdvice(c, late[0]); recs.push(adv.text); if (adv.action) addAction(a, adv.action); }
       if (tight.length) {
@@ -697,6 +721,12 @@
     }
     const others = ranked.slice(1, 4);
     if (others.length) a.md.push(`- Danach am stärksten belastet: ${others.map(x => `${mName(x.id)} ${durR(x.work)} (≈ ${daysTxt(x.days)})`).join('; ')}.`);
+    const loadRows = loads.filter(x => x.work > 0).slice(0, 6);
+    if (loadRows.length > 1) {
+      a.md.push('', '### Arbeitsinhalt je Arbeitsplatz');
+      SLOT(a, 'bars3', loadRows.map(x => `- ${mName(x.id)}: ${durR(x.work)} (≈ ${daysTxt(x.days)})`).join('\n'), { unit: 'Tage', rows: loadRows.map(x => ({ ent: { kind: 'machine', id: x.id }, label: x.st.short, v: x.days, vTxt: '≈ ' + daysTxt(x.days), sub: durR(x.work) + (x.auto ? ' · läuft auch unbemannt (24 h/Tag)' : ' · zwei Schichten') + (bnOf(x.id).length ? ' · Engpass von ' + listJoin(bnOf(x.id).map(o => o.id)) : ''), c: x.id === top.id ? 'var(--st-wait)' : 'var(--info)' })) });
+      a.md.push('');
+    }
     const waits = c.mvs().filter(m => WAIT[m.state] || m.state === 'fault');
     if (waits.length) a.md.push(`- Akut gebremst: ${waits.map(m => `${mName(m.id)} (${stLabel(m.state)})`).join(', ')}.`);
     const alt = altMachines(top.id);
@@ -812,8 +842,10 @@
         // Kennzahlen-Leiste statt Textzeile (im kopierten Text bleibt die Zeile erhalten)
         const oee = mv.oeeToday && mv.oeeToday.oee;
         a.stats = [
-          { l: 'Status', v: stLabel(mv.state), s: 'seit ' + durR(mv.sinceSec), c: mv.state === 'fault' ? 'crit' : WAIT[mv.state] ? 'warn' : mv.state === 'running' ? 'ok' : 'info' },
-          o ? { l: 'AG ' + o.seq + ' · Teile', v: nm(mv.partsDone) + '/' + nm(mv.partsTotal), s: mv.etaOpEnd ? 'fertig ca. ' + tc(mv.etaOpEnd) : o.id } : { l: 'Auftrag', v: '–', s: mv.queue && mv.queue.length ? 'als Nächstes ' + mv.queue[0].orderId : 'nichts eingeplant' },
+          (() => { const L = stLabel(mv.state), short = L === 'Werkzeugwechsel' ? 'WZ-Wechsel' : L.length > 11 && L.indexOf(' ') > 0 ? L.slice(0, L.indexOf(' ')) : L, rest = short !== L && short !== 'WZ-Wechsel' ? L.slice(short.length + 1) + ' · ' : '';
+            return { l: 'Status', v: short, s: rest + 'seit ' + durR(mv.sinceSec), c: mv.state === 'fault' ? 'crit' : WAIT[mv.state] ? 'warn' : mv.state === 'running' ? 'ok' : 'info' }; })(),
+          o ? { l: 'AG ' + o.seq + ' · Teile', v: nm(mv.partsDone) + '/' + nm(mv.partsTotal), s: mv.etaOpEnd ? 'fertig ca. ' + tc(mv.etaOpEnd) : o.id }
+            : mv.queue && mv.queue.length ? { l: 'Als Nächstes', v: mv.queue[0].orderId, s: (mv.queue[0].why || 'AG ' + mv.queue[0].seq).replace(/^Teile\s+/, '') } : { l: 'Auftrag', v: '–', s: 'nichts eingeplant' },
           { l: 'OEE heute', v: oee != null ? pct(oee, 0) : '–', s: pl(mv.goodToday, 'Gutteil', 'Gutteile') + (mv.scrapToday ? ' · ' + nm(mv.scrapToday) + ' Ausschuss' : ''), c: oee == null ? '' : oee >= TARGET_OEE ? 'ok' : 'warn' },
           { l: 'Stillstand', v: eur(mv.lossEurToday), s: 'heute · ' + eur(mv.rate) + '/h', c: 'info' },
         ];
@@ -938,7 +970,12 @@
     }
     SLOT(a, 'route', routeTxt.join('\n'), route);
     const cont = o.containers.filter(x => x.state !== 'shipped' && x.state !== 'scrap');
-    if (cont.length && focus !== 'eta') a.md.push('', `Behälter: ${cont.slice(0, 4).map(x => `${stk(x.qty)} ${x.where}`).join('; ')}${cont.length > 4 ? ' (+' + (cont.length - 4) + ')' : ''}.`);
+    if (cont.length && focus !== 'eta') {
+      // je Ort zusammenfassen: „WFL M80 · Eingang: 5 Stk (2 Behälter)“
+      const byW = [];
+      for (const x of cont) { const g = byW.find(y => y.w === x.where); if (g) { g.q += x.qty; g.n++; } else byW.push({ w: x.where, q: x.qty, n: 1 }); }
+      a.md.push('', `Behälter: ${byW.slice(0, 4).map(g => `${g.w} ${stk(g.q)}${g.n > 1 ? ' (' + g.n + ' Behälter)' : ''}`).join('; ')}${byW.length > 4 ? ' (+' + (byW.length - 4) + ' Orte)' : ''}.`);
+    }
     if (o.bottleneck) a.md.push('', `Engpass laut Prognose: ${o.bottleneck}.`);
     let advTxt = '';
     if (o.risk !== 'ok') {
@@ -1017,7 +1054,7 @@
     const mats = Object.values(S().materials).filter(mt => !ids || !ids.length || ids.indexOf(mt.id) >= 0);
     const rows = mats.map(mt => {
       const nd = need[mt.id] || 0;
-      const status = mt.onHand < mt.min ? 'unter' : mt.onHand + mt.onOrder < nd ? 'fehlt' : mt.onHand < mt.min * 1.2 ? 'knapp' : 'ok';
+      const status = mt.onHand < mt.min ? 'unter' : mt.onHand + mt.onOrder < nd ? 'fehlt' : mt.onHand < mt.min * 1.2 || mt.onHand + mt.onOrder - nd < mt.min ? 'knapp' : 'ok';
       return { mt, nd, status };
     });
     const rank = { unter: 0, fehlt: 1, knapp: 2, ok: 3 };
@@ -1035,22 +1072,36 @@
       a.md.push(`- Lieferant: ${mt.supplier}, Lieferzeit ca. ${durR(mt.leadMin * 60)}, ${eur(mt.pricePerUnit)} je ${mt.unit}.`);
       if (r.status !== 'ok' && !mt.onOrder) { addAction(a, reorderAction(mt)); a.md.push('', `> **Empfehlung:** Nachbestellen (${matQty(mt, mt.reorderQty)}, ca. ${eur(mt.reorderQty * mt.pricePerUnit)}).`); }
     } else {
-      a.md.push(crit.length ? `**${pl(crit.length, 'Material braucht', 'Materialien brauchen')} Aufmerksamkeit**, ${rows.length - crit.length} im grünen Bereich:` : `**Alle ${rows.length} Rohmaterialien im grünen Bereich** – Bestand über Mindestbestand und ausreichend für die offenen Aufträge.`, '');
+      const nU = rows.filter(r => r.status === 'unter' || r.status === 'fehlt').length, nK = rows.filter(r => r.status === 'knapp').length, nOk = rows.length - nU - nK;
+      a.md.push(nU ? `**${nU} ${nU === 1 ? 'Material' : 'Materialien'} unter Mindestbestand${rows.some(r => r.status === 'fehlt') ? ' bzw. zu knapp für die offenen Aufträge' : ''}**${nK ? `, ${nK} knapp` : ''}, ${nOk} im grünen Bereich:`
+        : nK ? `**Kein Material unter Mindestbestand** – ${nK} knapp, ${nOk} im grünen Bereich:`
+        : `**Alle ${rows.length} Rohmaterialien im grünen Bereich** – Bestand über Mindestbestand und ausreichend für die offenen Aufträge.`, '');
       for (const r of (crit.length ? crit : rows.slice(0, 4))) {
         const mt = r.mt;
         const covers = mt.onHand >= r.nd;
-        const st = r.status === 'unter' ? (covers ? 'unter Mindestbestand, reicht aber für die offenen Aufträge' : 'unter Mindestbestand und zu wenig für die offenen Aufträge') : r.status === 'fehlt' ? 'reicht nicht für die offenen Aufträge' : r.status === 'knapp' ? 'knapp über Mindestbestand' : 'ausreichend';
+        const after = mt.onHand + (mt.onOrder || 0) - r.nd;
+        const st = r.status === 'unter' ? (covers ? 'unter Mindestbestand, reicht aber für die offenen Aufträge' : 'unter Mindestbestand und zu wenig für die offenen Aufträge') : r.status === 'fehlt' ? 'reicht nicht für die offenen Aufträge'
+          : r.status === 'knapp' ? (after < mt.min ? `reicht für die offenen Aufträge, danach ca. ${matQty(mt, Math.max(0, after))} – unter Mindestbestand` : 'knapp über Mindestbestand') : 'ausreichend';
         a.md.push(`- **${mt.name}**: ${matQty(mt, mt.onHand)} (Min. ${matQty(mt, mt.min)}) – ${st}; Bedarf offener Aufträge ca. ${matQty(mt, r.nd)}${mt.onOrder ? '; bestellt ' + matQty(mt, mt.onOrder) + (openPurchases(mt.id)[0] ? ', Lieferung ca. ' + dueTxt(openPurchases(mt.id)[0].etaT) : '') : ''}.`);
       }
       const starved = c.mvs().filter(m => m.state === 'starved');
       if (starved.length) a.md.push(`- Wartet auf Material: ${starved.map(m => `${mName(m.id)} – ${m.cause}`).join('; ')}.`);
+
       const bars = c.mvs().filter(m => m.barStockM != null);
       for (const m of bars) a.md.push(`- ${mName(m.id)}: Stangenmagazin ${nm(m.barStockM, 1)} m ${m.barMaterial || ''}${m.barStockM < (m.barReorderM || 0) ? ' – wird nachgeladen' : ''}.`);
       const pur = openPurchases();
       if (pur.length) a.md.push(`- Offene Bestellungen: ${pur.map(p => `${p.id} ${matQty(S().materials[p.materialId], p.qty)} ${S().materials[p.materialId].name}, Lieferung ca. ${dueTxt(p.etaT)}`).join('; ')}.`);
+      if (rows.length > 1) {
+        a.md.push('', '### Bestände');
+        SLOT(a, 'stock', rows.map(r => `- ${r.mt.name}: ${matQty(r.mt, r.mt.onHand)} (Min. ${matQty(r.mt, r.mt.min)}, Bedarf ca. ${matQty(r.mt, r.nd)})`).join('\n'),
+          rows.map(r => ({ id: r.mt.id, name: r.mt.name, on: r.mt.onHand, min: r.mt.min, nd: r.nd, ord: r.mt.onOrder || 0, status: r.status, q: matQty(r.mt, r.mt.onHand), minQ: matQty(r.mt, r.mt.min), ndQ: matQty(r.mt, r.nd), ordQ: r.mt.onOrder ? matQty(r.mt, r.mt.onOrder) : '' })));
+        a.md.push('');
+      }
       const toOrder = crit.filter(r => !r.mt.onOrder && r.status !== 'knapp');
       for (const r of toOrder) addAction(a, reorderAction(r.mt));
-      a.md.push('', '> **Empfehlung:** ' + (toOrder.length ? `${toOrder.map(r => r.mt.name).join(', ')} nachbestellen – ${toOrder.length === 1 ? 'Bestellvorschlag' : 'Bestellvorschläge'} unten.` : crit.length ? 'Bestellungen laufen; Liefertermine im Blick behalten.' : 'Keine Bestellung nötig.'));
+      const soon = crit.filter(r => r.status === 'knapp' && !r.mt.onOrder);
+      const soonTxt = soon.length ? ` ${listJoin(soon.map(r => r.mt.name))}: nächste Bestellung einplanen – nach den offenen Aufträgen unter Mindestbestand.` : '';
+      a.md.push('', '> **Empfehlung:** ' + (toOrder.length ? `${toOrder.map(r => r.mt.name).join(', ')} nachbestellen – ${toOrder.length === 1 ? 'Bestellvorschlag' : 'Bestellvorschläge'} unten.${soonTxt}` : soon.length ? soonTxt.trim() : crit.length ? 'Bestellungen laufen; Liefertermine im Blick behalten.' : 'Keine Bestellung nötig.'));
     }
     a.sources = ['Rohmaterialbestände', 'Bedarf aus offenen Arbeitsgängen', 'Bestellungen', srcStand()];
     a.followups = single ? ['Welches Material wird knapp?', 'Wie läuft die Schicht?'] : ['Was machen die AGVs gerade?', 'Wie läuft die Schicht?'];
@@ -1095,7 +1146,10 @@
       const parts = [nw ? nw + ' ' + (nw === 1 ? 'arbeitet' : 'arbeiten') : '', nwk ? nwk + ' unterwegs' : '', ni ? ni + ' verfügbar' : '', nb ? nb + ' in Pause' : ''].filter(Boolean);
       a.md.push(`**${on.length} ${on.length === 1 ? 'Person' : 'Personen'} ${roles && roles.length ? '(' + roles.join(', ') + ') ' : ''}im Dienst** (${sh.id ? sh.name : 'Übergabe'}): ${parts.join(', ')}.`, '');
       const order = { working: 0, driving: 0, walking: 1, idle: 2, break: 3 };
-      for (const p of on.slice().sort((x, y) => (order[x.state] - order[y.state]) || x.id.localeCompare(y.id))) a.md.push(`- **${sn(p.name)}** (${p.role}) – ${p.state === 'idle' ? 'verfügbar' + (/^bereit$/i.test(p.activity || '') ? '' : ': ' + p.activity) : label('person', p.state) + ': ' + actWhere(p.activity, p.state === 'break' ? '' : whereOf(p))}`);
+      const sorted = on.slice().sort((x, y) => (order[x.state] - order[y.state]) || x.id.localeCompare(y.id));
+      const actOf = (p) => (p.state === 'idle' ? (/^bereit$/i.test(p.activity || '') ? 'verfügbar' : p.activity) : actWhere(p.activity, p.state === 'break' ? '' : whereOf(p)));
+      SLOT(a, 'crew', sorted.map(p => `- **${sn(p.name)}** (${p.role}) – ${p.state === 'idle' ? 'verfügbar' + (/^bereit$/i.test(p.activity || '') ? '' : ': ' + p.activity) : label('person', p.state) + ': ' + actWhere(p.activity, p.state === 'break' ? '' : whereOf(p))}`).join('\n'),
+        sorted.map(p => ({ id: p.id, name: sn(p.name), full: p.name, role: p.role, state: p.state, st: p.state === 'idle' ? 'verfügbar' : label('person', p.state), act: actOf(p), util: p.utilToday })));
     }
     const wo = c.mvs().filter(m => m.state === 'waitOperator' && m.sinceSec >= 120);
     if (wo.length && wo.every(noStaff)) a.md.push('', ...groupNoStaff(wo));
@@ -1182,18 +1236,23 @@
       { l: 'Ausschuss', v: nm(k.scrap) + ' Stk', s: 'FPY ' + pct(k.fpy, 1), c: k.scrap ? 'warn' : 'ok' },
       { l: 'Energie', v: nm(k.energyKwh, 0) + ' kWh', s: 'jetzt ' + nm(k.powerKw, 0) + ' kW' },
     ];
+    const stCol = (st) => (WF.STATE[st] || {}).color || 'var(--st-wait)';
     if (L.causes.length) {
       a.md.push('', '### Nach Ursache');
-      for (const x of L.causes.slice(0, 5)) if (x.eur >= 1) a.md.push(`- **${CAUSE_LABEL[x.state]}**: ca. ${eur(x.eur)}`);
+      const cs = L.causes.slice(0, 5).filter(x => x.eur >= 1);
+      SLOT(a, 'bars1', cs.map(x => `- **${CAUSE_LABEL[x.state]}**: ca. ${eur(x.eur)}`).join('\n'),
+        { rows: cs.map(x => ({ label: CAUSE_LABEL[x.state], v: x.eur, vTxt: eur(x.eur), sub: `${durR(x.sec)} an ${pl(x.machines, 'Arbeitsplatz', 'Arbeitsplätzen')} · ${pct(k.lossEur > 0 ? x.eur / k.lossEur : 0)} der Stillstandskosten`, c: stCol(x.state) })) });
     }
     if (top.length) {
       a.md.push('', '### Nach Arbeitsplatz');
-      for (const x of top) a.md.push(`- **${mName(x.mv.id)}**: ${eur(x.loss)} (${eur(x.mv.rate)}/h) – ${x.causes.length ? x.causes.slice(0, 2).map(y => `${CAUSE_LABEL[y.state]} ${durR(y.sec)}`).join(', ') : 'Zustand vor Tagesbeginn'}${x.mv.state !== 'running' ? '; jetzt: ' + stLabel(x.mv.state) : ''}`);
+      const txt = (x) => `${x.causes.length ? x.causes.slice(0, 2).map(y => `${CAUSE_LABEL[y.state]} ${durR(y.sec)}`).join(', ') : 'Zustand vor Tagesbeginn'}${x.mv.state !== 'running' ? '; jetzt: ' + stLabel(x.mv.state) : ''}`;
+      SLOT(a, 'bars2', top.map(x => `- **${mName(x.mv.id)}**: ${eur(x.loss)} (${eur(x.mv.rate)}/h) – ${txt(x)}`).join('\n'),
+        { rows: top.map(x => ({ ent: { kind: 'machine', id: x.mv.id }, label: station(x.mv.id).short, v: x.loss, vTxt: eur(x.loss), sub: txt(x) + ' · ' + eur(x.mv.rate) + '/h', c: x.causes.length ? stCol(x.causes[0].state) : 'var(--st-wait)' })) });
     }
     const nowLoss = c.mvs().filter(m => m.state !== 'running' && m.state !== 'idle' && WF.sim.shift().id && !WF.sim.shift().inBreak);
     if (nowLoss.length) a.md.push('', `Gerade kostet Stillstand ca. ${eur(nowLoss.reduce((s, m) => s + m.rate, 0))}/h: ${nowLoss.map(m => `${m.id} ${stLabel(m.state)}`).join(', ')}.`);
     const main = L.causes[0];
-    a.md.push('', '> **Empfehlung:** ' + (main ? `Größter Hebel ist **${CAUSE_LABEL[main.state]}** (ca. ${eur(main.eur)}): ${CAUSE_ADVICE[main.state]}` : 'Bisher kaum Stillstand – weiter so.'));
+    a.md.push('', '> **Empfehlung:** ' + (main ? `Größter Hebel ist **${CAUSE_LABEL[main.state]}** (ca. ${eur(main.eur)}). ${CAUSE_ADVICE[main.state] || ''}` : 'Bisher kaum Stillstand – weiter so.'));
     a.sources = ['Stillstandskosten je Maschine (Stundensatz)', 'Zustandsband heute (Schichtzeit)', 'Kennzahlen heute', srcStand()];
     a.followups = top.length ? [`Was macht ${top[0].mv.id} gerade?`, 'Wie hoch ist der Energieverbrauch?', 'Was ist der Engpass?'] : ['Wie läuft die Schicht?'];
     return done(a);
@@ -1569,6 +1628,8 @@
   }
 
   // ------------------------------------------------------------------ Benachrichtigung erklären
+  /** Empfehlungstext der Engine ohne doppeltes „Empfehlung:“; ist niemand im Dienst, bezieht sich der Rest auf den Schichtbeginn */
+  const cleanSuggestion = (t) => String(t || '').replace(/\.\s*Empfehlung:\s*/g, /nächste Schicht/.test(t) ? '. Zu Schichtbeginn: ' : '. ').replace(/^Empfehlung:\s*/, '');
   function ansNotification(c, n) {
     const a = A('notification');
     if (!n) { a.md.push('Diese Benachrichtigung ist nicht mehr vorhanden.'); return done(a); }
@@ -1592,7 +1653,7 @@
       a.md.push(...lines); if (sub.slots) a.slots = Object.assign(a.slots || {}, sub.slots); a.impact = sub.impact; a.entity = sub.entity; for (const x of sub.actions) addAction(a, x);
     }
     if (own && ownRec && n.status !== 'resolved') a.md.push('', ownRec);
-    else if (n.suggestion) a.md.push('', '> **Empfehlung:** ' + n.suggestion);
+    else if (n.suggestion) a.md.push('', '> **Empfehlung:** ' + cleanSuggestion(n.suggestion));
     for (const x of n.actions || []) {
       if (!x.action || x.action.type === 'select') continue;
       addAction(a, { label: x.label, desc: 'Vorschlag aus der Meldung', action: x.action, icon: x.action.type === 'reorder' ? 'box' : x.action.type === 'setPriority' ? 'bolt' : x.action.type === 'applyOffset' ? 'gauge' : 'wrench' });
@@ -2027,7 +2088,11 @@
       run: (i) => { const id = normMachineId(i.id); const mv = id && WF.sim.machineView(id); if (!mv) throw new Error('Unbekannte Maschine: ' + i.id + ' (gültig: ' + PROF().machines.join(', ') + ')'); return fit(trimMachine(mv)); } },
     { name: 'get_order', label: (i) => 'Liest Auftrag ' + (i.id || ''), description: 'Details eines Fertigungsauftrags (id z. B. "FA-24118"): Prognose, Puffer, Risiko, Engpass, Arbeitsgang-Kette mit Status und Plan, Behälterorte.',
       inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Auftrags-ID, z. B. FA-24118' } }, required: ['id'] },
-      run: (i) => { const id = String(i.id || '').toUpperCase().replace(/^FA(\d)/, 'FA-$1').replace(/^(\d{5})$/, 'FA-$1'); const o = WF.sim.orderView(id); if (!o) throw new Error('Unbekannter Auftrag: ' + i.id); return fit(trimOrder(o)); } },
+      run: (i) => { const id = String(i.id || '').toUpperCase().replace(/^FA(\d)/, 'FA-$1').replace(/^(\d{5})$/, 'FA-$1'); const o = WF.sim.orderView(id); if (!o) throw new Error('Unbekannter Auftrag: ' + i.id);
+        const r = trimOrder(o);
+        // Vorab-Abwägung der Regel-Engine (hilft ein Eilauftrag? wer würde überholt? Alternativen) – Claude prüft und nutzt sie
+        if (o.status !== 'fertig' && o.risk !== 'ok') { try { r.regelEinschaetzung = trimTxt(orderAdvice(data(), o).text.replace(/\*\*/g, ''), 600); } catch (e) { /* ohne Einschätzung */ } }
+        return fit(r); } },
     { name: 'get_forecast', label: () => 'Liest Prognose und Plantafel', description: 'Prognose: je offenem Auftrag Liefertermin-Prognose, Puffer (min) und Engpass; je Maschine die nächsten eingeplanten Arbeitsgänge (Start–Ende).',
       run: () => { const f = WF.sim.forecast(), o = {}, m = {}; for (const id in f.orders) { const x = f.orders[id]; if (x.done) continue; o[id] = { prognose: U.fmtDayClock(x.eta), pufferMin: minOf(x.slackSec), spaet: x.late, engpass: x.bottleneck }; } for (const id in f.machines) m[id] = f.machines[id].slice(0, 4).map(e => e.orderId + ' AG' + e.seq + ' ' + tc(e.start) + '–' + tc(e.end)); return fit({ auftraege: o, plantafel: m }); } },
     { name: 'get_notifications', label: () => 'Liest Meldungen', description: 'Offene und quittierte Benachrichtigungen (neueste zuerst) mit Titel, Text, Empfehlung, Rolle und möglichen Aktionen.',
@@ -2090,6 +2155,8 @@
       '- Nenne konkrete IDs und Zahlen (FA-24118, M05, P06, Uhrzeiten, Teile, €) ausschließlich aus der Lageübersicht unten oder aus Werkzeug-Ergebnissen. Erfinde nichts; fehlt etwas, sag es und lies es über ein Werkzeug nach.',
       '- Erkläre Ursachen (Zustand → Ursache → Auswirkung auf Termin/Kosten) und schließe mit einer konkreten Empfehlung als eigener Zeile „> **Empfehlung:** …“.',
       '- Formatierung: **fett** für Kernaussagen, Listen mit „- “, höchstens Überschriften „### “. Keine Tabellen.',
+      '- Grafiken: Eine eigene Zeile [[route FA-24118]] zeigt die Arbeitsgang-Kette eines Auftrags, [[werkzeuge M05]] die Werkzeug-Standzeiten, [[maschine M05]] die Kennzahlen einer Maschine, [[termine]] Prognose gegen Termin der gefährdeten Aufträge, [[risiko]] die Risiko-Karten, [[engpass]] den Arbeitsinhalt je Arbeitsplatz, [[verluste]] die Stillstandskosten je Arbeitsplatz, [[ursachen]] die Stillstandskosten je Ursache, [[material]] die Bestände, [[personal]] das Personal im Dienst. Höchstens zwei pro Antwort und nur, wenn sie die Aussage stützen; die gezeigten Zahlen dann nicht noch einmal als Liste wiederholen.',
+      '- Eilauftrag nur empfehlen, wenn er wirklich Zeit gewinnt: er wirkt erst beim nächsten Auftragswechsel und nur, wenn die Teile schon da sind; überholte Aufträge rutschen um die Belegzeit nach hinten. Das Feld regelEinschaetzung in get_order enthält diese Abwägung bereits.',
       '- Aktionen (Störung auslösen, Priorität, Nachbestellung, Verlagerung, Werkzeugwechsel, Quittieren) nur auf ausdrücklichen Wunsch; der Nutzer bestätigt jede Aktion im Panel. Abgelehnt = nicht erneut versuchen. Nach einer Aktion das Ergebnis kurz berichten.',
       '- Fachbegriffe: Zustände Produktion, Rüsten, Erstteilprüfung, Werkzeugwechsel, Wartet auf Werkzeug/Bediener/Material, Ausgang voll, Störung, Bereit. Werkzeuge werden nur zwischen zwei Teilen gewechselt, angekündigt mit Uhrzeit und Einrichter. Prognose = Plantafel; Engpass = längster Arbeitsgang im Plan; Stillstandskosten = Maschinenstundensatz × Zeit mit eingeplantem Auftrag ohne Produktion (Schichtzeit).',
       live.tools ? '- Für Details die Werkzeuge nutzen (get_machine, get_order, get_forecast, get_tools, get_materials, get_people, get_notifications).' : '- In dieser Ansicht gibt es keine Werkzeuge: antworte nur aus der Lageübersicht und sag, wenn Details fehlen.',
@@ -2289,6 +2356,7 @@
   .ai-stat.ok{--c:var(--st-run)} .ai-stat.warn{--c:var(--st-wait)} .ai-stat.crit{--c:var(--st-fault)} .ai-stat.info{--c:var(--info)}
   .ai-stat .l{font:500 10.5px/1.2 var(--f-ui);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ai-stat .v{font:600 19px/1.15 var(--f-cond);color:var(--text);margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  @media (max-width:520px){.ai-stats.n4{grid-template-columns:repeat(2,minmax(0,1fr))}.ai-stats.n4 .ai-stat:nth-child(3){border-left:0}.ai-stats.n4 .ai-stat:nth-child(n+3){border-top:1px solid var(--line)}}
   .ai-stat .s{font-size:10.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
   .ai-imp{margin:9px 0 11px;padding:10px 12px 8px;border-radius:9px;background:var(--bg2);border:1px solid var(--line)}
   .ai-imp-h{display:flex;align-items:center;gap:10px;margin-bottom:6px;min-width:0}
@@ -2358,7 +2426,10 @@
   .ai-chip .ico{color:var(--accent);flex:none}
   .ai-chip:disabled{opacity:.45;cursor:default}
   .ai-empty{display:flex;flex-direction:column;gap:16px;padding:6px 0 4px;margin:auto 0}
-  .ai-hero{display:flex;flex-direction:column;align-items:flex-start;gap:7px}
+  .ai-hero{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:7px;isolation:isolate}
+  .ai-hero::before{content:"";position:absolute;z-index:-1;left:-40px;top:-46px;width:260px;height:170px;pointer-events:none;
+    background:radial-gradient(closest-side,color-mix(in srgb,var(--accent) 16%,transparent),transparent);filter:blur(6px)}
+  .ai-hero h3 span{color:var(--accent)}
   .ai-hero h3{margin:0;font:600 23px/1.15 var(--f-cond);letter-spacing:.01em;color:var(--text)}
   .ai-hero p{margin:0;color:var(--muted);font-size:13px;line-height:1.5;max-width:50ch}
   .ai-live{display:flex;flex-wrap:wrap;gap:6px}
@@ -2395,7 +2466,67 @@
   .ai-sys .ico{flex:none}
   .ai-sys.ok .ico{color:var(--st-run)} .ai-sys.warn .ico{color:var(--st-wait)}
   .btn-ai.ai-on{background:color-mix(in srgb,var(--accent) 26%,var(--card));box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent) inset}
-  .ai-slot:empty{display:none}
+  .ai-slot:empty,.ai-embed:empty{display:none}
+  /* Balken */
+  .ai-bars{display:grid;gap:9px;margin:4px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:color-mix(in srgb,var(--card2) 70%,transparent)}
+  .ai-br .h{display:flex;align-items:center;gap:7px;min-width:0;font-size:12.5px;line-height:19px}
+  .ai-br .h .ai-ent{margin:0;flex:none}
+  .ai-br .n{flex:1;min-width:0;color:var(--text);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ai-br .q{flex:none;font-weight:600;font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--text)}
+  .ai-br .tr{height:6px;margin-top:4px;border-radius:3px;background:var(--track);overflow:hidden}
+  .ai-br .tr i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,color-mix(in srgb,var(--c) 70%,transparent),var(--c))}
+  .ai-br .s{margin-top:3px;font-size:11.5px;line-height:1.4;color:var(--muted)}
+  /* Risiko-Karten */
+  .ai-risk{display:grid;gap:8px;margin:4px 0 12px}
+  .ai-rk{position:relative;padding:9px 11px 9px 13px;border:1px solid var(--line);border-radius:var(--r-sm);background:color-mix(in srgb,var(--card2) 70%,transparent);overflow:hidden}
+  .ai-rk::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--c)}
+  .ai-rk .h{display:flex;align-items:center;gap:7px;min-width:0}
+  .ai-rk .h .ai-ent{margin:0;flex:none}
+  .ai-rk .nm{flex:1;min-width:0;font-weight:600;font-size:12.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ai-rk .tg{flex:none;font:600 10.5px/17px var(--f-ui);padding:0 7px;border-radius:999px;white-space:nowrap;color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent);border:1px solid color-mix(in srgb,var(--c) 32%,transparent)}
+  .ai-rk .m{margin:4px 0 5px;font-size:11.5px;color:var(--muted)}
+  .ai-rk .m b{color:var(--text2);font-weight:600}
+  .ai-rk .ln{display:grid;grid-template-columns:58px minmax(0,1fr);gap:8px;padding:3px 0 0;font-size:12px;line-height:1.45;color:var(--text2)}
+  .ai-rk .ln + .ln{margin-top:2px}
+  .ai-rk .k{font:600 9.5px/18px var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+  .ai-rk .v .ai-ent{height:17px}
+  /* Personal */
+  .ai-crew{display:grid;margin:4px 0 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:color-mix(in srgb,var(--card2) 70%,transparent);overflow:hidden}
+  .ai-pp{display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:10px;padding:8px 10px}
+  .ai-pp + .ai-pp{border-top:1px solid var(--line)}
+  .ai-pp .av{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font:600 11px/1 var(--f-ui);letter-spacing:.02em;color:var(--text);cursor:pointer;
+    background:color-mix(in srgb,var(--c) 18%,var(--card));border:1.5px solid color-mix(in srgb,var(--c) 65%,transparent);padding:0}
+  .ai-pp .av:hover{background:color-mix(in srgb,var(--c) 30%,var(--card))}
+  .ai-pp .tx{min-width:0}
+  .ai-pp .n{display:flex;align-items:baseline;gap:6px;min-width:0;font-size:12.5px;line-height:17px}
+  .ai-pp .n button{all:unset;cursor:pointer;font-weight:600;color:var(--text);white-space:nowrap}
+  .ai-pp .n button:hover{color:var(--accent)}
+  .ai-pp .n small{min-width:0;font-size:11px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ai-pp .a{font-size:12px;line-height:1.45;color:var(--muted);margin-top:1px}
+  .ai-pp .a .ai-ent{height:17px}
+  .ai-pp .tg{flex:none;font:600 10px/16px var(--f-ui);padding:0 7px;border-radius:999px;white-space:nowrap;color:var(--c);background:color-mix(in srgb,var(--c) 13%,transparent);border:1px solid color-mix(in srgb,var(--c) 30%,transparent)}
+  /* Rohmaterial */
+  .ai-stock{display:grid;gap:9px;margin:4px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:color-mix(in srgb,var(--card2) 70%,transparent)}
+  .ai-sk .h{display:flex;align-items:baseline;gap:8px;min-width:0;font-size:12.5px;line-height:18px}
+  .ai-sk .n{all:unset;cursor:pointer;flex:1 1 auto;min-width:0;color:var(--text);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ai-sk .n:hover{color:var(--accent)}
+  .ai-sk .tg{flex:none;font:600 10px/16px var(--f-ui);padding:0 6px;border-radius:999px;color:var(--c);background:color-mix(in srgb,var(--c) 13%,transparent);border:1px solid color-mix(in srgb,var(--c) 30%,transparent)}
+  .ai-sk .q{flex:none;font-weight:600;font-size:12px;font-variant-numeric:tabular-nums;color:var(--c)}
+  .ai-sk .wb{position:relative;height:6px;margin-top:4px;border-radius:3px;background:var(--track)}
+  .ai-sk .wb .tr{position:absolute;inset:0;border-radius:3px;overflow:hidden}
+  .ai-sk .wb i{position:absolute;left:0;top:0;bottom:0;background:var(--c)}
+  .ai-sk .wb i.ord{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--c) 45%,transparent) 0 3px,transparent 3px 6px)}
+  .ai-sk .wb b{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;border-radius:1px}
+  .ai-sk .wb b.min{background:var(--text2);opacity:.8}
+  .ai-sk .wb i.res{background:color-mix(in srgb,var(--c) 38%,transparent)}
+  .ai-sk .wb i.sh{background:color-mix(in srgb,var(--st-fault) 22%,transparent);box-shadow:inset 0 0 0 1.5px var(--st-fault)}
+  .ai-sk-lg{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:2px;font-size:10.5px;color:var(--faint)}
+  .ai-sk-lg span{display:inline-flex;align-items:center;gap:5px}
+  .ai-sk-lg i{display:inline-block}
+  .ai-sk-lg .l-min{width:2px;height:10px;border-radius:1px;background:var(--text2)}
+  .ai-sk-lg .l-free{width:12px;height:6px;border-radius:2px;background:var(--st-run)}
+  .ai-sk-lg .l-res{width:12px;height:6px;border-radius:2px;background:color-mix(in srgb,var(--st-run) 38%,transparent)}
+  .ai-sk-lg .l-ord{width:12px;height:6px;border-radius:2px;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--st-run) 55%,transparent) 0 3px,transparent 3px 6px)}
   /* Werkzeug-Standzeiten */
   .ai-tools{display:grid;gap:8px;margin:4px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:color-mix(in srgb,var(--card2) 70%,transparent)}
   .ai-tl .h{display:flex;align-items:baseline;gap:8px;min-width:0;font-size:12.5px;line-height:18px}
@@ -2435,6 +2566,7 @@
   .ai-rt .w .ai-ent{margin:0}
   .ai-rt .wh{color:var(--text2)}
   .ai-rt .sub{min-width:0}
+  .ai-rt .w.sub2{display:block;margin-top:2px}
   .ai-rt .wh:not(:last-child)::after{content:"·";margin-left:6px;color:var(--faint)}
   .ai-rt .pg{display:block;height:4px;margin-top:6px;border-radius:2px;background:var(--track);overflow:hidden}
   .ai-rt .pg i{display:block;height:100%;border-radius:2px;background:var(--c);transition:width .4s}
@@ -2512,6 +2644,7 @@
       if (code != null) { if (/^\s*```/.test(line)) { html += '<pre class="ai-pre">' + esc(code.join('\n')) + '</pre>'; code = null; } else code.push(raw); continue; }
       if (/^\s*```/.test(line)) { flushP(); flushQ(); closeL(); flushT(); code = []; continue; }
       if ((m = /^\u0005(\w+)$/.exec(line.trim()))) { flushP(); flushQ(); closeL(); flushT(); html += `<div class="ai-slot" data-slot="${m[1]}"></div>`; continue; }
+      if ((m = /^\[\[([a-zäöü]+)(?:\s+([A-Za-z0-9-]+))?\]\]$/i.exec(line.trim()))) { flushP(); flushQ(); closeL(); flushT(); html += `<div class="ai-embed" data-e="${esc(m[1].toLowerCase())}" data-id="${esc(m[2] || '')}"></div>`; continue; }
       if (/^\s*\|.*\|\s*$/.test(line)) { flushP(); flushQ(); closeL(); table.push(line); continue; }
       flushT();
       if (!line.trim()) { flushP(); flushQ(); closeL(); continue; }
@@ -2699,7 +2832,7 @@
     const prod = st ? Object.values(st.machines).filter(m => m.state === 'running').length : 0;
     R.log.innerHTML = `<div class="ai-empty">
       <div class="ai-hero">
-        <h3>Fragen an die Fertigung</h3>
+        <h3>Fragen an die <span>Fertigung</span></h3>
         <p>Der Copilot kennt jede Maschine, jeden Auftrag, jedes Werkzeug und jeden Behälter – live. Er erklärt Ursachen, rechnet Szenarien durch und schlägt Maßnahmen vor; Aktionen laufen erst nach Bestätigung.</p></div>
       <div class="ai-live"><span><i></i><span><b>${prod}</b>/${mvs} produzieren</span></span><span style="--c:var(--info)"><i></i><span><b>${ord}</b> Aufträge offen</span></span><span style="--c:var(--st-setup)"><i></i><span><b>${ppl}</b> im Dienst</span></span></div>
       ${exampleGroups().map(g => `<div class="ai-exg"><span class="eyebrow">${esc(g.g)}</span>${g.items.map(([ic, t]) => `<button type="button" class="ai-ex" data-ask="${esc(t)}">${icon(ic, 16)}<span class="tx">${esc(t)}</span><span class="ar">${icon('arrowRight', 14)}</span></button>`).join('')}</div>`).join('')}
@@ -2763,11 +2896,19 @@
     });
   }
   function renderBody(m, streaming) {
-    const html = md(m.text + (streaming ? '\u0003' : ''));
+    // während des Streamens eine angefangene Grafik-Zeile „[[…“ noch nicht als Text zeigen
+    const src = streaming ? m.text.replace(/(^|\n)\[\[[^\]\n]*\]?$/, '$1') : m.text;
+    const html = md(src + (streaming ? '\u0003' : ''));
     if (m._h === html) return;
     m._h = html;
     m.body.innerHTML = `<div class="ai-md">${html}</div>`;
     if (m.slots) for (const el of m.body.querySelectorAll('.ai-slot')) { const x = m.slots[el.dataset.slot]; if (x) el.innerHTML = x; }
+    for (const el of m.body.querySelectorAll('.ai-embed')) {
+      const key = el.dataset.e + '|' + el.dataset.id;
+      m.embeds = m.embeds || {};
+      if (!(key in m.embeds)) { try { m.embeds[key] = embedHTML(el.dataset.e, el.dataset.id); } catch (e) { m.embeds[key] = ''; } }
+      el.innerHTML = m.embeds[key];
+    }
     scrollEnd(false);
   }
   function toolChip(m, labelTxt) {
@@ -2784,7 +2925,7 @@
   // ------------------------------------------------------------------ Zusatzblöcke: Kennzahlen, Termin-Diagramm, Datenbasis, Aktionen, Folgefragen
   function statsHTML(stats) {
     if (!stats || !stats.length) return '';
-    return `<div class="ai-stats" style="--n:${stats.length}">${stats.map(x => `<div class="ai-stat ${x.c || ''}" title="${esc(x.l + ': ' + x.v + (x.s ? ' · ' + x.s : ''))}"><div class="l">${esc(x.l)}</div><div class="v">${esc(x.v)}</div>${x.s ? `<div class="s">${esc(x.s)}</div>` : ''}</div>`).join('')}</div>`;
+    return `<div class="ai-stats n${stats.length}" style="--n:${stats.length}">${stats.map(x => `<div class="ai-stat ${x.c || ''}" title="${esc(x.l + ': ' + x.v + (x.s ? ' · ' + x.s : ''))}"><div class="l">${esc(x.l)}</div><div class="v">${esc(x.v)}</div>${x.s ? `<div class="s">${esc(x.s)}</div>` : ''}</div>`).join('')}</div>`;
   }
   /** Prognose gegen Termin: eine gemeinsame Zeitachse (jetzt … spätester Wert), Termin als Strich, Prognose als Punkt,
       Puffer bzw. Verzug als Balken zwischen Prognose und Termin; bei Szenarien „vorher“ als Ring mit Verschiebung */
@@ -2824,11 +2965,11 @@
   function routeHTML(list) {
     if (!list || !list.length) return '';
     const node = (r) => (r.st === 'done' ? icon('check', 11) : r.st === 'ship' ? icon('truck', 11) : r.st === 'ext' ? icon('route', 11) : '');
-    const where = (r) => (S().machines[r.station] ? entChip('machine', r.station, r.station) + `<span class="wh">${esc(station(r.station).short)}</span>` : `<span class="wh">${esc(r.where || r.station)}</span>`);
+    const where = (r) => (r.st === 'ship' ? '' : S().machines[r.station] ? entChip('machine', r.station, r.station) + `<span class="wh">${esc(station(r.station).short)}</span>` : `<span class="wh">${esc(r.where || r.station)}</span>`);
     return `<ol class="ai-route">${list.map(r => `<li class="ai-rt s-${r.st}" style="--c:${r.c}">
       <span class="nd">${node(r)}</span>
       <div class="bd"><div class="h"><span class="sq">AG ${esc(r.seq)}</span><span class="op">${esc(r.op)}</span><span class="tg">${esc(r.pill)}</span></div>
-        <div class="w">${where(r)}${r.sub ? `<span class="sub">${inline(r.sub)}</span>` : ''}</div>
+        ${r.sub && r.sub.length > 38 && where(r) ? `<div class="w">${where(r)}</div><div class="w sub2">${inline(r.sub)}</div>` : `<div class="w">${where(r)}${r.sub ? `<span class="sub">${inline(r.sub)}</span>` : ''}</div>`}
         ${r.pct != null && r.st !== 'done' ? `<span class="pg"><i style="width:${Math.round(r.pct * 100)}%"></i></span>` : ''}</div></li>`).join('')}</ol>`;
   }
   /** Werkzeug-Standzeit: Verschleißbalken (heller Anteil = nach dem laufenden Teil), Strich = Wechselgrenze */
@@ -2845,7 +2986,68 @@
         <div class="s"><span>${esc(nm(w, 0))} % Verschleiß</span>${t.tag ? `<span class="tg">${icon('wrench', 11)}${esc(t.tag)}</span>` : ''}</div></div>`;
     }).join('')}</div>`;
   }
-  const SLOT_HTML = { route: routeHTML, tools: toolsHTML, today: () => '' };
+  /** Personal im Dienst: Initialen (Farbe = Zustand), Name/Rolle, Tätigkeit, Zustand */
+  function crewHTML(list) {
+    if (!list || !list.length) return '';
+    const col = { working: 'var(--st-run)', driving: 'var(--st-run)', walking: 'var(--info)', idle: 'var(--accent)', break: 'var(--st-wait)' };
+    const ini = (n) => String(n || '').split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+    return `<div class="ai-crew">${list.map(p => `<div class="ai-pp s-${esc(p.state)}" style="--c:${col[p.state] || 'var(--muted)'}">
+      <button type="button" class="av" data-ent-k="person" data-ent-id="${esc(p.id)}" title="${esc(p.full)} öffnen">${esc(ini(p.full))}</button>
+      <div class="tx"><div class="n"><button type="button" data-ent-k="person" data-ent-id="${esc(p.id)}">${esc(p.name)}</button><small>${esc(p.role)}</small></div>
+        <div class="a">${p.act && p.act !== 'verfügbar' ? inline(p.act) : '<span class="muted">bereit für die nächste Aufgabe</span>'}</div></div>
+      <span class="tg">${esc(p.st)}</span></div>`).join('')}</div>`;
+  }
+  /** Rohmaterial: frei (voll) + für offene Aufträge verplant (hell) + bestellt (schraffiert), Fehlmenge rot umrandet; Strich = Mindestbestand */
+  function stockHTML(list) {
+    if (!list || !list.length) return '';
+    const col = { unter: 'var(--st-wait)', fehlt: 'var(--st-fault)', knapp: 'var(--st-wait)', ok: 'var(--st-run)' };
+    const tag = { unter: 'unter Min.', fehlt: 'fehlt', knapp: 'knapp', ok: '' };
+    return `<div class="ai-stock">${list.map(r => {
+      const max = Math.max(r.on + r.ord, r.min * 2, r.nd, 1) * 1.08, X = (v) => Math.max(0, Math.min(100, v / max * 100));
+      const free = Math.max(0, r.on - r.nd), res = Math.min(r.on, r.nd), short = Math.max(0, r.nd - r.on - r.ord);
+      const tip = `${r.name}: Bestand ${r.q} · Mindestbestand ${r.minQ} · Bedarf offener Aufträge ca. ${r.ndQ}${r.ordQ ? ' · bestellt ' + r.ordQ : ''}`;
+      return `<div class="ai-sk" style="--c:${col[r.status]}" title="${esc(tip)}">
+        <div class="h"><button type="button" class="n" data-ent-k="material" data-ent-id="${esc(r.id)}">${esc(r.name)}</button>${tag[r.status] ? `<span class="tg">${esc(tag[r.status])}</span>` : ''}<span class="q">${esc(r.q)}</span></div>
+        <div class="wb"><span class="tr">${free > 0 ? `<i style="width:${X(free).toFixed(1)}%"></i>` : ''}${res > 0 ? `<i class="res" style="left:${X(free).toFixed(1)}%;width:${(X(r.on) - X(free)).toFixed(1)}%"></i>` : ''}${r.ord ? `<i class="ord" style="left:${X(r.on).toFixed(1)}%;width:${(X(r.on + r.ord) - X(r.on)).toFixed(1)}%"></i>` : ''}${short > 0 ? `<i class="sh" style="left:${X(r.on + r.ord).toFixed(1)}%;width:${(X(r.nd) - X(r.on + r.ord)).toFixed(1)}%"></i>` : ''}</span><b class="min" style="left:${X(r.min).toFixed(1)}%"></b></div></div>`;
+    }).join('')}<div class="ai-sk-lg"><span><i class="l-free"></i>frei</span><span><i class="l-res"></i>für offene Aufträge verplant</span><span><i class="l-ord"></i>bestellt</span><span><i class="l-min"></i>Mindestbestand</span></div></div>`;
+  }
+  /** Risiko-Karten: je Auftrag Kopf (Puffer/Verzug), Prognose/Termin, „Jetzt“ und „Engpass“ */
+  function riskHTML(list) {
+    if (!list || !list.length) return '';
+    return `<div class="ai-risk">${list.map(r => `<div class="ai-rk${r.late ? ' late' : ''}" style="--c:${r.late ? 'var(--st-fault)' : 'var(--st-wait)'}">
+      <div class="h">${entChip('order', r.id)}<span class="nm">${esc(r.part)}</span><span class="tg">${esc(dur0(Math.abs(r.slack)) + (r.late ? ' Verzug' : ' Puffer'))}</span></div>
+      <div class="m">${esc(r.cust)} · Prognose <b>${esc(r.eta)}</b> · Termin ${esc(r.due)}${r.eil ? ' · <b>Eilauftrag</b>' : ''}</div>
+      ${r.now ? `<div class="ln"><span class="k">Jetzt</span><span class="v">${inline(r.now)}</span></div>` : ''}
+      ${r.bn ? `<div class="ln"><span class="k">Engpass</span><span class="v">${inline(r.bn)}</span></div>` : ''}</div>`).join('')}</div>`;
+  }
+  /** Balken (horizontal): Wert relativ zum größten Wert; optional Maschinen-Chip und Unterzeile */
+  function barsHTML(d) {
+    const rows = d && d.rows || []; if (!rows.length) return '';
+    const max = Math.max(...rows.map(r => r.v || 0), 1e-9);
+    return `<div class="ai-bars">${rows.map(r => `<div class="ai-br" style="--c:${r.c || 'var(--accent)'}">
+      <div class="h">${r.ent ? entChip(r.ent.kind, r.ent.id) : ''}<span class="n">${esc(r.label)}</span><span class="q">${esc(r.vTxt)}</span></div>
+      <div class="tr"><i style="width:${Math.max(1.5, (r.v || 0) / max * 100).toFixed(1)}%"></i></div>
+      ${r.sub ? `<div class="s">${inline(r.sub)}</div>` : ''}</div>`).join('')}</div>`;
+  }
+  const SLOT_HTML = { route: routeHTML, tools: toolsHTML, crew: crewHTML, stock: stockHTML, risk: riskHTML, bars: barsHTML, today: () => '' };
+  /** Grafiken, die Claude im Live-Modus per eigener Zeile „[[route FA-24118]]“ einbetten kann – aus denselben Bausteinen wie der Offline-Copilot */
+  function embedHTML(kind, id) {
+    const c = data(), slotOf = (a, k) => (a && a.slots && a.slots[k] ? (SLOT_HTML[k] || SLOT_HTML[k.replace(/\d+$/, '')])(a.slots[k].data) : '');
+    const oid = String(id || '').toUpperCase().replace(/^FA(\d)/, 'FA-$1').replace(/^(\d{5})$/, 'FA-$1'), mid = normMachineId(id);
+    switch (kind) {
+      case 'route': case 'auftrag': return S().orders[oid] ? slotOf(ansOrder(c, oid), 'route') : '';
+      case 'werkzeuge': case 'tools': return mid ? slotOf(ansMachine(c, mid, 'tools'), 'tools') : '';
+      case 'termine': { const a = ansRisk(c); return a.impact ? impactHTML(a.impact) : ''; }
+      case 'risiko': return slotOf(ansRisk(c), 'risk');
+      case 'engpass': return slotOf(ansBottleneck(c), 'bars3');
+      case 'verluste': { const a = ansLoss(c); return slotOf(a, 'bars2') || slotOf(a, 'bars1'); }
+      case 'ursachen': return slotOf(ansLoss(c), 'bars1');
+      case 'material': return slotOf(ansMaterial(c), 'stock');
+      case 'personal': return slotOf(ansPeople(c), 'crew');
+      case 'maschine': { if (!mid) return ''; const a = ansMachine(c, mid, 'full'); return a.stats ? statsHTML(a.stats) : ''; }
+      default: return '';
+    }
+  }
   const durShort = (sec) => { const m = Math.round(sec / 60); if (m < 60) return m + ' min'; const h = Math.floor(m / 60), r = m % 60; return h >= 24 ? (Math.round(h / 24 * 10) / 10).toString().replace('.', ',') + ' d' : h + ' h' + (r ? ' ' + String(r).padStart(2, '0') : ''); };
   function sourcesHTML(src) {
     if (!src || !src.length) return '';
@@ -2978,7 +3180,7 @@
         if (note) m.el.querySelector('.ai-asks').insertAdjacentHTML('beforebegin', `<div class="ai-notice">${icon('info', 14)}<span>${esc(note)}</span></div>`);
         const full = a.display || a.text;
         m.plain = a.text;
-        if (a.slots) { m.slots = {}; for (const k in a.slots) m.slots[k] = SLOT_HTML[k] ? SLOT_HTML[k](a.slots[k].data) : ''; }
+        if (a.slots) { m.slots = {}; for (const k in a.slots) { const f = SLOT_HTML[k] || SLOT_HTML[k.replace(/\d+$/, '')]; m.slots[k] = f ? f(a.slots[k].data) : ''; } }
         const words = full.split(/(\s+)/);
         const steps = Math.min(28, Math.max(6, Math.ceil(words.length / 14)));
         const per = Math.ceil(words.length / steps);
@@ -3070,7 +3272,7 @@
   /** Antwort als Klartext (Markdown ohne Sternchen) – z. B. Schichtübergabe in E-Mail/Schichtbuch übernehmen */
   function copyMsg(id, btn) {
     const m = conv.msgs.find(x => String(x.id) === String(id)); if (!m) return;
-    const plain = (m.plain || m.text).replace(/\*\*/g, '').replace(/^#{1,6}\s*/gm, '').replace(/^~\s+/gm, '').replace(/^>\s?/gm, '');
+    const plain = (m.plain || m.text).replace(/^\[\[[^\]\n]+\]\]\s*$/gm, '').replace(/\*\*/g, '').replace(/^#{1,6}\s*/gm, '').replace(/^~\s+/gm, '').replace(/^>\s?/gm, '');
     const ok = () => { btn.classList.add('ok'); btn.innerHTML = icon('check', 13); btn.title = 'Kopiert'; setTimeout(() => { btn.classList.remove('ok'); btn.innerHTML = icon('file', 13); btn.title = 'Antwort als Text kopieren'; }, 1600); };
     const fallback = () => { try { const ta = document.createElement('textarea'); ta.value = plain; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.append(ta); ta.select(); const r = document.execCommand('copy'); ta.remove(); if (r) ok(); else addSys('Kopieren ist in dieser Ansicht nicht erlaubt.', 'warn'); } catch (e) { addSys('Kopieren ist in dieser Ansicht nicht erlaubt.', 'warn'); } };
     try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(plain).then(ok, fallback); else fallback(); } catch (e) { fallback(); }

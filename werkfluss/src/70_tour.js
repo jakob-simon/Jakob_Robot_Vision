@@ -37,7 +37,10 @@
   .tour-hero span{font-size:12px;color:var(--muted)}
   .tour-progress{height:2px;background:var(--line);border-radius:2px;overflow:hidden;margin-top:12px}
   .tour-progress i{display:block;height:100%;background:var(--accent);width:0}
-  @media (max-width:560px){.tour-hero{grid-template-columns:1fr}.tour-card.center .tour-t{font-size:26px}}
+  @media (max-width:560px){.tour-hero{grid-template-columns:1fr}.tour-card.center .tour-t{font-size:26px}
+    .tour-dots{display:none}.tour-step{white-space:nowrap}.tour-card{padding:12px 14px 12px}.tour-x{font-size:13px}.tour-t{font-size:19px}
+    .tour-card.center{max-height:calc(100vh - 120px);overflow:auto}.tour-hero div{padding:8px 10px}.tour-hero b{font-size:20px}}
+  @media (min-width:900px){body.ai-open .tour-card:not(.center){left:max(16px,calc(var(--side-w) + 16px));transform:none;width:min(560px,calc(100vw - var(--side-w) - 440px - 48px))}}
   `, 'tour');
 
   const has = (viewId) => WF.views.some(v => v.id === viewId);
@@ -97,7 +100,15 @@
       } },
     { id: 'hall', view: 'halle', run: () => { WF.app.closeDrawer(); }, title: 'Der digitale Zwilling der Halle',
       body: () => `Alle Maschinen, Personen, AGVs und Behälter in Echtzeit. <b>Orange</b>: Materialfluss – welcher Behälter gerade von wo nach wo fährt. <b>Cyan</b>: Datenfluss – jede Meldung einer Maschine läuft zum werkfluss-Server. Klick auf ein Objekt öffnet die Details.` },
-    { id: 'order', view: 'halle', run: () => { const id = pickExternalOrder(); if (id) { WF.app.select('order', id); if (WF.hall && WF.hall.focusOrder) WF.hall.focusOrder(id); } return id; },
+    { id: 'order', view: 'halle', run: () => {
+        const id = pickExternalOrder();
+        if (id) {
+          WF.app.select('order', id);
+          // Schmale Bildschirme: Detail ausblenden, damit die Route in der Halle sichtbar ist (Auswahl bleibt)
+          if (window.matchMedia('(max-width: 900px)').matches && WF.app.hideDrawer) WF.app.hideDrawer();
+          if (WF.hall && WF.hall.focusOrder) WF.hall.focusOrder(id);
+        }
+        return id; },
       title: 'Einen Auftrag durch die Fabrik verfolgen',
       body: (ctx) => {
         const ov = ctx && sim().orderView(ctx);

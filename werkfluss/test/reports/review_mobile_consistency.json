@@ -1,0 +1,373 @@
+{
+  "summary": "Adversarial review lenses over the integrated werkfluss build (args = lens keys)",
+  "agentCount": 2,
+  "logs": [],
+  "result": [
+    {
+      "lens": "mobile",
+      "summary": "I reviewed werkfluss on mobile and tablet: phone 400×860, tablet portrait 768×1024 and landscape 1024×768. I built /tmp/rv-mobile.html, drove every view, all 7 drawer kinds, the Copilot, notifications, settings, the 11-step tour, the KI-Auftrag analysis, the Anbindung wizard, the Plantafel, TV mode, modals and the 3D hall controls, and looked at every screenshot (all in /tmp/rv-mobile/). There were no console errors.\n\nThe phone build is mostly solid. Grids collapse correctly, drawers, modals and wizards fit, and the KI-Auftrag sticky footer, Plantafel and Copilot work well on phone.\n\nThe serious problems are at tablet sizes and in a few demo-critical flows:\n- **TV mode is completely blank** on tablet portrait (≤900 px).\n- **The page scrolls sideways at 1024×768** in Werkzeuge and Anbindung. The right-hand columns and the \"Verbessern\"/\"Anbinden\" buttons are cut off. Werkzeuge also overflows at 912, 1180 and 1280 px wide.\n- **\"In der Halle verfolgen\" does nothing visible on phone.** The full-width drawer stays open over the 3D route, and tour step 5 has the same problem.\n- **3D hall overlays collide** when a drawer is open at 768 and 1024 px.\n- **The Materialfluss diagram's labels render at about 6 px** on every non-desktop size.\n\nBeyond those: the nav tab bar is not kept in view, tap targets are 25–32 px across the shell, inputs are smaller than 16 px (which makes iPhone Safari zoom in on focus), toasts cover sticky buttons and the tour card, the Copilot and drawer overlap at tablet widths, and several SVG charts shrink below 10 px. At 360 px (common on Android) the top bar overflows by 6 px, so the page scrolls sideways there too.\n\nOne caveat: headless rendering of the hall is very slow, so CSS transitions there lag. Hall-related screenshots were re-taken with reduced motion, and drawer states were checked through the DOM, not timing.",
+      "findings": [
+        {
+          "severity": "high",
+          "file": "src/20_app.js",
+          "title": "TV-Modus shows an empty screen on tablet portrait (≤900px)",
+          "evidence": "On 768×1024, tapping 'TV-Modus' in the Leitstand leaves only the top bar; the rest is empty (/tmp/rv-mobile/tv-tab.png). Computed grid: columns '0px 768px', rows '54px 0px 970px', and #main is 0px wide. Cause: line 324 sets `.app.tv{grid-template-columns:0 minmax(0,1fr)}`, but the ≤900px layout has one column with areas 'top' 'side' 'main', so main lands in the 0px column. At 1024×768 TV mode renders, but the only exit button (.ls-tvexit, 28px tall) sits at y=839, below the 768px fold. Touch tablets have no Esc key, so there is no visible way out.",
+          "fix": "In the app-tv css block, add `grid-template-columns:minmax(0,1fr)` inside `@media (max-width:900px){.app.tv{...}}`. In 40_leitstand.js, move 'TV beenden' into a fixed, always-visible spot in TV mode, e.g. `position:fixed; top:calc(var(--top-h) + 10px); right:16px; height:40px`, or into the top bar. Two-finger tap or long-press could also exit."
+        },
+        {
+          "severity": "high",
+          "file": "src/46_tools.js",
+          "title": "Werkzeuge list overflows the page horizontally on landscape tablets (1024, 1180, 1280 px)",
+          "evidence": "At 1024×768, view#view-werkzeuge has scrollWidth 919 vs clientWidth 810, so the whole page scrolls sideways. In 'Werkzeuge in den Maschinen', the plan column ('voraussichtlich nach Teil 26 · ca. 09:36', 'Kein Wechsel nötig') is cut at the right edge (/tmp/rv-mobile/land-werkzeuge-list.png). The same overflow appears at 912×1368 (919/698), 1180×820 (1083/966) and 1280×800 (1083/1066). Cause: the ≤1320px grid `--cols:40px minmax(200px,2fr) 150px 110px 146px minmax(180px,1.8fr)` needs about 914px, but beside the 214px sidebar only about 774px is available. The compact layout only applies at `@media (max-width:820px)`, which is based on the viewport, not the content width.",
+          "fix": "Base the layout on the content width. Add `container: tltb / inline-size` on the .tl-tb card and replace the 820px media query with `@container tltb (max-width: 940px)` (2-row layout: name+status, wear+rest, plan). Alternatively, apply the compact rules at `(max-width:1100px)` and add a 1101–1320px variant that drops the 'Stand/Schnittzeit' column. Add `min-width:0` and `overflow:hidden` to .tl-tr children so a grid can never push the page."
+        },
+        {
+          "severity": "high",
+          "file": "src/50_connect.js",
+          "title": "Anbindung machine table overflows at 1024×768; 'Verbessern'/'Anbinden' buttons cut off",
+          "evidence": "view#view-anbindung has scrollWidth 909 vs clientWidth 810 at 1024×768. In 'Maschinen & Stationen', the action column is clipped: 'Verbessern' buttons are half visible and the blue 'Anbinden' button for Okamoto ACC (the demo step 5 entry) is only a sliver at the right edge (/tmp/rv-mobile/land-anbindung-list.png). The ≤1280px grid `minmax(160px,1.4fr) 50px minmax(140px,1.4fr) 46px minmax(190px,2fr) 92px 122px` needs about 860px plus gaps, and the stacked layout only starts at viewport ≤980px.",
+          "fix": "Make .cn-lr/.cn-lh responsive to the card width: add `container-type:inline-size` on the list card and apply the stacked grid ('m lv' / 'd d' / 'p act' / 'live live') at `@container (max-width: 900px)`, or raise the media query to `(max-width:1180px)`. Also hide .cn-c-year and .cn-c-ago between 981 and 1280px."
+        },
+        {
+          "severity": "high",
+          "file": "src/41_orders.js",
+          "title": "On phone, 'In der Halle verfolgen' keeps the full-screen drawer open; the 3D route is never seen (same for tour step 5)",
+          "evidence": "In the hall on 400×860, open order FA-24118 and tap 'In der Halle verfolgen'. The app navigates to the hall and calls focusOrder, but `.drawer.open` stays true and the 100%-wide drawer still covers everything (/tmp/rv-mobile/mh2-phone.png). Tour step 5 'Einen Auftrag durch die Fabrik verfolgen' on phone also shows the drawer, not the route (/tmp/rv-mobile/mt-phone-b.png, middle). This is README demo step 2. 42_machine.js line 621 ('In der Halle zeigen') has the same problem. The hall already has a mobile selection bar ('AUFTRAG FA-24118 · Route zeigen', /tmp/rv-mobile/hall-phone-order.png) that would replace the drawer.",
+          "fix": "In the 'hall' handler (lines 2018-2021) and in 42_machine.js:621, close the drawer when `matchMedia('(max-width:640px)').matches`, before navigate/focus. Because closeDrawer() emits select {kind:null} and would clear the hall selection, add to 20_app.js a `WF.app.closeDrawer({keepSelection:true})` (or `hideDrawer()`) that only removes `.open`. In 70_tour.js step 'order', call that variant on narrow screens instead of leaving the drawer open."
+        },
+        {
+          "severity": "high",
+          "file": "src/30_hall3d.js",
+          "title": "3D hall overlays collide when a detail drawer is open at tablet widths",
+          "evidence": "With a machine or order drawer open, the toolbar (.h3-tb, right: 14px + --dw) slides left over the LIVE status card. On 768×1024 it is also clipped at the left edge ('e Ansicht'). The selection bar gets a negative max-width (`calc(100% - 330px - var(--dw))` evaluates to 'calc(100% - 810px)' at 1024 px) and collapses to 20px, leaving an orphan stub. /tmp/rv-mobile/mh4.png (tablet left, landscape right) and /tmp/rv-mobile/mh-land.png (left). Measured at 1024×768: toolbar x=200–530 overlaps the status card x=228–516, and the selection bar is 20px wide. At 768 the 'Route zeigen' bar falls behind the drawer.",
+          "fix": "Switch layout by the hall's *available* width. In resize and drawer-sync (lines ~2639, 3247, 3784), set `R.root.classList.toggle('m', (R.w - (R.drawerW||0)) <= 700)`, so the compact status line, bottom mbar and hidden minimap are used when space is short. Clamp the selection bar with `max-width:max(260px, calc(100% - 330px - var(--dw,0px)))` and drop the +151px offset when the minimap is hidden. Alternative for ≤1100px: let the drawer overlay the canvas without shifting (--dw: 0) and hide .h3-tb while a drawer is open."
+        },
+        {
+          "severity": "high",
+          "file": "src/45_material.js",
+          "title": "Materialfluss diagram labels render at about 6 px on phone, tablet portrait and 1024 landscape",
+          "evidence": "The SVG viewBox is 1200 wide (VW=1200, line 885) but is drawn into `.mt-fin{min-width:880px}` (line 479). Room/area labels (8.5px) render at 6.1px effective, station names (11px) at 7.9px, and 'M01' sub-ids and '1 unter Mindestbestand' at about 6.5px. Measured identically at 400, 768 and 1024 px wide (96 text nodes under 9.5px). The station boxes are unreadable without zoom (/tmp/rv-mobile/zoom-phone-material-flow.png, /tmp/rv-mobile/m-tab-material-0.png). This is the main material-flow visual the product owner wants to stand out.",
+          "fix": "For ≤1100px containers, set `.mt-fin{min-width:1200px}` so the diagram renders at 1:1 inside the existing swipe scroller; keep the 'zur Seite wischen' hint and add a right-edge fade (`mask-image:linear-gradient(90deg,#000 85%,transparent)`) as a scroll cue. Raise the minimum SVG text sizes: .mt-door/.mt-room-t/.mt-area/.mt-ext-t to 10px, .mt-el text to 12px, station sub-ids to 10px. For ≤560px, optionally replace the map with the existing 'Stärkste Verbindungen' list plus a 'Karte öffnen' fullscreen button."
+        },
+        {
+          "severity": "medium",
+          "file": "src/20_app.js",
+          "title": "Phone/tablet tab bar: active view scrolls out of sight and hidden views have no cue",
+          "evidence": "After WF.app.navigate('ki-auftrag') on 400×860, the nav strip stays at scrollLeft 0. The active 'KI-Auftrag' item is at x=983–1089 while the viewport is 400px, so the user sees 'Leitstand, Halle 3D, Aufträge, Analyse' with none highlighted (/tmp/rv-mobile/phone-ki-auftrag.png). The same happens at 768px for Qualität, Anbindung and KI-Auftrag, and on every tour step, notification link or 'Plantafel' jump. 6 of 10 views sit off-screen with no fade or arrow. Nav items are 32px tall, and the alert badges ('1 spät', 'Werkzeuge 4') are hidden at ≤900px by styles.css.",
+          "fix": "In app.navigate, after toggling `.on`: `const a=document.querySelector('.nav-item.on'); if (matchMedia('(max-width:900px)').matches) a.scrollIntoView({inline:'center',block:'nearest',behavior:'smooth'})`. In styles.css ≤900px: give .side `mask-image:linear-gradient(90deg,transparent 0,#000 16px,#000 calc(100% - 28px),transparent)`, `.nav-item{min-height:40px}`, and show badges as a small dot (`.nav-item .badge:not(:empty){display:inline-block;width:7px;height:7px;font-size:0;border-radius:50%;background:var(--st-wait)}`)."
+        },
+        {
+          "severity": "medium",
+          "file": "src/styles.css",
+          "title": "Tap targets below 40px across the shell and the main action buttons",
+          "evidence": "Measured on 400×860: sim play/pause 31×25, speed toggle 32×27, bell/tour/settings 36×36, nav items 32px tall. Leitstand 'Jetzt wichtig' actions (Nachbestellen / Quittieren / Als Eilauftrag) are .btn.sm at 26px. Notification panel actions are 28px. Segmented controls (.seg, e.g. Auftragsliste/Plantafel, Fahrten/Stück/Gewicht, SPC 30/60/alle 31×27) are 27–30px. Inline .link targets are 17px tall. On 768/1024 tablets the hall layer chips are 28×30 and 'Legende' 33×30, and the 3D machine labels used to select machines are 42×18. Copilot close/refresh buttons are 32×32 and send is 34×34 (60_ai.js).",
+          "fix": "Add a coarse-pointer block: `@media (pointer:coarse){ .btn{height:40px} .btn.sm{height:36px;padding:0 12px} .seg button{min-height:36px;padding:8px 12px} .icon-btn{width:40px;height:40px} .speed button{min-width:40px;min-height:34px} .nav-item{min-height:40px} .link{padding:6px 0;margin:-6px 0} }`. Do the same in modules: 60_ai .ai-ib/.ai-send → 40×40; 30_hall3d .h3-chip/.h3-dd → height:38px on coarse pointers and .h3-lb → `padding:6px 9px` (≥30px tall) when the root is not desktop."
+        },
+        {
+          "severity": "medium",
+          "file": "src/styles.css",
+          "title": "Inputs smaller than 16px make iPhone Safari zoom in on focus (Copilot, settings, reorder)",
+          "evidence": "Computed font sizes: Copilot textarea 13.5px, .input 14px, settings modal inputs 12px (inherited from label.field 12px), Nachbestellen quantity input 12px, KI-Auftrag form fields 14px. On iOS Safari, focusing any input below 16px zooms the page and leaves it zoomed, which breaks the fixed shell layout during a phone demo (e.g. typing a Copilot question). The viewport meta has no maximum-scale.",
+          "fix": "`@media (pointer:coarse){ input, select, textarea, .input { font-size:16px } }` in styles.css. Also set `label.field .input{font-size:16px}` explicitly, because label.field sets 12px and inputs inherit via `font: inherit`. In 60_ai.js, set the composer textarea to 16px on coarse pointers (keep line-height so the bar does not grow)."
+        },
+        {
+          "severity": "medium",
+          "file": "src/styles.css",
+          "title": "Toasts cover sticky action bars and the tour card on phone",
+          "evidence": "Toasts are fixed bottom-right with z-index 70, above the tour card (z 65) and the sticky wizard and KI footers. In tour step 7 on phone, the 'Störung M02 …' toast covers the tour text and its Zurück/Weiter buttons (/tmp/rv-mobile/mt-phone-c.png, left). After 'Anbindung aktivieren', the success toast covers the wizard footer's primary button 'Nächste Maschine' (/tmp/rv-mobile/mwz-b.png, right).",
+          "fix": "At ≤560px, show toasts at the top: `#toasts{top:calc(var(--top-h) + 8px); bottom:auto; left:8px; right:8px} .toast{min-width:0; max-width:none}`. In 20_app.js app.toast, when WF.tour.active, set `bottom: calc(card height + 24px)` or suppress non-critical toasts during the tour. Give toasts a swipe/tap-to-dismiss."
+        },
+        {
+          "severity": "medium",
+          "file": "src/70_tour.js",
+          "title": "Tour card on phone: step label wraps into 3 lines; on tablet it covers the Copilot during the Copilot step",
+          "evidence": "On 400px the header shows 'DEMO- / TOUR · 1 / / 11' in three lines, because the 11 progress dots (16px each) take the row (/tmp/rv-mobile/mt-phone-a.png). The card is about 270–310px tall (35% of the screen) and covers the hall and drawer it is explaining (tour-phone-03/04). On 768×1024, step 8 'Der Copilot kennt jede Zahl' places the card over the Copilot answer and composer (/tmp/rv-mobile/mt-tab-b.png, left).",
+          "fix": "In the ≤560px media block: `.tour-dots{display:none}` (keep 'n / 11' text), `.tour-step{white-space:nowrap}`, `.tour-card{padding:12px 14px} .tour-x{font-size:13px}`, and add a collapse chevron that shrinks the card to title + Weiter. When the Copilot is open (body.ai-open) and viewport ≥768px, set `.tour-card{left:16px; transform:none; width:min(560px, calc(100vw - 440px - 48px))}` so it sits left of the panel."
+        },
+        {
+          "severity": "medium",
+          "file": "src/60_ai.js",
+          "title": "Copilot and detail drawer overlap at 768/1024 px with a 40px drawer sliver peeking out",
+          "evidence": "With a drawer open (480px, inside .main) and the Copilot open (fixed, 440px, right:0), the Copilot sits on top of the drawer but 40px of it stays visible on the left ('Tie…', 'IND…', 'M02'). At 1024×768: /tmp/rv-mobile/ai-land-3-with-drawer.png; at 768×1024 in the tour: /tmp/rv-mobile/mt-tab-b.png. The 'beside' mode only helps on wide screens. On touch tablets the composer also shows keyboard-only hints ('Enter senden · Shift+Enter Zeile').",
+          "fix": "Below about 1400px, when the drawer is open, either give the panel the drawer's width (`.ai-panel{width:min(480px,100%)}` when body has a drawer open) so they align exactly, or add `visibility:hidden` to #drawer while the Copilot is open and restore it on close. Hide the keyboard hint with `@media (hover:none){.ai-kbd{display:none}}`."
+        },
+        {
+          "severity": "medium",
+          "file": "src/41_orders.js",
+          "title": "'Freigegeben' tag overlaps the progress figure on order cards at tablet width",
+          "evidence": "On 768×1024, FA-24123's 'Freigegeben' tag runs into '0 %' of the progress column (/tmp/rv-mobile/zoom-tab-or-freig.png, also visible in m-tab-auftraege-1.png). Cause: `.or-l1{display:flex}` without wrapping, and `.or-tag{flex:none}`, in a first column that is only about 125px wide at this card width. Customer names in the same column are also truncated ('Hydrava Pumpen Gm…', 'Kärntner Antriebste…').",
+          "fix": "Set `.or-l1{flex-wrap:wrap; row-gap:4px}` and `overflow:hidden` on .or-top. Or, at `@container orcard (max-width:900px)`, move the status tag into the .or-cust line, or show it as a 6px dot plus a tooltip. Consider a minimum first-column width of 190px at this container size so customer names fit."
+        },
+        {
+          "severity": "medium",
+          "file": "src/43_analyse.js",
+          "title": "'Ausstoß und Leistung im Tagesverlauf' axis labels shrink to 5.7px on phone",
+          "evidence": "On 400×860, all 16 axis texts (0/50/100/150/200, 06/07/08, 'Gutteile/h', 'kW') render at 5.7px because the chart is a fixed viewBox scaled down to about 330px (/tmp/rv-mobile/zoom-phone-analyse-chart.png). The legend also wraps into two rows in the card header. On 768px it is fine.",
+          "fix": "Render the chart in pixel space at the actual container width (read clientWidth on mount/resize, set viewBox = `0 0 ${w} ${h}`), so 11px font-size stays 11px. Or keep the viewBox and scale font-size by `VW/clientWidth` with a minimum of 10.5px effective. Move the legend under the chart on ≤560px."
+        },
+        {
+          "severity": "medium",
+          "file": "src/47_people.js",
+          "title": "'Lageplan · wer ist wo' is unreadable on phone/tablet and has no touch way to tell who is where",
+          "evidence": "On 400px, station labels ('M01', 'Rohmaterial', 'Werkzeuge', 'Instandh.') render at 5–7.4px; it is the same at 768 (7.3px) and 1024 (7.8px). Persons are plain coloured dots without initials, and identities only appear on hover, which does not exist on touch (/tmp/rv-mobile/zoom-phone-pe-lageplan.png).",
+          "fix": "On ≤900px, put the SVG in a horizontal scroller with `min-width:720px`, raise station text to 11px and area labels to 9.5px (≥10px effective), and draw the person's initials (font 9px bold) inside 16px circles. Make dots tappable (`WF.app.select('person', id)`) with a 32px invisible hit circle."
+        },
+        {
+          "severity": "medium",
+          "file": "src/30_hall3d.js",
+          "title": "Default hall framing crops stations on tablet portrait (M09, M11, M13 missing) and hides M01 in landscape",
+          "evidence": "On 768×1024 'Übersicht', the hall is horizontal and cut at both sides: M01 at the edge, Montage/M13 cut, and only 10 of 13 labels visible (M09, M11, M13 missing) (/tmp/rv-mobile/tab-halle.png). At 1024×768, the M01 label sits under the status card (land-halle.png). On phone, Montage M13 is off-screen. mobK() (line 2634) only applies 1.2× when w/h<1.25 on non-mobile, which is not enough for a 0.88 aspect ratio.",
+          "fix": "Fit the camera to the hall bounding box with the real frustum: `dist = max(halfW / tan(hfov/2), halfD / tan(vfov/2)) * 1.05`, using the canvas minus overlay insets (status card height at the top, minimap width at the bottom-left). Or, for aspect < 1 (tablet portrait), reuse the phone's rotated 'portrait' camera orientation that already frames the long axis vertically."
+        },
+        {
+          "severity": "medium",
+          "file": "src/styles.css",
+          "title": "At 360px (common Android width) the top bar overflows and every page scrolls sideways",
+          "evidence": "At 360×740, #top scrollWidth is 365 vs 360 and the document scrollWidth is 366 on all views; the settings gear is clipped at the right edge (/tmp/rv-mobile/w360-leitstand.png). This breaks the 'page never scrolls horizontally' rule on many Android phones.",
+          "fix": "Add `@media (max-width:380px){ .top{gap:6px; padding-inline:10px} .top-actions{gap:4px} #t-tour{display:none} }` and move 'Demo-Tour starten' into the settings modal and the Leitstand header. Also add `overflow:hidden` on .top so it can never widen the page."
+        },
+        {
+          "severity": "medium",
+          "file": "src/45_material.js",
+          "title": "Wide tables on tablet hide the most important column (status) with no scroll cue",
+          "evidence": "Transportaufträge is 1083px inside a 730px wrapper at 768 and 1006/772 at 1024. Its last column 'Status' (Unterwegs/Offen pills) is cut mid-pill (/tmp/rv-mobile/land-material-transport.png, m-tab-material-1.png). Rohmaterial is 1102/730: 'Bestellt' and 'Lieferant' are hidden. Similar in Analyse 'Verlustmatrix' (Summe column cut at 768) and the Aufträge KPI strip on phone (1000/400, 'OFFENE AUF…' cut).",
+          "fix": "Use the existing phone card layout (.mt-trt/.mt-mtt block rows) up to `(max-width:1100px)` instead of only on phones, or move 'Status' to the 2nd column and hide 'Gewicht'/'Mittel' below 1100px. For any remaining horizontal scroller (.tbl-wrap, .or-kpis, .pe-mx-wrap), add a right fade `mask-image:linear-gradient(90deg,#000 calc(100% - 32px),transparent)` and a sticky first column."
+        },
+        {
+          "severity": "medium",
+          "file": "src/61_ki_auftrag.js",
+          "title": "'Vergrößern' on phone does not enlarge the drawing",
+          "evidence": "On 400×860, the lightbox modal is 368px wide and shows the drawing at the same size as the inline preview; drawing text renders at about 3px with no pan or pinch (/tmp/rv-mobile/kizoom-phone.png). The drawing is the starting point of demo step 6.",
+          "fix": "On ≤640px, open the lightbox fullscreen (`.modal{width:100vw;height:100dvh;border-radius:0}`). Render the SVG at a fixed 1100px width inside `overflow:auto; touch-action:pan-x pan-y pinch-zoom`, scroll it to the title block, and add a 'Querformat empfohlen' hint. Feature balloons (1–8) should stay tappable and scroll to the feature list."
+        },
+        {
+          "severity": "medium",
+          "file": "src/40_leitstand.js",
+          "title": "Phone Leitstand is about 7.5 screens long; no compact machine list or way to jump between sections",
+          "evidence": "At 400px the view is 6280px tall. The 13 machine tiles are each about 300px (tool box, staff row, buffer bar) and are only reachable after 6 KPI tiles and 'Jetzt wichtig' (/tmp/rv-mobile/m-phone-leitstand-*.png). Material (8180px), Werkzeuge (8160px) and Personal (5820px) have the same problem. A best-in-class mobile MES shows a one-line-per-machine status list.",
+          "fix": "At ≤560px, render tiles in a compact mode: one 56px row per machine (state pill, name, order/part, ETA, small progress bar), tap to expand or open the drawer. Show the KPI tiles as a horizontal swipe strip (like Aufträge) so 'Jetzt wichtig' starts above the fold. Optionally add sticky jump chips (KPIs · Wichtig · Maschinen · Briefing)."
+        },
+        {
+          "severity": "medium",
+          "file": "src/styles.css",
+          "title": "1024px landscape: fixed 214px sidebar takes 21% of the width and drives the overflows",
+          "evidence": "At 1024×768 the sidebar stays at --side-w 214px, leaving about 774px for content. This causes the Werkzeuge/Anbindung overflows, 2-column Leitstand tiles, tables in horizontal scroll, and the hall drawer collisions (land-*.png). The side-foot text ('Fiktiver Beispielbetrieb…') uses space without adding value.",
+          "fix": "Between 901 and 1280px, collapse the sidebar to a 64px icon rail: `@media (min-width:901px) and (max-width:1280px){ :root{--side-w:64px} .nav-item span:not(.badge),.side .nav-label,.side-foot{display:none} .nav-item{justify-content:center} .nav-item .badge:not(:empty){position:absolute;...dot} }` with the title attribute as a tooltip. That adds about 150px to every view."
+        },
+        {
+          "severity": "low",
+          "file": "src/46_tools.js",
+          "title": "Wechselplan on phone: M10 row text runs out of the card; machine names truncated",
+          "evidence": "In the Wechselplan at 400px, M10's 'kein Arbeitsgang · Werkzeuge bleiben bis zum nächs…' runs past the card edge and is clipped mid-word (.tl-rs, right edge 499px vs 400px viewport) (/tmp/rv-mobile/zoom-phone-tl-plan.png). Row labels are cut to 'INDEX G2…', 'Citizen …', 'Tiefbohr…', 'Liebherr…'.",
+          "fix": "On narrow widths use a short text ('kein AG · Werkzeuge bleiben montiert') and anchor it with `text-anchor:end` at the plot's right edge, or measure with getComputedTextLength() and truncate. Widen the label column on phone to 92px and show only the short name (e.g. 'INDEX', 'Citizen'), with the machine ID on the line above."
+        },
+        {
+          "severity": "low",
+          "file": "src/30_hall3d.js",
+          "title": "Hall hint shows mouse instructions on touch tablets; Legende popover clips text",
+          "evidence": "At 1024×768 with touch, the hint reads 'Ziehen drehen · Rechte Maustaste verschieben · Mausrad zoomen · Klick Details' (land-halle.png). Tablets have no right mouse button or wheel; OrbitControls maps two-finger gestures to zoom/pan. The 340px 'Legende' popover cuts its right column ('Rüsten / Ersteilprüfun…', 'Maschinendaten → Ser…') (/tmp/rv-mobile/mh-land.png, right). The phone mbar has an unlabeled grid icon (37×34) next to 'Legende'.",
+          "fix": "Choose the hint by `matchMedia('(pointer:coarse)')`: '<b>Wischen</b> drehen · <b>Zwei Finger</b> zoomen/verschieben · <b>Tippen</b> Details' (line 2761). Widen .h3-pop to 380px or use a single column for long entries. Give the phone grid button a text label ('Reset' or 'Übersicht')."
+        },
+        {
+          "severity": "low",
+          "file": "src/47_people.js",
+          "title": "Shift timeline labels collide with pause markers and the now-line",
+          "evidence": "'Frühschicht' runs into the 09:00 pause hatch and the 08:51 now-line, and 'Spätschicht' touches the 16:00 hatch on 400px (/tmp/rv-mobile/zoom-phone-pe-shift.png). At 1024 the label 'Frühschicht 06:00–14:00' overlaps the first hatch (m-land-personal-0.png). KPI sublines are ellipsized ('1 unterwegs · 6 verfüg…', 'Arbeitszeit ÷ Anwese…').",
+          "fix": "Put shift labels above the bar (small 11px caption row), or give them a solid background pill with `z-index` above the hatches. Hide the time range on narrow widths. Allow KPI .s lines to wrap to 2 lines on ≤1100px (`white-space:normal; -webkit-line-clamp:2`)."
+        },
+        {
+          "severity": "low",
+          "file": "src/43_analyse.js",
+          "title": "Odd KPI tile counts leave orphan tiles on tablet; KPI sublines truncated on phone",
+          "evidence": "At 768px Analyse shows 4 KPIs in row 1 and 'Energie je Fertigteil' alone in row 2, with 3 empty slots (m-tab-analyse-0.png); Werkzeuge shows 3+2 (m-tab-werkzeuge-0.png). On phone, sublines are cut: 'Maschinenstundensatz × Sti…', 'am längsten verplant – bis …', '564 kWh heute · 44 Fertigte…' (phone-analyse.png).",
+          "fix": "Use `grid-template-columns:repeat(auto-fit,minmax(170px,1fr))` so 5 tiles spread as 3+2 filled rows, or make the 5th tile span the remaining columns (`.kpi:last-child:nth-child(4n+1){grid-column:1/-1}`). Let `.kpi .s` wrap to 2 lines below 560px."
+        },
+        {
+          "severity": "low",
+          "file": "src/styles.css",
+          "title": "Several text styles drop to 9–9.5px on phone",
+          "evidence": "Computed on 400px: .eyebrow 9.5px in module overrides ('Schicht', 'Logistik'), Leitstand .ls-area/.ls-arr 9.5px ('Zuschnitt', 'EIN/AUS' buffer labels), Material .mt-cg-sl 9.5px ('Ausgang · 1 / 4'), AGV 'Akku' 9px, avatars 9.5px, Personal timeline ticks 9.5px. Anbindung explicitly shrinks matrix labels to 9.5px at ≤560px (50_connect.js line 144: `.cn-mn{font-size:9.5px}`). The AGV drawer chart axis is 7.9–8.3px.",
+          "fix": "Set a 10.5px floor for uppercase labels and 11px for body micro-text on ≤560px: `.eyebrow,.kpi .l{font-size:10.5px}` in styles.css, and remove the 9–9.5px overrides in 40_leitstand (.ls-area, .ls-arr), 45_material (.mt-cg-sl, gauge 'Akku'), 47_people (timeline ticks) and 50_connect (line 144). Render the AGV battery chart in pixel space so ticks are at least 10px."
+        }
+      ]
+    },
+    {
+      "lens": "consistency",
+      "summary": "Lens: data consistency, robustness and performance. I built my own copy at /tmp/rv-consistency.html; screenshots are in /tmp/rv-consistency/ and the Playwright and Node scripts in /tmp/claude-0/-home-user-Jakob-Robot-Vision/6ef6b142-22da-5500-b3f8-4cbdfc06f256/scratchpad/rvcons/ (dump.js plus an1–an3.js, idle.mjs, long.js, kbd.js, company.js, perf2.js, prof.js, night.mjs).\n\nWhat I checked at 6 sim times (Mo 08:40, 10:37, 13:58, 18:12, 23:31, Di 07:03): the DOM numbers for every machine and order, compared with WF.sim and across views. Machine state, part X/Y, op ETA, tool wear and remaining parts, per-machine OEE, order due date/forecast/risk/progress, KPI tiles, people counts and stock levels all match between Leitstand, Halle labels, Aufträge, Analyse, Werkzeuge, Personal, the drawers and the offline Copilot. All views read the same machineView/orderView.\n\nRobustness:\n- 24 sim hours at 600× (real loop, cycling all views), then WF.sim.reset(), then a company/site rename: 0 console errors or warnings, 0 pageerrors, engineErrors stays 0.\n- Memory: JS heap stays at 44–49 MB after GC over 25 sim hours. DOM is stable at about 11–13k nodes once all views are mounted. No leak.\n- Keyboard: Esc closes the drawer and keeps focus on the tile; focus-visible outlines (2 px accent) are present; P toggles pause.\n- update() cost over 200 calls: mean 0.3–2.3 ms for every view except Werkzeuge.\n\nThe real problems are where modules use their own definitions instead of one engine value (bottleneck, 'Los fertig', 'frei ab'). There are also ghost-shift semantics (OEE 100 % and 'autonome Maschinen laufen' while the whole hall stands still), an order book that runs dry, a broken keyboard mapping and rename leaks.\n\nThe Halle frame measurements (0.8 fps; 367 draw calls, 132k triangles; render() JS call 5–7 ms) come from software GL (swiftshader). That is mostly the environment, so I only reported the frame-rate coupling of the sim clock that it exposed.",
+      "findings": [
+        {
+          "severity": "high",
+          "file": "src/10_sim.js",
+          "title": "The order book runs dry: after about 1.5 sim days the factory sits idle permanently",
+          "evidence": "Node run (rvcons/idle.mjs), counting open orders and machine states:\n- Mo 08:40: 12 open, 12 running.\n- Mo 16:40: 8 open; 7 running, 5 Bereit.\n- Di 12:40: 5 open; 9 of 13 Bereit.\n- Di 16:40: 3 open; 10 Bereit.\n- Mi 20:40 and later: 0 open, 13/13 Bereit, OEE shows '–' forever.\nThe same thing is visible in the app. At Mo 13:58 Leitstand and Halle show 7 of 13 machines 'Bereit' (/tmp/rv-consistency/t2-halle.png: 'IN PRODUKTION 3/13 · 3 Rüsten · 7 bereit'). At Di 07:03 Analyse shows 5 machines with OEE '–' (/tmp/rv-consistency/t5-analyse.png).\nThere is no order intake in the engine: orderAdded only fires from actions.addOrder. At 600× the hall is half empty after about 1 real minute and completely empty after about 6 minutes; at 120× after about 30 minutes. That is fatal for a booth or startup-program screen left running.",
+          "fix": "Add a deterministic order intake in 10_sim:\n- At every shift start, or whenever open orders drop below about 10, release a new order cloned from a template pool in 05_profile (new FA number, seeded qty variation, due = now + 2–4 working days).\n- Emit 'orderAdded' and an 'Auftragseingang' event so the Leitstand feed and Copilot see it.\nAlso add a 'Demo-Endlosschleife' setting in 20_app that calls WF.sim.reset() when the sim passes e.g. Di 14:00.\nMention both in README."
+        },
+        {
+          "severity": "high",
+          "file": "src/43_analyse.js",
+          "title": "Analyse 'Engpass' KPI is wrong (dead branch) and contradicts Copilot and Leitstand",
+          "evidence": "bottleneck() (around lines 251–268) counts fc.orders[id].bottleneck, but that field is a label such as \"M07 Tiefbohren (AG 30 „Tieflochbohren Ø20 × 200“)\" (verified with rvcons/bn.mjs). It then looks up WF.profile.stationById[label], which is always undefined, so the function always falls back to 'am längsten verplant'.\n- Mo 08:40, Analyse header: 'ENGPASS Studer S33 – am längsten verplant – bis Mi 19:05' (/tmp/rv-consistency/v0-analyse.png).\n- Same moment, Leitstand 'Termin gefährdet' card: 'Engpass: M07 Tiefbohren' (/tmp/rv-consistency/v0-leitstand.png).\n- Copilot 'Was ist der Engpass?': 'Engpass: M07 Tiefbohren – Arbeitsinhalt ca. 29 h 21 min'.\n- Di 07:03, Analyse still says 'Engpass Studer S33 … bis morgen 18:28' while Studer S33 shows OEE 0 % and 5 machines are idle (/tmp/rv-consistency/t5-analyse.png).",
+          "fix": "Use one definition everywhere. Preferably add `WF.sim.bottleneck()` (or `forecast().bottleneckStation`) to the engine with the Copilot's rule: largest remaining work content, with the station of the latest or at-risk order winning ties. Use it in 43_analyse, 60_ai and the Aufträge KPI.\nMinimum fix: replace `count[o.bottleneck]` with `count[o.bottleneck.split(' ')[0]]` and weight late/knapp orders higher.\nChange the sub-text to e.g. 'Arbeitsvorrat 29 h · begrenzt FA-24122 (verspätet)'."
+        },
+        {
+          "severity": "high",
+          "file": "src/10_sim.js",
+          "title": "Ghost shift shows 'OEE 100 %' and no stop costs while every machine is stopped",
+          "evidence": "Mo 23:31, Leitstand OEE tile: '78,5 % · Ziel 75 % · +3,5 Pkt. · Geisterschicht 100 %' next to the chips '0 Produktion · 7 Wartet · 6 Bereit' (/tmp/rv-consistency/t4-leitstand.png). kpis().oeeShift = 1; machineView('M02').oeeShift = {oee:1, availability:1, plannedSec:2129} although M02 has been in waitTool since 22:35.\nCause: statsTick (around line 2677) counts planned time outside shifts only while 'running', so ghost-shift availability is always 100 %. lossEur also does not accrue: it stays at 1.993 € from 23:31 to 23:59 (rvcons/night.mjs). Yet the open notification wait:M02 says 'Stillstandskosten ca. 110 € / h'. This undermines the ghost-shift story, one of the key selling points.",
+          "fix": "In statsTick, outside shifts, count a second as planned when the machine has an op assigned and loading === 'auto' (it should be running unattended) and its state is not 'idle'. Accrue lossEur the same way, or drop the €/h phrase from ghost-shift notifications.\nIn 40_leitstand.js line 792, show 'Geisterschicht –' when nothing ran, or 'Geisterschicht: 0 von 4 eingeplanten laufen'."
+        },
+        {
+          "severity": "medium",
+          "file": "src/30_hall3d.js",
+          "title": "Fixed text 'autonome Maschinen laufen (weiter)' appears while 0 machines run (Halle, Leitstand, Personal, Copilot)",
+          "evidence": "Mo 23:31, 0 machines running:\n- Halle HUD: 'Keine Schicht · autonome Maschinen laufen · Schichtbeginn Di 06:00' directly above 'IN PRODUKTION 0/13 · 7 wartend' (/tmp/rv-consistency/t4-halle.png; 30_hall3d.js:3255).\n- Leitstand staff tile: 'Niemand im Dienst · autonome Maschinen laufen weiter' (40_leitstand.js:722; t4-leitstand.png).\n- Personal: 'bis dahin laufen nur autonome Maschinen (Stangenlader, Palette, Portallader) weiter' (47_people.js:722 / empty state).\n- Copilot overview (60_ai.js:569) says 'kein Arbeitsplatz produziert' and, in the same answer, 'autonome Maschinen laufen weiter'.",
+          "fix": "Derive the text from live data: n = count of machines with state === 'running'.\n- n > 0: '${n} Maschinen laufen unbemannt'.\n- n = 0: 'alle Maschinen stehen – ${k} warten auf Werkzeug/Bediener bis 06:00'.\nApply the same rule in 30_hall3d (HUD), 40_leitstand (staffSub), 47_people (shSub and empty state) and 60_ai (line 569)."
+        },
+        {
+          "severity": "medium",
+          "file": "src/10_sim.js",
+          "title": "Planned tool change says 'Maschine steht ab ca. 23:31' when it has stood since 22:35",
+          "evidence": "At Mo 23:31, machineView('M02') returns plannedChange.waitFromT = 84660 (= 23:31, clamped to now) and text 'nach Teil 56 · frühestens Di 06:00 (Frühschicht) – Maschine steht ab ca. 23:31 (Wartet auf Werkzeug)' (rvcons/night.mjs).\nCopilot 'Was macht M02?' then contradicts itself in one answer: 'Wartet auf Werkzeug seit 56 min (22:35)' … 'Maschine steht ab ca. 23:31'. The waitFromT value moves forward with the clock every tick.",
+          "fix": "In the plannedChange builder, if the machine is already in waitTool for this change, set waitFromT = m.since and phrase it 'steht seit 22:35'. Never clamp a past stop to S.t. Also use the past tense in 40_leitstand toolLine ('Stopp seit …')."
+        },
+        {
+          "severity": "medium",
+          "file": "src/48_quality.js",
+          "title": "Qualität 'Los fertig ca.' uses a different time than the Leitstand and the queue",
+          "evidence": "48_quality.js:465 prints mv.etaBusyEnd as 'Los fertig'. The same QS job shows different times on different screens:\n- Mo 08:40: Qualität 'FA-24120 · AG 30 · Pumpengehäuse · 3/30 Stk · Los fertig ca. 10:45' (/tmp/rv-consistency/v0-qualitaet.png). Leitstand QS tile: 'Teil 4 von 30 · fertig ca. 18:55' (etaOpEnd). The queue chip in the same card: 'FA-24120 6 Stk · ca. 24 min' (→ 09:04). Halle label: 'QS Messraum 4/30'.\n- 10:37: '16/50 · Los fertig 12:34' vs tile 'fertig ca. 15:08'.\n- 23:31: 'Di 06:14' vs 'Di 11:11'.",
+          "fix": "Show 'Arbeitsgang fertig ca. 18:55' from mv.etaOpEnd, the same value as Leitstand and Aufträge. If occupancy matters, show it separately as 'Messraum belegt bis ca. 10:45'. Give queue chips a clock time ('fertig ca. 09:04') instead of a bare duration. Use 'Teil 4 von 30' or '3/30 geprüft' wording consistently with the Leitstand."
+        },
+        {
+          "severity": "medium",
+          "file": "src/61_ki_auftrag.js",
+          "title": "Live-Belegung 'frei ab' shows idle machines as busy until tomorrow",
+          "evidence": "emptyHtml() (around lines 2410–2413) uses free = max(end) over all forecast entries.\n- M10 Okamoto ACC is 'Bereit' with no order at 10:37, 13:58, 18:12 and 23:31, yet KI-Auftrag shows 'M10 Okamoto ACC frei ab morgen 21:53' the whole time.\n- M09 Studer is 'Bereit' at 10:37 but shows 'frei ab Mi 19:04'.\n- M11 Waschanlage shows 'frei ab Mi 11:07' while idle.\nCompare /tmp/rv-consistency/t1-ki-auftrag.png with /tmp/rv-consistency/t1-leitstand.png. A prospect sees the Leitstand say 'Bereit' and KI-Auftrag say busy until tomorrow night.",
+          "fix": "Compute the first free window from fc.machines sorted by start: the first gap ≥ 2 h after now. Show 'jetzt frei · bis morgen 13:20' or 'frei ab 14:17'. If the last booking end is still wanted, label it 'verplant bis morgen 21:53' and add utilisation, e.g. '35 % belegt'."
+        },
+        {
+          "severity": "medium",
+          "file": "src/20_app.js",
+          "title": "Number keys are shifted by the Analyse view; KI-Auftrag has no key and the docs are wrong",
+          "evidence": "Playwright (rvcons/kbd.js): 1→leitstand, 2→halle, 3→auftraege, 4→analyse, 5→material, 6→werkzeuge, 7→personal, 8→qualitaet, 9→anbindung. KI-Auftrag (10th view, the demo finale) cannot be reached by key.\nThe keydown handler uses WF.views[Number(key)-1], and Analyse has order 3.5. README says 'Tasten 1–9 wechseln die Ansicht'; UI_GUIDE says 'material 4 … ki-auftrag 9'. A presenter pressing 9 for KI-Auftrag lands on Anbindung.",
+          "fix": "Map digits explicitly: 1–9 to the integer orders 1..9 (Material = 4, KI-Auftrag = 9), and give Analyse '0' or 'A'. Alternatively add '0' for the 10th view. Show the key in each nav item's title ('Leitstand · 1') and fix README and UI_GUIDE."
+        },
+        {
+          "severity": "medium",
+          "file": "src/30_hall3d.js",
+          "title": "Company/site rename does not reach the Halle HUD or the Copilot data",
+          "evidence": "After saving 'Musterbau Stahl GmbH' / 'Werk Linz · 4020 Linz' in Einstellungen, the top bar and Leitstand update, but the Halle HUD still reads 'Werk Donaustadt' (/tmp/rv-consistency/company-halle.png; 30_hall3d.js:2714 uses P.company.site).\nWF.sim.snapshot().company still returns 'Donau Präzisionstechnik GmbH' (10_sim.js:3462). With live Claude, the system prompt names the new company (60_ai.js:2142) but the JSON data names the old one.\nThe reset event 'Simulation gestartet – Donau Präzisionstechnik GmbH' (10_sim.js:395) also keeps the profile name.",
+          "fix": "In 30_hall3d, use WF.app.company().site (or short site) for the HUD title and re-render on WF.bus 'settings'. In 60_ai, override `snap.company = WF.app.company().name` (plus site) before sending the context. Make the reset event message company-neutral ('Simulation gestartet – Frühschicht')."
+        },
+        {
+          "severity": "medium",
+          "file": "src/10_sim.js",
+          "title": "A producing machine shows 0 % OEE because performance is credited only at part end",
+          "evidence": "Di 07:03, Analyse 'OEE je Maschine': 'Studer S33 0 % · V 49 % · L 0 % · Q 100 %' while M09 is in 'Produktion' on Teil 4/12 (/tmp/rv-consistency/t5-analyse.png). This drags Werk-OEE to 61,2 %. oeeOf() computes performance = ideal / run, and ideal only grows when a part completes. With 38–62 min cycles (M07, M09) the value is 0 % or saw-toothed for the first hour of every day and shift.",
+          "fix": "In oeeOf / kpis, add the ideal time of the in-process part pro rata (op.cycleMin × 60 × part progress, capped at the cycle) to ideal for kd/ks. Alternatively return performance null, rendered as '–', until the first part of the period completes. Analyse then shows '–' instead of a red 0 %."
+        },
+        {
+          "severity": "low",
+          "file": "src/46_tools.js",
+          "title": "Werkzeuge update() is about 5–10× costlier than other views because renderPlan rebuilds the whole SVG",
+          "evidence": "200 calls of update() with WF.sim.advance(8) between them: Werkzeuge mean 8.6 ms, p95 23 ms, p99 110 ms, max 136 ms, 18 of 200 above 16 ms. Every other view: mean ≤ 2.3 ms, p95 ≤ 6 ms (rvcons/perf2.js).\nCPU profile (rvcons/prof.js): renderPlan self time 967 ms of 1,599 ms total. Its signature includes Math.floor(now/30), so the whole Wechselplan SVG innerHTML is rebuilt every 30 sim-seconds, which is every tick at ≥ 120×.",
+          "fix": "Split the static plan from the 'Jetzt' marker:\n- Rebuild rows and hatches only when the machine/group signature or a 5-minute window bucket changes.\n- Move the now line, now label and past shading via setAttribute(x/width) or a CSS transform on each tick."
+        },
+        {
+          "severity": "low",
+          "file": "src/20_app.js",
+          "title": "Sim speed depends on frame rate: '600×' is not achieved on slow frames",
+          "evidence": "loop() clamps dt to 0.1 s and advances the sim with the same dt × speed. Measured with Tempo 600× (software GL): Halle 24 sim-s per real second, Analyse 113. A 24-hour run took 363 s instead of 144 s, about 250× (rvcons/halle.js, long.js). On a weak demo laptop or a screen-shared session the clock runs visibly slower than the selected speed.",
+          "fix": "Advance the sim with real elapsed time (performance.now delta, capped at about 2 s for tab switches) independent of the render dt. Keep the 0.1 s clamp only for frame() animations."
+        },
+        {
+          "severity": "low",
+          "file": "src/40_leitstand.js",
+          "title": "Pulse animations animate box-shadow and repaint every frame",
+          "evidence": "40_leitstand.js:117 runs 'lsPulse … infinite' on box-shadow for every running tile (12 at once). Leitstand frame rate with the sim paused (software raster): 5 fps; with animations disabled 13 fps; with filters/shadows also off 29.5 fps; a blank page runs at 60 fps (rvcons/fps.js). The same pattern exists in orPulse (41_orders) and mtFlow/mtSd (45_material, 13 + 12 running animations).",
+          "fix": "Animate transform: scale and opacity of a ::after ring (compositor-only) instead of box-shadow. Alternatively pulse only attention states (fault/wait) and not the 12 normal 'Produktion' pills."
+        },
+        {
+          "severity": "low",
+          "file": "src/47_people.js",
+          "title": "KPI 'Arbeiten gerade' sub-line wording reads as if available people are part of the working count",
+          "evidence": "Mo 08:40: 'ARBEITEN GERADE 6 / 10 · davon 1 in Bereitschaft · 1 unterwegs · 3 verfügbar' (/tmp/rv-consistency/v0-personal.png; 47_people.js:884). The legend on the same screen says 'Arbeitet 6 · Unterwegs 1 · Verfügbar 3'. 'davon' only applies to the first item, but readers apply it to all three.",
+          "fix": "Write 'davon 1 in Bereitschaft' and put the rest on a separate clause, e.g. 'außerdem 1 unterwegs · 3 verfügbar', or split into two lines."
+        },
+        {
+          "severity": "low",
+          "file": "src/45_material.js",
+          "title": "Material 'Entnahme heute' and Copilot 'Verbrauch heute' differ for bar stock",
+          "evidence": "MAT-TI10 at Mo 13:40: the Material table and drawer show 'Entnahme heute 6,0 m · 870 €' (UI ledger of store withdrawals). The Copilot shows 'Verbrauch heute: 15,0 m' (engine usedToday = 14.95). The Copilot also says 'Bedarf ca. 0,5 m – FA-24117: 70 × 0,050 m', which arithmetically is 3,5 m; the magazine deduction is not explained (rvcons/ti.js).",
+          "fix": "Show both values with clear labels in the table and drawer: 'Verbrauch 15,0 m (Maschine) · aus Lager entnommen 6,0 m'. In 60_ai, explain the deduction: '70 × 0,050 m = 3,5 m, davon 3,0 m im Stangenmagazin'."
+        },
+        {
+          "severity": "low",
+          "file": "src/30_hall3d.js",
+          "title": "Halle HUD KPI labels are truncated at 1440 px",
+          "evidence": "/tmp/rv-consistency/v0-halle.png shows 'IN PRODUKT…' and '1 Stapler · 1 w…'. /tmp/rv-consistency/t4-halle.png shows '7 wartend · 6 …' and 'niemand im …'.",
+          "fix": "Widen the status card by about 40 px or allow the sub-line to wrap to 2 lines. Shorten the texts ('Produktion', '1 Stapler, 1 wartet', '6 bereit')."
+        },
+        {
+          "severity": "low",
+          "file": "src/43_analyse.js",
+          "title": "'Energie je Fertigteil' is dominated by overnight base load in the morning",
+          "evidence": "08:40: '12,87 kWh · 515 kWh heute · 40 Fertigteile'. 10:37: '4,90 kWh'. 13:58: '4,55 kWh' (dump). The numerator includes 00:00–06:00 base and ghost-shift consumption, so the KPI drops nearly 3× within 2 hours and looks alarming at demo start.",
+          "fix": "Compute it per running shift or per machine production energy, or label it 'inkl. Grundlast seit 00:00'. A trailing 8-hour window would also give a stable value."
+        }
+      ]
+    }
+  ],
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Review"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "review:mobile",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "af38370867485c2c8",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1792201757988,
+      "queuedAt": 1792201757929,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "I reviewed werkfluss on mobile and tablet: phone 400×860, t…",
+      "promptPreview": "You review \"werkfluss\", an AI-native MES demo for Austrian SME manufacturers (fictional Vienna job shop, simulated live). It will be shown to real prospects and at a startup program; the product owner's top priority now is VISUAL quality (\"vor allem optisches Improvement\"), plus clear dashboards, felt connection between machines (material + information flow), insight into machines/tools/stock/peop…",
+      "promptFramed": true,
+      "lastProgressAt": 1792204192103,
+      "tokens": 345336,
+      "toolCalls": 169,
+      "durationMs": 2434114,
+      "resultPreview": "{\"summary\":\"I reviewed werkfluss on mobile and tablet: phone 400×860, tablet portrait 768×1024 and landscape 1024×768. I built /tmp/rv-mobile.html, drove every view, all 7 drawer kinds, the Copilot, notifications, settings, the 11-step tour, the KI-Auftrag analysis, the Anbindung wizard, the Plantafel, TV mode, modals and the 3D hall controls, and looked at every screenshot (all in /tmp/rv-mobile/…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "review:consistency",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "a9d75bd78114515c0",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1792201757988,
+      "queuedAt": 1792201757930,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Lens: data consistency, robustness and performance. I built…",
+      "promptPreview": "You review \"werkfluss\", an AI-native MES demo for Austrian SME manufacturers (fictional Vienna job shop, simulated live). It will be shown to real prospects and at a startup program; the product owner's top priority now is VISUAL quality (\"vor allem optisches Improvement\"), plus clear dashboards, felt connection between machines (material + information flow), insight into machines/tools/stock/peop…",
+      "promptFramed": true,
+      "lastProgressAt": 1792203766637,
+      "tokens": 339895,
+      "toolCalls": 108,
+      "durationMs": 2003647,
+      "resultPreview": "{\"summary\":\"Lens: data consistency, robustness and performance. I built my own copy at /tmp/rv-consistency.html; screenshots are in /tmp/rv-consistency/ and the Playwright and Node scripts in /tmp/claude-0/-home-user-Jakob-Robot-Vision/6ef6b142-22da-5500-b3f8-4cbdfc06f256/scratchpad/rvcons/ (dump.js plus an1–an3.js, idle.mjs, long.js, kbd.js, company.js, perf2.js, prof.js, night.mjs).\\n\\nWhat I ch…"
+    }
+  ],
+  "totalTokens": 685231,
+  "totalToolCalls": 277
+}

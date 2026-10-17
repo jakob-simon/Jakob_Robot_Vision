@@ -12,6 +12,10 @@
   .an-grid.even{grid-template-columns:repeat(2,minmax(0,1fr))}
   @media (max-width:1100px){.an-grid,.an-grid.even{grid-template-columns:minmax(0,1fr)}}
   .an-sec{margin-top:14px}
+  .an-kpis{grid-template-columns:repeat(5,minmax(0,1fr))}
+  @media (max-width:1180px){.an-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
+  @media (max-width:640px){.an-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.an-kpis .kpi:last-child:nth-child(odd){grid-column:1/-1}}
+  .an-flow{width:100%;display:block}
   .an-bars{display:grid;grid-template-columns:minmax(84px,max-content) minmax(60px,1fr) max-content max-content;gap:7px 12px;align-items:center}
   .an-row{display:contents}
   .an-row.click .an-l{cursor:pointer}.an-row.click:hover .an-l{color:var(--text)}
@@ -75,7 +79,7 @@
     blocked: 'Fertige Behälter werden nicht abgeholt. AGV-Prioritäten anpassen oder Pufferplätze erweitern.',
   };
 
-  let root, range = 'kd', sig = '', tip = null;
+  let root, range = 'kd', sig = '', tip = null, flowW = 640;
   const S = () => WF.sim.state;
   const machines = () => WF.profile.machines.filter(id => S().machines[id]);
   const stats = (m) => (range === 'ks' ? m.ks : m.kd) || {};
@@ -163,7 +167,7 @@
       hours[k].good += h.good[i] || 0; hours[k].kw.push(h.powerKw[i]); if (h.oee[i] != null) hours[k].oee = h.oee[i];
     }
     if (!hours.length) return '<div class="empty">Die Schicht hat gerade erst begonnen.</div>';
-    const W = 640, H = 210, left = 40, right = 44, top = 26, bottom = 26;
+    const W = Math.max(300, Math.round(flowW || 640)), H = W < 480 ? 190 : 210, left = 40, right = 44, top = 26, bottom = 26;
     const maxG = Math.max(10, ...hours.map(x => x.good)), gStep = niceStep(maxG / 4), gMax = Math.ceil(maxG / gStep) * gStep;
     const kws = hours.map(x => x.kw.length ? x.kw.reduce((a, b) => a + b, 0) / x.kw.length : null);
     const maxK = Math.max(50, ...kws.filter(v => v != null)), kStep = niceStep(maxK / 4), kMax = Math.ceil(maxK / kStep) * kStep;
@@ -183,7 +187,7 @@
     if (pts.length > 1) g += `<polyline points="${pts.join(' ')}" style="fill:none;stroke:var(--info)" stroke-width="2" stroke-linejoin="round"/>`;
     const lastI = kws.map((v, i) => v != null ? i : -1).filter(i => i >= 0).pop();
     if (lastI != null) g += `<circle cx="${left + lastI * bw + bw / 2}" cy="${yk(kws[lastI])}" r="3.5" style="fill:var(--info)"/>`;
-    return `<svg class="an-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Ausstoß und Leistung je Stunde">${g}
+    return `<svg class="an-chart an-flow" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Ausstoß und Leistung je Stunde">${g}
       <text x="${left}" y="10">Gutteile/h</text><text x="${W - right + 6}" y="10">kW</text></svg>`;
   }
   function matrixHtml(rows) {
@@ -223,19 +227,21 @@
     const lossTotal = rows.reduce((a, r) => a + r.eur, 0);
     const top = par.items[0];
     const bott = bottleneck();
-    const energyPerPart = k.goodFinished > 0 ? k.energyKwh / k.goodFinished : null;
+    // Fertigungsenergie (Maschinen, ohne Hallen-Grundlast) je Fertigteil – stabil über den Tag
+    const machEnergy = WF.profile.machines.reduce((a, id) => { const m = S().machines[id]; return a + (m && m.kd ? m.kd.energyKwh || 0 : 0); }, 0);
+    const energyPerPart = k.goodFinished > 0 ? machEnergy / k.goodFinished : null;
     // Neu zeichnen höchstens je 2 Sim-Minuten (ruhiges Bild, Tooltips bleiben stehen)
     const sigNow = range + '|' + Math.floor(S().t / 120);
     if (sigNow === sig) return;
     sig = sigNow;
     const oo = range === 'ks' ? { oee: k.oeeShift } : k;
     root.querySelector('.an-body').innerHTML = `
-      <div class="kpis">
+      <div class="kpis an-kpis">
         <div class="kpi"><div class="l">Verlust ${range === 'ks' ? 'Schicht' : 'heute'}</div><div class="v">${U.fmtNum(lossTotal)}<small>€</small></div><div class="s">Maschinenstundensatz × Stillstand bei eingeplantem Auftrag</div></div>
         <div class="kpi"><div class="l">Größte Ursache</div><div class="v" style="font-size:22px">${top ? esc(top.label) : '–'}</div><div class="s">${top ? U.fmtEur(top.eur) + ' · ' + U.fmtPct(par.total ? top.eur / par.total : 0) + ' des Verlusts' : 'keine Verluste'}</div></div>
         <div class="kpi"><div class="l">Werk-OEE</div><div class="v">${oo.oee == null ? '–' : U.fmtNum(oo.oee * 100, 1)}<small>%</small></div><div class="s">${range === 'ks' ? 'laufende Schicht' : `V ${pct0(k.availability)} × L ${pct0(k.performance)} × Q ${pct0(k.quality)}`}</div></div>
         <div class="kpi"><div class="l">Engpass</div><div class="v" style="font-size:22px">${bott ? esc(bott.short) : '–'}</div><div class="s">${bott ? esc(bott.why) : 'kein eindeutiger Engpass'}</div></div>
-        <div class="kpi"><div class="l">Energie je Fertigteil</div><div class="v">${energyPerPart != null ? U.fmtNum(energyPerPart, 2) : '–'}<small>kWh</small></div><div class="s">${U.fmtNum(k.energyKwh)} kWh heute · ${U.fmtNum(k.goodFinished)} Fertigteile</div></div>
+        <div class="kpi"><div class="l">Energie je Fertigteil</div><div class="v">${energyPerPart != null ? U.fmtNum(energyPerPart, 2) : '–'}<small>kWh</small></div><div class="s">${U.fmtNum(machEnergy)} kWh Maschinen · ${U.fmtNum(k.goodFinished)} Fertigteile</div></div>
       </div>
       <div class="an-sec an-grid">
         <div class="card"><div class="card-h"><h3>Wo verlieren wir Geld? – Verlustursachen</h3><span class="muted">€ · Maschinenzeit · kumuliert</span></div><div class="card-b">${paretoSvg(par)}</div></div>
@@ -244,28 +250,32 @@
       <div class="an-sec"><div class="eyebrow" style="margin:4px 0 8px">Empfehlungen aus den größten Verlusten</div>${recos(rows, par)}</div>
       <div class="an-sec card"><div class="card-h"><h3>Verlustmatrix Maschine × Ursache</h3><span class="muted">Euro ${range === 'ks' ? 'laufende Schicht' : 'heute'} · dunkler = mehr</span></div><div class="card-b">${matrixHtml(rows)}</div></div>
       <div class="an-sec an-grid even">
-        <div class="card"><div class="card-h"><h3>Ausstoß und Leistung im Tagesverlauf</h3><div class="an-legend"><span><i style="background:var(--st-run)"></i>Gutteile je Stunde</span><span><i style="background:var(--info)"></i>Ø Leistung kW</span></div></div><div class="card-b">${flowSvg()}</div></div>
+        <div class="card"><div class="card-h"><h3>Ausstoß und Leistung im Tagesverlauf</h3><div class="an-legend"><span><i style="background:var(--st-run)"></i>Gutteile je Stunde</span><span><i style="background:var(--info)"></i>Ø Leistung kW</span></div></div><div class="card-b an-flowbox">${flowSvg()}</div></div>
         <div class="card"><div class="card-h"><h3>Energie je Maschine heute</h3><span class="muted">kWh · je Gutteil</span></div><div class="card-b">${energySvg(oee)}</div></div>
       </div>`;
+    // Diagramm in Pixelbreite des Containers zeichnen (Schrift bleibt auch auf dem Handy lesbar)
+    const fb = root.querySelector('.an-flowbox');
+    if (fb && fb.clientWidth) { const w = fb.clientWidth - 28; if (Math.abs(w - flowW) > 8) { flowW = w; sig = ''; render(); } }
   }
+  /** Engpass: eine Definition für alle Ansichten (Engine), Fallback aus der Prognose. */
   function bottleneck() {
+    if (WF.sim.bottleneck) {
+      let b = null; try { b = WF.sim.bottleneck(); } catch (e) { b = null; }
+      if (b && b.stationId) return { id: b.stationId, short: b.short || (WF.profile.stationById[b.stationId] || {}).short || b.stationId, why: b.why || '' };
+    }
     let fc; try { fc = WF.sim.forecast(); } catch (e) { fc = null; }
     const count = {};
-    if (fc) for (const id in fc.orders) { const o = fc.orders[id]; if (o && o.bottleneck && !o.done) count[o.bottleneck] = (count[o.bottleneck] || 0) + 1; }
+    if (fc) for (const id in fc.orders) {
+      const o = fc.orders[id]; if (!o || o.done) continue;
+      const sid = o.bottleneckStation || (typeof o.bottleneck === 'string' ? o.bottleneck.split(' ')[0] : null);
+      if (!sid || !WF.profile.stationById[sid]) continue;
+      count[sid] = (count[sid] || 0) + (o.late ? 3 : (o.slackSec != null && o.slackSec < 4 * 3600 ? 2 : 1));
+    }
     const best = Object.entries(count).sort((a, b) => b[1] - a[1])[0];
-    if (best) {
-      const id = best[0], st = WF.profile.stationById[id];
-      if (st) return { id, short: st.short, why: `begrenzt ${best[1]} Auftr${best[1] === 1 ? 'ag' : 'äge'} laut Prognose` };
-    }
-    // Sonst: die am längsten verplante Bearbeitungsmaschine
-    let top = null;
-    if (fc) for (const id in fc.machines) {
-      const st = WF.profile.stationById[id]; if (!st || st.kind !== 'machine') continue;
-      const list = fc.machines[id] || []; if (!list.length) continue;
-      const end = Math.max(...list.map(x => x.end || 0));
-      if (!top || end > top.end) top = { id, short: st.short, end };
-    }
-    return top ? { id: top.id, short: top.short, why: 'am längsten verplant – bis ' + U.fmtDue(top.end, S().t) } : null;
+    if (!best) return null;
+    const st = WF.profile.stationById[best[0]];
+    const n = Object.values(fc.orders).filter(o => o && !o.done && (o.bottleneckStation || (typeof o.bottleneck === 'string' ? o.bottleneck.split(' ')[0] : '')) === best[0]).length;
+    return { id: best[0], short: st.short, why: `begrenzt ${n} Auftr${n === 1 ? 'ag' : 'äge'} laut Prognose` };
   }
 
   WF.registerView({
@@ -292,6 +302,7 @@
         tip.style.top = (e.clientY + 14) + 'px';
       });
       r.addEventListener('mouseleave', () => { if (tip) { tip.remove(); tip = null; } });
+      window.addEventListener('resize', () => { sig = ''; });
       render();
     },
     show() { sig = ''; },

@@ -26,6 +26,7 @@
   css(`
 .h3-root{position:absolute;inset:0;overflow:hidden;background:var(--bg);-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;contain:layout paint}
 .h3-cv{position:absolute;inset:0;display:block;width:100%;height:100%;outline:none;touch-action:none}
+.h3-vig{position:absolute;inset:0;pointer-events:none;background:radial-gradient(130% 105% at 50% 46%,transparent 58%,rgba(5,9,18,.34) 100%)}
 .h3-root.hov .h3-cv{cursor:pointer}
 .h3-root.drag .h3-cv{cursor:grabbing}
 .h3-glass{background:color-mix(in srgb,var(--panel) 80%,transparent);-webkit-backdrop-filter:blur(16px) saturate(1.25);backdrop-filter:blur(16px) saturate(1.25);border:1px solid color-mix(in srgb,var(--line2) 80%,transparent);border-radius:12px;box-shadow:0 14px 34px rgba(2,6,16,.38),inset 0 1px 0 color-mix(in srgb,white 5%,transparent)}
@@ -42,8 +43,8 @@
 @keyframes h3pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--st-run) 60%,transparent)}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}
 .h3-ttl{font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .h3-clock{margin-left:auto;font:600 21px/1 var(--f-cond);font-variant-numeric:tabular-nums;letter-spacing:.02em;white-space:nowrap}
-.h3-shift{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.h3-shift b{font-weight:600;color:var(--text2)}
+.h3-shift{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-size:12px;line-height:1.38;color:var(--muted);margin-top:5px;overflow:hidden}
+.h3-shift b{font-weight:600;color:var(--text2);margin-right:6px}
 .h3-shift.br b{color:var(--st-wait)}
 .h3-kv{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;margin-top:10px;border:1px solid color-mix(in srgb,var(--line2) 70%,transparent);border-radius:9px;background:color-mix(in srgb,var(--bg) 35%,transparent)}
 .h3-kv>div{min-width:0;padding:8px 9px 7px}
@@ -51,7 +52,7 @@
 .h3-kv .l{display:block;font:600 9.5px/1.2 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .h3-kv b{display:block;font:600 22px/1.05 var(--f-cond);font-variant-numeric:tabular-nums;margin-top:4px;white-space:nowrap}
 .h3-kv b small{font-size:13px;color:var(--muted);font-weight:500;margin-left:1px}
-.h3-kv .s{display:block;font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.h3-kv .s{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-size:10.5px;line-height:1.3;min-height:2.6em;color:var(--muted);overflow:hidden;margin-top:3px}
 .h3-kv .s.w{color:var(--st-wait)}
 .h3-kv .s.f{color:var(--st-fault)}
 .h3-mapbox{left:14px;bottom:14px;width:288px;padding:9px 10px 10px}
@@ -80,7 +81,7 @@
 .h3-dd.icn.on .ico:last-child{transform:none;color:var(--accent)}
 .h3-menu,.h3-pop{position:absolute;top:calc(100% + 8px);z-index:8;padding:10px 8px}
 .h3-menu{left:-4px;width:248px}
-.h3-pop{right:-4px;width:300px;padding:12px 12px 10px}
+.h3-pop{right:-4px;width:340px;padding:12px 12px 10px}
 .h3-menu .h3-eb,.h3-sheet .h3-eb{padding:2px 6px 8px}
 .h3-pop .h3-eb{padding:0 0 7px}
 .h3-pop .h3-eb~.h3-eb{padding-top:10px;margin-top:9px;border-top:1px solid color-mix(in srgb,var(--line2) 60%,transparent)}
@@ -107,6 +108,7 @@
 .h3-lg i.ln{width:16px;height:3px;border-radius:2px;box-shadow:0 0 6px var(--c)}
 .h3-lg i.pt{width:7px;height:7px;border-radius:50%;margin:0 1px;box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 22%,transparent),0 0 8px var(--c)}
 .h3-lg i.rg{width:10px;height:10px;border-radius:50%;background:transparent;border:2px solid var(--c)}
+.h3-lg i.arc{width:16px;height:8px;border-radius:9px 9px 0 0;background:transparent;border:1.5px solid var(--c);border-bottom:0;opacity:.75}
 .h3-lg i.vest{width:8px;height:11px;border-radius:3px 3px 2px 2px}
 .h3-sleg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px 8px;margin-top:10px;font-size:11px;color:var(--muted)}
 .h3-sleg span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
@@ -136,6 +138,8 @@
 .h3-labels{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden;contain:strict}
 .h3-lb{--c:var(--st-idle);position:absolute;left:0;top:0;pointer-events:auto;cursor:pointer;white-space:nowrap;background:color-mix(in srgb,var(--bg) 84%,transparent);border:1px solid color-mix(in srgb,var(--c) 45%,var(--line2));border-radius:8px;padding:3px 7px 3px 6px;font:500 11.5px/1.25 var(--f-ui);color:var(--text);box-shadow:0 4px 14px rgba(0,0,0,.42);transition:opacity .18s;will-change:transform}
 .h3-lb::after{content:"";position:absolute;left:50%;top:100%;width:1px;height:9px;background:linear-gradient(color-mix(in srgb,var(--c) 85%,transparent),transparent)}
+.h3-lb[data-p="b"]::after{top:auto;bottom:100%;background:linear-gradient(transparent,color-mix(in srgb,var(--c) 85%,transparent))}
+.h3-lb[data-p="s"]::after{display:none}
 .h3-lb.off{opacity:0 !important;pointer-events:none !important}
 .h3-lb .r1{display:flex;align-items:center;gap:6px}
 .h3-lb .d{width:7px;height:7px;border-radius:50%;background:var(--c);flex:none;box-shadow:0 0 6px var(--c)}
@@ -186,7 +190,11 @@
 .h3-tip .pg{display:flex;align-items:center;gap:8px}
 .h3-tip .pg .bar{flex:1}
 .h3-tip .ft{margin-top:10px;padding-top:8px;border-top:1px solid color-mix(in srgb,var(--line2) 60%,transparent);font-size:11px;color:var(--faint);display:flex;justify-content:space-between;gap:10px}
-.h3-tip .tw{color:var(--st-tool)}
+.h3-tip .tw{color:var(--st-tool);display:block;margin-top:4px;font-size:11.5px}
+.h3-tip .tl{display:flex;flex-direction:column;gap:3px}
+.h3-tip .ti{display:grid;grid-template-columns:minmax(0,1fr) 50px 56px;align-items:center;gap:7px;font-size:11.5px}
+.h3-tip .ti .tn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)}
+.h3-tip .ti .tr{text-align:right;font-family:var(--f-mono);font-size:10.5px;color:var(--text2)}
 .h3-tip .ok{color:var(--st-run)}
 .h3-tip .wn{color:var(--st-wait)}
 
@@ -362,6 +370,14 @@
       new THREE.Vector3(sx == null ? 1 : sx, sy == null ? 1 : sy, sz == null ? 1 : sz));
   }
   void _e;
+  // allokationsfreie Instanz-Matrix (nur Drehung um Y) fuer Updates pro Frame
+  let _IM = null;
+  function ixf(mesh, i, x, y, z, ry, sx, sy, sz) {
+    const m = _IM || (_IM = new THREE.Matrix4()), c = Math.cos(ry || 0), s = Math.sin(ry || 0);
+    sx = sx == null ? 1 : sx; sy = sy == null ? 1 : sy; sz = sz == null ? 1 : sz;
+    m.set(c * sx, 0, s * sz, x, 0, sy, 0, y, -s * sx, 0, c * sz, z, 0, 0, 0, 1);
+    mesh.setMatrixAt(i, m);
+  }
   function mergeGeos(list) {
     let n = 0; const parts = [];
     for (const [g, mx] of list) {
@@ -619,6 +635,13 @@
     g.fillStyle = gr; g.fillRect(0, 0, N, N);
     return tex(c, { srgb: false });
   }
+  function texPool() {   // Lichtkegel einer Hallenleuchte auf dem Boden (additiv)
+    const N = 128, c = cnv(N, N), g = c.getContext('2d');
+    const gr = g.createRadialGradient(N / 2, N / 2, 0, N / 2, N / 2, N / 2);
+    gr.addColorStop(0, 'rgba(255,238,206,1)'); gr.addColorStop(0.28, 'rgba(255,232,196,.62)'); gr.addColorStop(0.62, 'rgba(255,226,186,.18)'); gr.addColorStop(1, 'rgba(255,226,186,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, N, N);
+    return tex(c);
+  }
   function texLabel(text, o = {}) {
     const w = o.w || 512, h = o.h || 128, c = cnv(w, h), g = c.getContext('2d');
     if (o.bg) { g.fillStyle = o.bg; g.fillRect(0, 0, w, h); }
@@ -643,8 +666,8 @@
     const std = (c, r = 0.6, m = 0, x) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: r, metalness: m }, x || {}));
     const basic = (c, x) => new THREE.MeshBasicMaterial(Object.assign({ color: c, toneMapped: false }, x || {}));
     M = {
-      paint: std(0xcdd1d0, 0.42),          // RAL 7035 Lichtgrau – Verkleidung
-      paintW: std(0xe7e9e8, 0.38),         // RAL 9016 – moderne Maschinen
+      paint: std(0xc4c8c7, 0.44),          // RAL 7035 Lichtgrau – Verkleidung
+      paintW: std(0xdcdfde, 0.4),          // RAL 9016 – moderne Maschinen
       paintOld: std(0xb2b7a6, 0.58),       // Bestandsmaschine Bj. 1996
       dark: std(0x3a4047, 0.52),           // RAL 7016 Anthrazit – Sockel, Rahmen
       darker: std(0x23282e, 0.58),
@@ -721,10 +744,13 @@
   function batchMaterial() {
     const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 1, emissive: 0x000000 });
     m.onBeforeCompile = (sh) => {
-      sh.vertexShader = 'attribute vec2 pbr;\nvarying vec2 vPbr;\n' + sh.vertexShader.replace('#include <uv_vertex>', '#include <uv_vertex>\n vPbr = pbr;');
-      sh.fragmentShader = 'varying vec2 vPbr;\n' + sh.fragmentShader
+      sh.vertexShader = 'attribute vec2 pbr;\nvarying vec2 vPbr;\nvarying float vWy;\n' + sh.vertexShader.replace('#include <uv_vertex>', '#include <uv_vertex>\n vPbr = pbr;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\n vWy = (modelMatrix * vec4(transformed, 1.0)).y;');
+      // Bodennahe Verdeckung: Umgebungslicht nimmt zum Hallenboden hin ab (erdet Maschinen, Regale, Behälter)
+      sh.fragmentShader = 'varying vec2 vPbr;\nvarying float vWy;\n' + sh.fragmentShader
         .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vPbr.x;')
-        .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vPbr.y;');
+        .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vPbr.y;')
+        .replace('#include <aomap_fragment>', '#include <aomap_fragment>\n float gAO = mix(0.5, 1.0, smoothstep(0.0, 0.85, vWy)); reflectedLight.indirectDiffuse *= gAO; reflectedLight.indirectSpecular *= mix(0.65, 1.0, gAO);');
     };
     m.customProgramCacheKey = () => 'h3batch';
     return m;
@@ -756,7 +782,7 @@
     const sc = R.scene, P = WF.profile.hall, cx = P.w / 2, cz = P.d / 2;
     R.hemi = new THREE.HemisphereLight(0xe9effc, 0x3c424b, 0.5);
     sc.add(R.hemi);
-    const sun = new THREE.DirectionalLight(0xfff5e8, 1.3);
+    const sun = new THREE.DirectionalLight(0xfff5e8, 1.22);
     sun.position.set(cx - 26, 58, cz + 30); sun.target.position.set(cx, 0, cz);
     sun.castShadow = true;
     const big = R.renderer.capabilities.maxTextureSize >= 8192 && !R.mobile;
@@ -968,9 +994,11 @@
     const b = new Builder();
     // Fundament + Vorplatz vor den Toren
     b.box(M.plinth, HW + 0.8, 0.1, HD + 0.8, HW / 2, -0.13, HD / 2);
-    const apron = std2(0x4a5058, 0.9);
-    b.box(apron, HW + 0.6, 0.05, 7.5, HW / 2, -0.09, HD + 4.15);
-    for (const d of P.hall.doors) { b.box(M.darker, d.w + 0.6, 0.012, 7.2, d.x + d.w / 2, -0.04, HD + 4.0); for (const s of [-1, 1]) b.box(M.yellow, 0.12, 0.012, 7.2, d.x + d.w / 2 + s * (d.w / 2 + 0.24), -0.035, HD + 4.0); }
+    const apron = std2(0x4a5058, 0.9), AD = 11.5;
+    b.box(apron, HW + 0.6, 0.05, AD, HW / 2, -0.09, HD + 0.4 + AD / 2);
+    b.box(M.plinth, HW + 0.6, 0.16, 0.14, HW / 2, -0.13, HD + 0.4 + AD);   // Bordstein
+    for (const d of P.hall.doors) { b.box(M.darker, d.w + 0.6, 0.012, AD - 0.6, d.x + d.w / 2, -0.04, HD + 0.4 + (AD - 0.6) / 2); for (const s of [-1, 1]) b.box(M.yellow, 0.12, 0.012, AD - 0.6, d.x + d.w / 2 + s * (d.w / 2 + 0.24), -0.035, HD + 0.4 + (AD - 0.6) / 2); }
+    buildYard(b, HD);
     buildFloor();
 
     // ---------- Wände: Rück- und linke Wand voll (Sandwichpaneel, Fensterband), vorne/rechts als Schnitt auf Sockelhöhe
@@ -1066,6 +1094,11 @@
     hous.castShadow = false; lens.castShadow = false;
     sc.add(hous, lens);
     R.fade.push({ obj: hous, mat: M.fixture }, { obj: lens });
+    // Lichtkegel am Boden – nur sichtbar, wenn das Tageslicht fehlt (keine Schicht / Geisterschicht)
+    R.poolMat = new THREE.MeshBasicMaterial({ map: texPool(), transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    R.pools = new THREE.InstancedMesh(gPlaneY(), R.poolMat, lamps.length);
+    lamps.forEach(([x, z], i) => R.pools.setMatrixAt(i, xf(x, 0.02, z, 0, 0, 0, 7.5, 1, 7.5)));
+    R.pools.visible = false; R.pools.renderOrder = 1; R.pools.frustumCulled = false; sc.add(R.pools);
 
     // ---------- Kabeltrasse (Datenfluss): Hauptgang → rechter Längsgang → Leitstand/MES-Server
     const off = P.stationById.OFFICE, srv = off.server;
@@ -1079,7 +1112,7 @@
       for (let i = 0; i <= n; i++) { const t = -len / 2 + i * len / n, [rx, rz] = rotXZ(0, t, ry); tb.box(M.tray, wdt, 0.015, 0.03, mx + rx, TRAY_Y - 0.07, mz + rz, ry); }
       const [cx1, cz1] = rotXZ(-wdt * 0.15, 0, ry); tb.box(M.cable, wdt * 0.42, 0.035, len, mx + cx1, TRAY_Y - 0.055, mz + cz1, ry);
       const [cx2, cz2] = rotXZ(wdt * 0.22, 0, ry); tb.box(M.cableB, wdt * 0.18, 0.03, len, mx + cx2, TRAY_Y - 0.055, mz + cz2, ry);
-      for (let i = 0; i <= Math.floor(len / 3); i++) { const t = -len / 2 + 0.2 + i * 3, [rx, rz] = rotXZ(0, Math.min(t, len / 2 - 0.2), ry); for (const s of [-1, 1]) { const [hx, hz] = rotXZ(s * (wdt / 2 + 0.02), 0, ry); tb.cyl(M.steelDark, 0.008, ROOF_Y - TRAY_Y + 0.07, mx + rx + hx, TRAY_Y - 0.07, mz + rz + hz, 5); } tb.box(M.steelDark, wdt + 0.1, 0.03, 0.04, mx + rx, TRAY_Y - 0.1, mz + rz, ry); }
+      for (let i = 0; i <= Math.floor(len / 3); i++) { const t = -len / 2 + 0.2 + i * 3, [rx, rz] = rotXZ(0, Math.min(t, len / 2 - 0.2), ry); for (const s of [-1, 1]) { const [hx, hz] = rotXZ(s * (wdt / 2 + 0.02), 0, ry); tb.cyl(M.steelDark, 0.008, 0.95, mx + rx + hx, TRAY_Y - 0.07, mz + rz + hz, 5); } tb.box(M.steelDark, wdt + 0.1, 0.03, 0.04, mx + rx, TRAY_Y - 0.1, mz + rz, ry); }
     };
     R.trayRoute = [[2.5, 22], [58.5, 22], [58.5, 4.6], [srv.x, 4.6]];
     traySeg(2.5, 22, 58.5, 22, 0.4); traySeg(58.5, 22.2, 58.5, 4.6, 0.4); traySeg(58.7, 4.6, srv.x, 4.6, 0.3);
@@ -1091,6 +1124,79 @@
     gl.box(glowLine, 56.0, 0.01, 0.05, 30.5, TRAY_Y - 0.02, 22); gl.box(glowLine, 0.05, 0.01, 17.4, 58.5, TRAY_Y - 0.02, 13.3); gl.box(glowLine, srv.x - 58.5, 0.01, 0.05, (58.5 + srv.x) / 2, TRAY_Y - 0.02, 4.6);
     R.trayGlow = gl.build(sc, false);
     R.trayGlowMat = glowLine;
+  }
+  /** Hof vor den Toren: Koffer-Lkw am Versandtor (Rampe), Kastenwagen der Härterei am Tor Fremdbearbeitung */
+  function buildYard(b, HD) {
+    const P = WF.profile, door = id => P.hall.doors.find(d => d.id === id);
+    const cabM = std2(0xf2f4f5, 0.3, 0.05), boxM = std2(0xe4e8eb, 0.55), ribM = std2(0xc9cfd4, 0.5, 0.3);
+    const winM = new THREE.MeshStandardMaterial({ color: 0x0c141b, roughness: 0.05, metalness: 0.3, envMapIntensity: 1.7 });
+    const headM = new THREE.MeshBasicMaterial({ color: 0xfff3dc, toneMapped: false }), tailM = new THREE.MeshBasicMaterial({ color: 0xb8241c, toneMapped: false });
+    const vanM = std2(0x7d8a94, 0.32, 0.25);
+    for (const m of [cabM, boxM, ribM, winM, vanM]) m.userData.batch = true;
+    const wheel = (x, z, r, w, side) => {
+      const x0 = side < 0 ? x - w : x;
+      b.cylX(M.rubber, r, w, x0, r, z, 22);
+      b.cylX(M.alu, r * 0.56, 0.02, side < 0 ? x0 - 0.01 : x0 + w - 0.01, r, z, 18);
+      b.cylX(M.darker, r * 0.2, 0.03, side < 0 ? x0 - 0.02 : x0 + w - 0.01, r, z, 10);
+    };
+    const glassSlope = (cx, w, z1, y1, z2, y2, y0, zc) => {   // dünne Scheibe parallel zur Schräge (Profil in z/y)
+      const dz = z2 - z1, dy = y2 - y1, l = Math.hypot(dz, dy), nz = dy / l * 0.025, ny = -dz / l * 0.025;
+      const key = ['gl', z1, y1, z2, y2].map(v => typeof v === 'number' ? v.toFixed(2) : v).join('_');
+      b.side(winM, key, [[z1, y1], [z2, y2], [z2 + nz, y2 + ny], [z1 + nz, y1 + ny]], w, cx, y0, zc);
+    };
+    // ---- Koffer-Lkw (7,5 t), Heck an der Versandrampe
+    const dv = door('D-VS');
+    if (dv) {
+      const cx = dv.x + dv.w / 2, z0 = HD + 0.75, W = 2.48, BL = 6.3, BH = 2.55, BY = 1.18;
+      b.add(gPlaneY(), M.blob, xf(cx, -0.02, z0 + 4.4, 0, 0, 0, W + 1.2, 1, 9.8));
+      b.box(M.darker, 0.95, 0.26, 8.4, cx, 0.6, z0 + 4.4);                                  // Rahmen
+      b.rbox(boxM, W, BH, BL, 0.04, cx, BY, z0 + BL / 2);                                  // Koffer
+      for (let z = z0 + 0.35; z < z0 + BL - 0.2; z += 0.62) for (const sx of [-1, 1]) b.box(ribM, 0.02, BH - 0.12, 0.06, cx + sx * (W / 2 + 0.005), BY + 0.06, z);
+      b.box(M.alu, W + 0.04, 0.09, BL + 0.02, cx, BY - 0.02, z0 + BL / 2); b.box(M.alu, W + 0.04, 0.07, BL + 0.02, cx, BY + BH - 0.05, z0 + BL / 2);
+      b.box(M.accent, W + 0.012, 0.16, BL - 0.2, cx, BY + 0.2, z0 + BL / 2);
+      b.box(M.alu, W + 0.04, BH, 0.06, cx, BY, z0 - 0.01);                                  // Heckportal
+      b.box(ribM, W - 0.16, BH - 0.16, 0.02, cx, BY + 0.08, z0 - 0.045);
+      b.box(M.darker, 0.03, BH - 0.18, 0.03, cx, BY + 0.09, z0 - 0.06);
+      for (const sx of [-1, 1]) { for (const y of [0.35, 1.25, 2.15]) b.box(M.steelDark, 0.12, 0.05, 0.03, cx + sx * 1.05, BY + y, z0 - 0.06); b.box(M.steelDark, 0.025, BH - 0.3, 0.025, cx + sx * 0.45, BY + 0.15, z0 - 0.07); }
+      b.box(M.darker, W - 0.2, 0.1, 0.12, cx, 0.42, z0 + 0.05);                              // Unterfahrschutz
+      for (const sx of [-1, 1]) { b.box(tailM, 0.32, 0.11, 0.04, cx + sx * 0.98, 0.78, z0 - 0.03); b.box(M.darker, W * 0.5 - 0.15, 0.32, 0.03, cx + sx * 0.62, 0.42, z0 + 1.6); }
+      // Räder: Hinterachse zwillingsbereift, Vorderachse einfach
+      for (const sx of [-1, 1]) {
+        wheel(cx + sx * 0.66, z0 + 2.1, 0.46, 0.56, sx);
+        b.rbox(M.darker, 0.66, 0.06, 1.25, 0.03, cx + sx * 0.97, 0.98, z0 + 2.1);
+        wheel(cx + sx * 0.92, z0 + 7.45, 0.46, 0.3, sx);
+      }
+      // Fahrerhaus
+      const zc = z0 + BL + 0.12, cw = 2.36;
+      b.side(cabM, 'lkwcab', [[0, 0], [2.08, 0], [2.12, 1.2, 0.05], [2.02, 2.06, 0.22], [1.6, 2.22, 0.2], [0, 2.22, 0.06]], cw, cx, 0.72, zc, 0, 0.03);
+      b.side(M.darker, 'lkwcabb', [[0, 0], [2.14, 0], [2.14, 0.34], [0, 0.34]], cw + 0.02, cx, 0.62, zc);
+      glassSlope(cx, cw - 0.22, 2.115, 1.32, 2.03, 2.0, 0.72, zc);
+      for (const sx of [-1, 1]) b.box(winM, 0.02, 0.62, 0.95, cx + sx * (cw / 2 + 0.004), 2.02, zc + 1.45);
+      b.box(M.darker, 1.5, 0.42, 0.03, cx, 1.02, zc + 2.12); for (let i = 0; i < 4; i++) b.box(M.steelDark, 1.4, 0.03, 0.035, cx, 1.08 + i * 0.09, zc + 2.125);
+      for (const sx of [-1, 1]) { b.box(headM, 0.34, 0.13, 0.03, cx + sx * 0.88, 1.04, zc + 2.13); b.box(M.black, 0.05, 0.34, 0.14, cx + sx * 1.32, 2.0, zc + 1.92); b.box(M.black, 0.16, 0.025, 0.025, cx + sx * 1.24, 2.2, zc + 1.9); }
+      b.box(M.darker, 2.42, 0.3, 0.2, cx, 0.5, zc + 2.06);
+      b.box(M.accent, cw + 0.01, 0.1, 2.02, cx, 1.62, zc + 1.0);
+      b.rbox(cabM, 1.9, 0.35, 1.2, 0.15, cx, 2.94, zc + 0.6);                              // Dachspoiler
+    }
+    // ---- Kastenwagen (Härterei-Abholung), seitlich vor dem Tor Fremdbearbeitung
+    const de = door('D-EXT');
+    if (de) {
+      const cx = de.x + de.w / 2 + 1.6, z0 = HD + 1.2, W = 2.0;
+      b.add(gPlaneY(), M.blob, xf(cx, -0.02, z0 + 2.95, 0, 0, 0, W + 0.9, 1, 6.6));
+      b.side(vanM, 'van', [[0, 0], [5.95, 0], [6.0, 0.5, 0.08], [5.7, 0.9, 0.2], [4.55, 1.98, 0.32], [4.1, 2.16, 0.2], [0, 2.16, 0.1]], W, cx, 0.36, z0, 0, 0.03);
+      b.side(M.darker, 'vanb', [[0, 0], [6.02, 0], [6.02, 0.3], [0, 0.3]], W + 0.02, cx, 0.24, z0);
+      glassSlope(cx, W - 0.18, 5.62, 0.98, 4.6, 1.93, 0.36, z0);
+      for (const sx of [-1, 1]) {
+        b.box(winM, 0.02, 0.58, 0.85, cx + sx * (W / 2 + 0.004), 1.12, z0 + 4.55);
+        b.box(M.darker, 0.02, 0.02, 3.4, cx + sx * (W / 2 + 0.004), 0.95, z0 + 2.3);
+        b.box(headM, 0.26, 0.1, 0.03, cx + sx * 0.7, 0.84, z0 + 6.02);
+        b.box(tailM, 0.1, 0.36, 0.03, cx + sx * 0.88, 1.0, z0 - 0.02);
+        b.box(M.black, 0.05, 0.22, 0.12, cx + sx * 1.1, 1.3, z0 + 4.6);
+        wheel(cx + sx * 0.77, z0 + 1.15, 0.34, 0.24, sx); wheel(cx + sx * 0.77, z0 + 4.95, 0.34, 0.24, sx);
+      }
+      b.box(M.darker, 0.02, 1.75, 0.02, cx, 0.42, z0 - 0.012);
+      b.box(M.darker, W - 0.1, 0.18, 0.08, cx, 0.3, z0 + 6.0); b.box(M.orange, W + 0.01, 0.1, 4.4, cx, 1.42, z0 + 2.2);
+    }
   }
   function std2(c, r, m) { return new THREE.MeshStandardMaterial({ color: c, roughness: r == null ? 0.6 : r, metalness: m || 0 }); }
 
@@ -1958,6 +2064,17 @@
     // ---------- Versand: Packtisch, Wickelmaschine, Regal
     b.box(M.wood, 1.6, 0.05, 0.8, 61.9, 0.85, 26.0); b.box(M.dark, 1.5, 0.85, 0.7, 61.9, 0, 26.0);
     b.rbox(M.carton, 0.5, 0.35, 0.4, 0.02, 61.6, 0.9, 26.0); b.box(M.paintW, 0.3, 0.2, 0.25, 62.3, 0.9, 25.9);
+    // Leerpaletten-Stapel, Plattformwaage, Regal mit Kartonzuschnitten und Stretchfolie
+    for (let i = 0; i < 7; i++) palletStatic(b, 58.3, i * 0.144, 25.35, 0);
+    b.box(M.darker, 1.25, 0.07, 1.25, 58.75, 0, 37.55); b.box(M.steelDark, 1.15, 0.012, 1.15, 58.75, 0.07, 37.55);
+    b.box(M.dark, 0.06, 1.15, 0.06, 57.95, 0, 38.25); b.rbox(M.paint, 0.36, 0.26, 0.1, 0.02, 57.95, 1.12, 38.25); b.box(M.screenFrame, 0.3, 0.16, 0.012, 57.95, 1.17, 38.195);
+    { const x = 62.55, z0 = 27.1, z1 = 34.9, H = 1.95;
+      for (const z of [z0, (z0 + z1) / 2, z1]) for (const dx of [-0.27, 0.27]) b.box(M.blueRack, 0.06, H, 0.06, x + dx, 0, z);
+      for (const y of [0.12, 0.85, 1.55]) { b.box(M.orange, 0.06, 0.08, z1 - z0, x - 0.27, y, (z0 + z1) / 2); b.box(M.orange, 0.06, 0.08, z1 - z0, x + 0.27, y, (z0 + z1) / 2); b.box(M.wood, 0.56, 0.02, z1 - z0 - 0.06, x, y + 0.08, (z0 + z1) / 2); }
+      for (let i = 0; i < 5; i++) b.box(M.carton, 0.5, 0.42 - (i % 2) * 0.12, 1.2, x, 0.2, z0 + 0.75 + i * 1.5);
+      for (let i = 0; i < 9; i++) b.cylZ(M.wrap, 0.11, 0.5, x - 0.12 + (i % 2) * 0.22, 1.06, z0 + 0.4 + i * 0.82, 16);
+      for (let i = 0; i < 6; i++) b.rbox(M.carton, 0.44, 0.32, 0.55, 0.02, x, 1.65, z0 + 0.6 + i * 1.25, 0);
+    }
     b.cyl(M.dark, 0.95, 0.1, 61.6, 0, 37.6, 30); b.box(M.paint, 0.3, 2.3, 0.3, 62.8, 0, 37.6); b.box(M.dark, 0.25, 0.35, 0.3, 62.55, 1.0, 37.6); b.cyl(M.wrap, 0.07, 0.5, 62.38, 0.95, 37.6, 12);
     b.build(sc);
     // Versand-Stellplätze (dynamisch je Auftrag), Pick-Flächen für Lager
@@ -2210,31 +2327,31 @@
       const i = n[k]++;
       C.byInst[k][i] = e.id;
       if (k === 'klt') {
-        C.klt.setMatrixAt(i, xf(x, y, z, 0, ry, 0)); C.klt.setColorAt(i, e.scrap ? M.kltScrap : e.raw ? M.kltRaw : M.kltParts);
-        C.kltFill.setMatrixAt(i, xf(x, y + 0.02 + e.fill * 0.22, z, 0, ry, 0, 0.56, 0.012, 0.36));
+        ixf(C.klt, i, x, y, z, ry, null, null, null); C.klt.setColorAt(i, e.scrap ? M.kltScrap : e.raw ? M.kltRaw : M.kltParts);
+        ixf(C.kltFill, i, x, y + 0.02 + e.fill * 0.22, z, ry, 0.56, 0.012, 0.36);
       } else if (k === 'gb') {
-        C.gbBase.setMatrixAt(i, xf(x, y, z, 0, ry, 0)); C.gb.setMatrixAt(i, xf(x, y + 0.11, z, 0, ry, 0));
-        C.gbFill.setMatrixAt(i, xf(x, y + 0.13 + e.fill * 0.55, z, 0, ry, 0, 0.76, 0.012, 0.7));
+        ixf(C.gbBase, i, x, y, z, ry, null, null, null); ixf(C.gb, i, x, y + 0.11, z, ry, null, null, null);
+        ixf(C.gbFill, i, x, y + 0.13 + e.fill * 0.55, z, ry, 0.76, 0.012, 0.7);
       } else if (k === 'rack') {
-        C.rack.setMatrixAt(i, xf(x, y, z, 0, ry, 0));
-        for (let s = 0; s < Math.min(3, e.qty); s++) { if (sh.n >= CMAX.rack * 3) break; const [ox, oz] = rotXZ(-0.22 + s * 0.22, 0, ry); C.shaft.setMatrixAt(sh.n++, xf(x + ox, y + 0.28, z + oz, 0, ry, 0, 0.062, 0.062, 1.6)); }
+        ixf(C.rack, i, x, y, z, ry, null, null, null);
+        for (let s = 0; s < Math.min(3, e.qty); s++) { if (sh.n >= CMAX.rack * 3) break; const [ox, oz] = rotXZ(-0.22 + s * 0.22, 0, ry); ixf(C.shaft, sh.n++, x + ox, y + 0.28, z + oz, ry, 0.062, 0.062, 1.6); }
       }
-      if (((hl && e.order === hl) || sel === e.id) && rings.n < 60) { const s = 1 + Math.sin(t * 4) * 0.06; C.ring.setMatrixAt(rings.n++, xf(x, y + 0.03, z, 0, 0, 0, s * (k === 'rack' ? 1.4 : 1), 1, s * (k === 'rack' ? 1.4 : 1))); }
+      if (((hl && e.order === hl) || sel === e.id) && rings.n < 60) { const s = 1 + Math.sin(t * 4) * 0.06; ixf(C.ring, rings.n++, x, y + 0.03, z, 0, s * (k === 'rack' ? 1.4 : 1), 1, s * (k === 'rack' ? 1.4 : 1)); }
     }
     for (const v of C.vers) {
       if (n.wrap >= CMAX.wrap) break;
       const i = n.wrap++, p = v.slot, layers = clamp(Math.ceil(v.n / 2), 1, 3), hgt = layers * 0.3 + 0.03;
       C.byInst.wrap[i] = v.last;
-      C.pal.setMatrixAt(i, xf(p.x, 0, p.z)); C.wrap.setMatrixAt(i, xf(p.x, 0.142, p.z, 0, 0, 0, 1, hgt, 1));
-      for (let L = 0; L < layers && boxes.n < CMAX.wrap * 3; L++) C.box.setMatrixAt(boxes.n++, xf(p.x, 0.146 + L * 0.3, p.z));
-      if (hl && v.order === hl && rings.n < 60) { const s = 1.5 + Math.sin(t * 4) * 0.08; C.ring.setMatrixAt(rings.n++, xf(p.x, 0.03, p.z, 0, 0, 0, s, 1, s)); }
+      ixf(C.pal, i, p.x, 0, p.z, 0, null, null, null); ixf(C.wrap, i, p.x, 0.142, p.z, 0, 1, hgt, 1);
+      for (let L = 0; L < layers && boxes.n < CMAX.wrap * 3; L++) ixf(C.box, boxes.n++, p.x, 0.146 + L * 0.3, p.z, 0, null, null, null);
+      if (hl && v.order === hl && rings.n < 60) { const s = 1.5 + Math.sin(t * 4) * 0.08; ixf(C.ring, rings.n++, p.x, 0.03, p.z, 0, s, 1, s); }
     }
     C.klt.count = C.kltFill.count = n.klt; C.gb.count = C.gbBase.count = C.gbFill.count = n.gb; C.rack.count = n.rack; C.shaft.count = sh.n; C.wrap.count = C.pal.count = n.wrap; C.box.count = boxes.n; C.ring.count = rings.n;
     for (const m of [C.klt, C.kltFill, C.gb, C.gbBase, C.gbFill, C.rack, C.shaft, C.wrap, C.pal, C.box, C.ring]) m.instanceMatrix.needsUpdate = true;
     if (C.klt.instanceColor) C.klt.instanceColor.needsUpdate = true;
     for (const k in n) C.byInst[k].length = n[k];
     let w = 0;
-    for (const e of C.waits) { if (w >= 40) break; const s = 1 + 0.18 * Math.sin(t * 3.5 + w); C.wait.setMatrixAt(w++, xf(e.x, 0.035, e.z, 0, 0, 0, s * (e.type === 'rack' ? 1.4 : 1), 1, s * (e.type === 'rack' ? 1.4 : 1))); }
+    for (const e of C.waits) { if (w >= 40) break; const s = 1 + 0.18 * Math.sin(t * 3.5 + w); ixf(C.wait, w++, e.x, 0.035, e.z, 0, s * (e.type === 'rack' ? 1.4 : 1), 1, s * (e.type === 'rack' ? 1.4 : 1)); }
     C.wait.count = w; C.wait.instanceMatrix.needsUpdate = true;
   }
 
@@ -2284,6 +2401,14 @@
     // Zielmarker (Ring am Abgabeplatz)
     R.flowDst = new THREE.InstancedMesh(cache('fdst', () => new THREE.RingGeometry(0.42, 0.56, 32).rotateX(-PI / 2)), new THREE.MeshBasicMaterial({ color: 0xff9d3d, transparent: true, opacity: 0.85, depthWrite: false, toneMapped: false }), 30);
     R.flowDst.count = 0; R.flowDst.renderOrder = 3; R.flowDst.frustumCulled = false; R.flowGroup.add(R.flowDst);
+    R.netGroup = new THREE.Group(); R.flowGroup.add(R.netGroup);
+    // Bögen blenden zu den Enden hin aus (kein harter Ansatz an der Maschine), Mitte am hellsten
+    R.netMat = new THREE.ShaderMaterial({
+      uniforms: { uColor: { value: srgb('#ff9d3d') }, uOp: { value: 0.24 } },
+      vertexShader: 'varying float vU; void main(){ vU = uv.x; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: 'uniform vec3 uColor; uniform float uOp; varying float vU; void main(){ float a = smoothstep(0.0, 0.16, vU) * smoothstep(1.0, 0.84, vU); gl_FragColor = vec4(uColor, uOp * (0.35 + 0.65 * a) * a); }',
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
   }
   function carrierOf(tr, S) {
     if (!tr.assignee) return null;
@@ -2334,6 +2459,46 @@
     for (const [id, fl] of R.flowLines) if (!seen.has(id)) { for (const m of fl.meshes) { R.flowGroup.remove(m); m.geometry.dispose(); } R.flowLines.delete(id); }
     R.flowDstPts = dst;
   }
+  /** Flussnetz: Verbindungen zwischen den Stationen aller offenen Aufträge (A → B → C), als Bögen mit laufenden Punkten */
+  function netEnd(id, from) {
+    const st = WF.profile.stationById[id === 'EXT' && from ? 'WE' : id]; if (!st) return null;
+    const p = from ? (st.outPos || st.dock) : (st.inPos || st.dock);
+    return new THREE.Vector3(p.x, st.kind === 'zone' ? 0.25 : 0.9, p.z);
+  }
+  function updateNet(S) {
+    const links = new Map();
+    for (const oid in S.orders) {
+      const o = S.orders[oid]; if (o.status === 'fertig') continue;
+      for (let i = 0; i < o.routing.length - 1; i++) {
+        if (o.ops[i + 1] && o.ops[i + 1].complete) continue;
+        const a = o.routing[i].station, b = o.routing[i + 1].station;
+        const k = (a === 'EXT' ? 'WE' : a) + '>' + b;
+        const l = links.get(k) || { a, b, n: 0, orders: [] }; l.n++; l.orders.push(oid); links.set(k, l);
+      }
+    }
+    const sig = [...links.keys()].sort().map(k => k + links.get(k).n).join(',');
+    if (sig === R.netSig) return;
+    R.netSig = sig;
+    const g = R.netGroup;
+    while (g.children.length) { const c = g.children.pop(); c.geometry.dispose(); }
+    R.netLinks = [];
+    for (const l of links.values()) {
+      const A = netEnd(l.a, true), B = netEnd(l.b, false); if (!A || !B) continue;
+      const d = A.distanceTo(B); if (d < 0.5) continue;
+      const mid = A.clone().lerp(B, 0.5); mid.y += 1.6 + d * 0.09;
+      const curve = new THREE.QuadraticBezierCurve3(A, mid, B), pts = curve.getPoints(28);
+      const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 0.022 + 0.01 * Math.min(4, l.n), 6, false), R.netMat);
+      m.renderOrder = 2; m.frustumCulled = false; g.add(m);
+      R.netLinks.push({ path: withLen(pts), n: l.n, acc: Math.random() * 3, l });
+    }
+  }
+  function netPulses(dt) {
+    if (!R.netLinks || !R.layers.flow || WF.app.paused || (R.netK != null && R.netK < 0.3)) return;
+    for (const k of R.netLinks) {
+      k.acc += dt * (0.22 + 0.12 * Math.min(4, k.n));
+      if (k.acc >= 1) { k.acc = 0; spawnPulse(k.path, { size: 0.32, speed: 5.5, alpha: 0.8, col: PCOL.mat, net: true }); }
+    }
+  }
   /** pro Bild: Anfang des Bands an die angezeigte Trägerposition setzen */
   function flowHeads(t) {
     for (const [, fl] of R.flowLines) for (const h of fl.heads) {
@@ -2347,12 +2512,12 @@
     }
     const d = R.flowDstPts || [];
     let k = 0;
-    for (const p of d) { if (k >= 30) break; const s = 0.9 + 0.12 * Math.sin(t * 4 + k); R.flowDst.setMatrixAt(k++, xf(p.x, 0.04, p.z, 0, 0, 0, s, 1, s)); }
+    for (const p of d) { if (k >= 30) break; const s = 0.9 + 0.12 * Math.sin(t * 4 + k); ixf(R.flowDst, k++, p.x, 0.04, p.z, 0, s, 1, s); }
     R.flowDst.count = k; R.flowDst.instanceMatrix.needsUpdate = true;
   }
 
   // ================================================================== Ebene Datenfluss (Pulse zum MES-Server, Meldungen an Personen)
-  const PULSE_N = 80, PULSE_PTS = 5;
+  const PULSE_N = 150, PULSE_PTS = 5;
   function buildPulses() {
     const n = PULSE_N * PULSE_PTS, pos = new Float32Array(n * 3), size = new Float32Array(n), alpha = new Float32Array(n), col = new Float32Array(n * 3);
     const g = new THREE.BufferGeometry();
@@ -2398,11 +2563,11 @@
     for (let i = 1; i < pts.length; i++) if (d <= L[i]) { const k = (d - L[i - 1]) / ((L[i] - L[i - 1]) || 1); return out.copy(pts[i - 1]).lerp(pts[i], k); }
     return out.copy(pts[pts.length - 1]);
   }
-  const PCOL = { info: srgb('#3cc6f2'), warn: srgb('#fbbf24'), crit: srgb('#f87171'), ok: srgb('#34d399') };
+  const PCOL = { info: srgb('#3cc6f2'), warn: srgb('#fbbf24'), crit: srgb('#f87171'), ok: srgb('#34d399'), mat: srgb('#ff9d3d') };
   function spawnPulse(path, o = {}) {
     const P = R.pulse; if (!P || !P.free.length) return;
     const slot = P.free.pop();
-    P.list.push({ slot, path, d: 0, speed: o.speed || 22, size: o.size || 0.55, onEnd: o.onEnd || null, a: o.alpha || 1, col: o.col || PCOL.info });
+    P.list.push({ slot, path, d: 0, speed: o.speed || 22, size: o.size || 0.55, onEnd: o.onEnd || null, a: o.alpha || 1, col: o.col || PCOL.info, net: !!o.net });
   }
   function arcPath(a, b, h) {
     const pts = [];
@@ -2646,8 +2811,8 @@
   const SHORT_STATE = { running: 'Produktion', setup: 'Rüsten', firstPiece: 'Erstteil', toolchange: 'Wkz-Wechsel', waitTool: 'Wartet', waitOperator: 'Wartet', starved: 'Wartet', blocked: 'Ausgang voll', fault: 'Störung', idle: 'Bereit' };
   function legendHtml() {
     const sw = (cv, t, cls, ttl) => `<span class="h3-lg"${ttl ? ` title="${esc(ttl)}"` : ''}><i class="${cls || ''}" style="--c:${cv}"></i>${esc(t)}</span>`;
-    return `<div class="h3-eb">Maschinenzustand</div><div class="h3-leg">${sw('var(--st-run)', 'Produktion')}${sw('var(--st-setup)', 'Rüsten / Erstteilprüfung')}${sw('var(--st-tool)', 'Werkzeugwechsel')}${sw('var(--st-wait)', 'Wartet / Ausgang voll', '', 'Wartet auf Material, Werkzeug oder Bediener bzw. Ausgangspuffer voll')}${sw('var(--st-fault)', 'Störung')}${sw('var(--st-idle)', 'Bereit (kein Auftrag)')}</div>
-      <div class="h3-eb">Flüsse</div><div class="h3-leg">${sw('var(--mat)', 'Transport unterwegs', 'ln', 'Weg vom Fahrzeug über die Abholung zum Ziel')}${sw('var(--mat)', 'Abholung offen', 'rg', 'Behälter steht bereit, Transport noch nicht vergeben')}${sw('var(--info)', 'Maschinendaten → Server', 'pt', 'Signale der angebundenen Maschinen laufen über die Kabeltrasse zum MES-Server')}${sw('var(--info)', 'Meldung an Person', 'rg', 'Benachrichtigung erreicht die zuständige Rolle')}${sw('var(--st-run)', 'Teil fertig', 'rg', 'Kurzer Puls am Ausgang, wenn ein Teil fertig wird')}${sw('#5fb6e6', 'Tablet (ohne Anbindung)', '', 'Maschine ohne Datenschnittstelle – Rückmeldung per Tablet')}</div>
+    return `<div class="h3-eb">Maschinenzustand</div><div class="h3-leg">${sw('var(--st-run)', 'Produktion')}${sw('var(--st-setup)', 'Rüsten / Erstteil', '', 'Rüsten oder Erstteilprüfung läuft')}${sw('var(--st-tool)', 'Werkzeugwechsel')}${sw('var(--st-wait)', 'Wartet / Ausgang voll', '', 'Wartet auf Material, Werkzeug oder Bediener bzw. Ausgangspuffer voll')}${sw('var(--st-fault)', 'Störung')}${sw('var(--st-idle)', 'Bereit (kein Auftrag)')}</div>
+      <div class="h3-eb">Flüsse</div><div class="h3-leg">${sw('var(--mat)', 'Transport unterwegs', 'ln', 'Weg vom Fahrzeug über die Abholung zum Ziel')}${sw('var(--mat)', 'Abholung offen', 'rg', 'Behälter steht bereit, Transport noch nicht vergeben')}${sw('var(--mat)', 'Auftragsfluss', 'arc', 'Nur in der Übersicht: Bögen zwischen aufeinanderfolgenden Arbeitsgängen offener Aufträge – je dicker, desto mehr Aufträge')}${sw('var(--info)', 'Daten → MES-Server', 'pt', 'Signale der angebundenen Maschinen laufen über die Kabeltrasse zum MES-Server – Warnungen gelb, Störungen rot')}${sw('var(--info)', 'Meldung an Person', 'rg', 'Benachrichtigung vom Server erreicht die zuständige Rolle – Farbe nach Dringlichkeit')}${sw('var(--st-run)', 'Teil fertig', 'rg', 'Kurzer Puls am Ausgang, wenn ein Teil fertig wird')}${sw('#5fb6e6', 'Tablet (ohne Anbindung)', '', 'Maschine ohne Datenschnittstelle – Rückmeldung per Tablet')}</div>
       <div class="h3-eb">Personen</div><div class="h3-leg">${Object.values(ROLES).map(r => sw(r.vest, r.label, 'vest')).join('')}</div>`;
   }
   function buildOverlays(root) {
@@ -2660,7 +2825,7 @@
       <div class="h3-shift" data-k="shift">–</div>
       <div class="h3-mline" data-k="mline"></div>
       <div class="h3-kv">
-        <div title="Maschinen im Zustand Produktion"><span class="l">In Produktion</span><b data-k="run">–</b><span class="s" data-k="runS">–</span></div>
+        <div title="Maschinen im Zustand Produktion"><span class="l">Produktion</span><b data-k="run">–</b><span class="s" data-k="runS">–</span></div>
         <div title="Personen in der Halle (ohne Feierabend)"><span class="l">Im Dienst</span><b data-k="ppl">–</b><span class="s" data-k="pplS">–</span></div>
         <div title="Offene Transportaufträge (AGV und Stapler)"><span class="l">Transporte</span><b data-k="tr">–</b><span class="s" data-k="trS">–</span></div>
       </div>
@@ -2768,8 +2933,11 @@
     computeUiRects();
   }
   function zoomToFollow() {
-    const cs = camState();
-    if (cs.r > 30) goCam({ tx: cs.tx, ty: 0, tz: cs.tz, r: 24, phi: Math.min(cs.phi, 58 * DEG), th: cs.th }, 0.9);
+    const cs = camState(), f = R.follow; if (!f) return;
+    const ps = f.kind === 'person' ? WF.sim.state.people[f.id] : null;
+    const e = f.kind === 'agv' ? R.agvs[f.id] : ps && ps.vehicle ? R.fork : R.people[f.id];
+    const tx = e && e.x != null ? e.x : cs.tx, tz = e && e.z != null ? e.z : cs.tz;
+    goCam({ tx, ty: 0, tz, r: Math.min(cs.r, 24), phi: Math.min(cs.phi, 58 * DEG), th: cs.th }, 0.9);
   }
 
   // ---------- Hallenplan (Minikarte, SVG)
@@ -2792,7 +2960,9 @@
       const s = P.stationById[id], f = s.footprint;
       const g = sv('g', { class: 'mm', 'data-id': id }, svg);
       const r = sv('rect', { x: f.x + 0.15, y: f.z + 0.15, width: f.w - 0.3, height: f.d - 0.3, rx: 0.5, fill: '#7b8aa8', 'fill-opacity': 0.55, stroke: '#7b8aa8', 'stroke-width': 0.22 }, g);
-      const t = sv('text', { x: f.x + f.w / 2, y: f.z + f.d / 2 + 0.75, 'text-anchor': 'middle' }, g); t.textContent = id;
+      const cx = f.x + f.w / 2, cy = f.z + f.d / 2, rot = f.w < 3.4 && f.d > f.w * 1.3;
+      const t = sv('text', { x: cx, y: cy + 0.75, 'text-anchor': 'middle' }, g); t.textContent = id;
+      if (rot) t.setAttribute('transform', `rotate(-90 ${cx} ${cy})`);
       const tt = sv('title', {}, g); tt.textContent = `${id} · ${s.short}`;
       R.ui.mm[id] = { g, r, tt, st: null };
     }
@@ -2940,13 +3110,22 @@
         if (crowd) want = Math.min(want, 1);
         if (l.p >= 90) want = Math.max(want, R.mobile ? 1 : 2);
         ok = false;
-        for (let lv = want; lv >= 0; lv = lv === 2 ? 1 : lv - 1) {
+        let side = 'a';
+        for (let lv = want; lv >= 0 && !ok; lv = lv === 2 ? 1 : lv - 1) {
           const sz = sizeOf(l, lv);
-          x0 = l.sx - sz.w / 2; y0 = l.sy - sz.h - 10; x1 = x0 + sz.w; y1 = y0 + sz.h;
-          if (free(x0, y0, x1, y1)) { ok = true; if (l.level !== lv) l.level = lv; break; }
+          // über dem Ankerpunkt (Standard); in der kleinsten Stufe notfalls darunter oder seitlich statt ausblenden
+          for (let k = 0; k < (lv === 0 ? 4 : 1); k++) {
+            if (k === 0) { x0 = l.sx - sz.w / 2; y0 = l.sy - sz.h - 10; side = 'a'; }
+            else if (k === 1) { x0 = l.sx - sz.w / 2; y0 = l.sy + 12; side = 'b'; }
+            else if (k === 2) { x0 = l.sx + 12; y0 = l.sy - sz.h / 2; side = 's'; }
+            else { x0 = l.sx - 12 - sz.w; y0 = l.sy - sz.h / 2; side = 's'; }
+            x1 = x0 + sz.w; y1 = y0 + sz.h;
+            if (free(x0, y0, x1, y1)) { ok = true; if (l.level !== lv) l.level = lv; break; }
+          }
           if (lv === 0) break;
         }
         if (l.el.dataset.l !== String(l.level)) l.el.dataset.l = String(l.level);
+        if (ok && l.el.dataset.p !== side) l.el.dataset.p = side;
       }
       if (ok) {
         _rects.push([x0 - 4, y0 - 4, x1 + 4, y1 + 4]);
@@ -2998,14 +3177,23 @@
       if (ord) rows.push(row('Teile', `<div class="pg">${WF.ui.bar(v.partsTotal ? v.partsDone / v.partsTotal : 0, { color: v.stateColor })}<span class="mono">${counterOf(v)}</span></div>`));
       if (v.partRemainSec != null && (v.state === 'running' || v.partSub === 'load')) rows.push(row('Laufendes Teil', `noch ${F.fmtDur(v.partRemainSec)}${v.partSub === 'load' ? ' <span class="muted">(wird eingelegt)</span>' : ''}`));
       if (v.etaOpEnd) rows.push(row('Arbeitsgang fertig', 'ca. ' + F.fmtDue(v.etaOpEnd, S.t)));
-      if (t) rows.push(row('Werkzeug', `${esc(shortTool(t.name))} · ${t.wearPct != null ? fmtN(t.wearPct) + ' % Verschleiß · ' : ''}${restTxt(t.remainingParts)}${t.plannedChange ? `<br><span class="tw">Wechsel ${esc(t.plannedChange.text || '')}${t.plannedChange.by ? ' · ' + esc(t.plannedChange.by) : ''}${t.plannedChange.stage && t.plannedChange.stage !== 'offen' ? ' (' + esc(t.plannedChange.stage) + ')' : ''}</span>` : ''}`));
-      else if ((v.tools || []).some(x => x.status === 'replace' || x.status === 'setup')) rows.push(row('Werkzeug', '<span class="muted">wird beim Rüsten neu bestückt</span>'));
+      const act = (v.tools || []).filter(x => x.status !== 'idle' && x.status !== 'missing' && x.status !== 'replace' && x.status !== 'keep');
+      if (act.length) rows.push(row('Werkzeuge', `<div class="tl">${act.slice(0, 4).map(x => { const wr = clamp((x.wearPct || 0) / 100, 0, 1), c = x.status === 'broken' || x.status === 'due' ? 'var(--st-fault)' : x.status === 'planned' || x.status === 'changing' ? 'var(--st-tool)' : wr > 0.8 ? 'var(--st-wait)' : 'var(--st-run)'; return `<div class="ti"><span class="tn">${esc(shortTool(x.name))}</span>${WF.ui.bar(wr, { thin: true, color: c })}<span class="tr">${x.status === 'changing' ? 'Wechsel' : x.status === 'broken' ? 'Bruch' : x.remainingParts != null ? fmtN(x.remainingParts) + ' T.' : '–'}</span></div>`; }).join('')}</div>${t && t.plannedChange ? `<span class="tw">Wechsel ${esc(shortTool(t.name))} ${esc(t.plannedChange.text || '')}${t.plannedChange.by ? ' · ' + esc(t.plannedChange.by) : ''}${t.plannedChange.stage && t.plannedChange.stage !== 'offen' ? ' (' + esc(t.plannedChange.stage) + ')' : ''}</span>` : ''}`));
+      else if ((v.tools || []).some(x => x.status === 'replace' || x.status === 'setup')) rows.push(row('Werkzeuge', '<span class="muted">werden beim Rüsten neu bestückt</span>'));
+      const sg = v.signals;
+      if (sg) {
+        let s = '';
+        if (sg.level >= 2) s = [sg.mode, sg.spindleRpm != null ? 'Spindel ' + fmtN(sg.spindleRpm) + ' 1/min' : null, sg.spindleLoadPct != null ? 'Last ' + fmtN(sg.spindleLoadPct) + ' %' : null, sg.program ? 'Programm ' + sg.program : null].filter(Boolean).map(esc).join(' · ');
+        else if (sg.level === 1) s = [sg.stackLightLabel, sg.powerKw != null ? U.fmtNum(sg.powerKw, 1) + ' kW' : null].filter(Boolean).map(esc).join(' · ');
+        else s = 'Tablet-Rückmeldung' + (sg.lastFeedback ? ': ' + esc(sg.lastFeedback) : '') + (sg.lastFeedbackT ? ' · ' + U.fmtClock(sg.lastFeedbackT) : '');
+        if (s) rows.push(row('Live-Signale', `<span class="muted">${s}</span>`));
+      }
       if (v.operator) rows.push(row(v.operator.responsible ? 'Zuständig' : 'An der Maschine', `${esc(v.operator.name)} <span class="muted">· ${esc(v.operator.where || v.operator.activity || v.operator.stateLabel || '')}</span>`));
       if (v.inCap || v.outCap) rows.push(row('Puffer', `Eingang ${fmtN(v.input.length)}/${fmtN(v.inCap)} · Ausgang ${fmtN(v.output.length)}/${fmtN(v.outCap)} Behälter`));
       rows.push(row('Anbindung', `<span class="conn" data-l="${v.conn.level}">L${v.conn.level}</span> <span class="muted">${esc(v.conn.protocol || '')}</span>`));
       return `<div class="h"><div class="t">${esc(v.id)} · ${esc(v.short)}<small>${esc(v.name)}</small></div>${WF.ui.pill(v.state)}</div>
         <div class="cz" style="--c:${v.stateColor}">${esc(v.cause || '')} <span class="muted">· seit ${F.fmtDur(v.sinceSec)}</span></div>
-        <dl class="dl">${rows.join('')}</dl><div class="ft"><span>Klicken für Details</span><span>OEE heute ${F.fmtPct(v.oeeToday)}</span></div>`;
+        <dl class="dl">${rows.join('')}</dl><div class="ft"><span>Klicken für Details</span><span>OEE heute ${F.fmtPct(v.oeeToday && v.oeeToday.oee)}</span></div>`;
     }
     if (h.kind === 'person') {
       const p = S.people[h.id]; if (!p) return '';
@@ -3192,6 +3380,7 @@
       set('shift', sh.id ? `<b>${esc(sh.name)}${sh.inBreak ? ' · Pause' : ''}</b><span>bis ${until}</span>` : `<b>Keine Schicht</b><span>autonome Maschinen laufen · Schichtbeginn ${U.fmtDayClock(sh.endsAt)}</span>`, true);
       ui.shift.classList.toggle('br', !!sh.inBreak);
     }
+    R.lightT = sh && sh.id ? 1 : 0.42;
     ui.live.classList.toggle('paused', !!WF.app.paused);
     if (ui.live._p !== !!WF.app.paused) { ui.live._p = !!WF.app.paused; ui.live.innerHTML = `<i></i>${WF.app.paused ? 'Pausiert' : 'Live'}`; }
     set('run', `${run}<small>/${P.machines.length}</small>`, true);
@@ -3199,7 +3388,7 @@
     set('runS', rs.slice(0, 2).join(' · ') || 'alle in Produktion'); if (ui.runS.title !== rs.join(' · ')) ui.runS.title = rs.join(' · ');
     ui.runS.classList.toggle('f', !!flt); ui.runS.classList.toggle('w', !flt && !!wait);
     set('ppl', String(duty));
-    set('pplS', duty ? (brk ? `${brk} in Pause` : `${walk} unterwegs`) : 'niemand im Dienst');
+    set('pplS', duty ? (brk ? `${brk} in Pause` : `${walk} unterwegs`) : 'Halle leer');
     set('tr', String(trOpen));
     set('trS', trOpen ? [trAgv ? trAgv + ' AGV' : '', trFork ? trFork + ' Stapler' : '', trWait ? trWait + ' wartend' : ''].filter(Boolean).join(' · ') : 'alles zugestellt');
     set('mline', `<span><b>${run}/${P.machines.length}</b> in Produktion</span>${flt ? `<span class="f"><b>${flt}</b> Störung</span>` : wait ? `<span class="w"><b>${wait}</b> wartend</span>` : ''}<span><b>${duty}</b> Personen</span><span><b>${trOpen}</b> Transporte</span>`, true);
@@ -3232,6 +3421,7 @@
     updateRaw(S);
     updateContainers(S);
     updateFlows(S);
+    if ((R.netAcc = (R.netAcc || 0) + 1) % 8 === 1) updateNet(S);
     if (R.hover) renderTip(false);
     const sb = R.ui.sel && !R.ui.sel.hidden && R.ui.sel.querySelector('[data-ac]');
     if (sb && R.selTarget) { const s = R.selTarget; const act = s.kind === 'person' ? (S.people[s.id] ? S.people[s.id].activity : '') : (S.agvs[s.id] ? (S.agvs[s.id].taskLabel || WF.sim.LABELS.agv[S.agvs[s.id].state] || '') : ''); if (sb.textContent !== act) sb.textContent = act || ''; }
@@ -3438,6 +3628,13 @@
     if (app.paused) R.renderT = R.sT1; else R.renderT = Math.min(R.sT1, R.renderT + dt * (app.speed || 30));
     const al = R.sT1 > R.sT0 ? clamp((R.renderT - R.sT0) / (R.sT1 - R.sT0), 0, 1) : 1;
     const running = !app.paused;
+    // Hallenbeleuchtung: außerhalb der Schichten gedimmt (Geisterschicht – nur die Maschinen leuchten)
+    const lt = R.lightT == null ? 1 : R.lightT;
+    if (Math.abs((R.lightK == null ? 1 : R.lightK) - lt) > 0.002) { R.lightK = damp(R.lightK == null ? 1 : R.lightK, lt, 1.6, dt); R.sun.intensity = 1.22 * R.lightK; R.hemi.intensity = 0.5 * (0.35 + 0.65 * R.lightK); R.fill.intensity = 0.3 * R.lightK;
+      const night = Math.max(0, Math.min(1, (1 - R.lightK) / 0.58));
+      M.winGlass.emissiveIntensity = 0.55 - 0.45 * night;
+      if (R.envMats) for (const m of R.envMats) m.envMapIntensity = m.userData.envBase * (1 - 0.6 * night);
+      if (R.poolMat) { R.poolMat.opacity = 0.5 * night; R.pools.visible = night > 0.02; } }
 
     // Kamera: Fahrt, Folgen, Steuerung
     if (R.tween) {
@@ -3528,6 +3725,10 @@
       else R.selRing.material.opacity = 0;
     }
     if (R.selBox.visible) R.selBox.material.opacity = 0.65 + 0.35 * Math.sin(t * 3.2);
+    // Flussnetz nur in der Übersicht: aus der Nähe würden die Bögen als breite Lichtbänder vor der Kamera stehen
+    { const cd = R.camera.position.distanceTo(R.controls.target), k = Math.max(0, Math.min(1, (cd - 34) / 26));
+      R.netK = k; R.netMat.uniforms.uOp.value = 0.3 * k * (R.route && R.route.id ? 0.3 : 1); R.netGroup.visible = k > 0.02; }
+    netPulses(dt);
     pulses(dt, t);
     // Hover (Raycast höchstens jedes zweite Bild)
     R.hoverN = (R.hoverN || 0) + 1;
@@ -3650,12 +3851,12 @@
     for (let i = P.list.length - 1; i >= 0; i--) {
       const q = P.list[i];
       q.d += q.speed * dt;
-      const done = q.d >= q.path.len;
+      const done = q.d >= q.path.len, qa = q.net ? q.a * (R.netK == null ? 1 : R.netK) : q.a;
       for (let k = 0; k < PULSE_PTS; k++) {
         const j = q.slot * PULSE_PTS + k, d = q.d - k * 0.5;
         pointAt(q.path, Math.min(d, q.path.len), V1);
         pos[j * 3] = V1.x; pos[j * 3 + 1] = V1.y; pos[j * 3 + 2] = V1.z;
-        size[j] = q.size * (1 - k * 0.17); alpha[j] = d < 0 ? 0 : q.a * (1 - k * 0.2);
+        size[j] = q.size * (1 - k * 0.17); alpha[j] = d < 0 ? 0 : qa * (1 - k * 0.2);
         colA[j * 3] = q.col.r; colA[j * 3 + 1] = q.col.g; colA[j * 3 + 2] = q.col.b;
       }
       if (done) {
@@ -3677,7 +3878,7 @@
     }
     R.serverHit = Math.max(0, (R.serverHit || 0) - dt * 2.5);
     if (R.serverLeds) R.serverLeds.forEach((m, i) => { const b = 0.5 + 0.5 * (Math.sin(t * (7 + i * 3.3) + i) > 0.2 ? 1 : 0) + R.serverHit * 2; m.color.setHex(i === 1 ? 0x3cc6f2 : 0x34d399).multiplyScalar(0.6 + b); });
-    if (R.trayGlowMat) R.trayGlowMat.opacity = 0.38 + 0.12 * Math.sin(t * 1.6) + R.serverHit * 0.2;
+    if (R.trayGlowMat) R.trayGlowMat.opacity = (0.38 + 0.12 * Math.sin(t * 1.6) + R.serverHit * 0.2) * (0.55 + 0.45 * (R.netK == null ? 1 : R.netK));
     for (const p of R.pings) {
       if (p.t >= 1) { if (p.m.visible) p.m.visible = false; continue; }
       p.t += dt / 1.1;
@@ -3750,7 +3951,7 @@
     R.canvas = renderer.domElement; R.canvas.className = 'h3-cv'; R.canvas.setAttribute('aria-label', 'Hallenmodell 3D – ziehen zum Drehen, klicken für Details');
     R.canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); R.ok = false; }, false);
     R.canvas.addEventListener('webglcontextrestored', () => { R.ok = true; R.shadowDirty = true; }, false);
-    root.append(R.canvas);
+    root.append(R.canvas, el('div', { class: 'h3-vig', 'aria-hidden': 'true' }));
     R.mobile = (root.clientWidth || window.innerWidth) <= 640; root.classList.toggle('m', R.mobile);
     R.w = root.clientWidth || 1; R.h = root.clientHeight || 1;
     const t0 = performance.now();
@@ -3775,6 +3976,9 @@
       buildContainers(); buildFlow(); buildPulses(); buildHighlights();
       buildOverlays(root); buildLabels();
       bindPointer();
+      // Materialien mit Umgebungsreflexion sammeln (nachts wird die Reflexion mit dem Licht gedimmt)
+      R.envMats = []; const seenM = new Set();
+      R.scene.traverse(o => { const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : []; for (const m of ms) if (m && m.isMeshStandardMaterial && !seenM.has(m)) { seenM.add(m); m.userData.envBase = m.envMapIntensity; R.envMats.push(m); } });
       preset('uebersicht', true);
     } catch (e) {
       console.error('[halle] Aufbau fehlgeschlagen', e);
@@ -3805,7 +4009,7 @@
     if (R.pulse) { for (const q of R.pulse.list) { R.pulse.free.push(q.slot); for (let k = 0; k < PULSE_PTS; k++) R.pulse.alpha[q.slot * PULSE_PTS + k] = 0; } R.pulse.list.length = 0; }
     for (const mo of R.moList) { mo.state = null; mo.prog = mo.p0 = mo.p1 = 0; if (mo.a) { mo.a.key = null; mo.a.sig = null; mo.a.n = null; } if (R.lb[mo.id]) R.lb[mo.id].sig = ''; }
     if (R.route.id) { const id = R.route.id; clearRoute(); buildRoute(id); }
-    R.seenNotif = new Set();
+    R.seenNotif = new Set(); R.netSig = null;
     R.shadowDirty = true;
   }
   function show() {

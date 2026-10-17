@@ -100,6 +100,9 @@
   app.togglePause = (force) => { app.paused = force != null ? force : !app.paused; markSpeed(); };
 
   // ------------------------------------------------------------ Navigation & Ansichten
+  /** Tasten: 1–9 = Ansichten mit ganzzahliger Reihenfolge 1–9, 0 = Analyse (Reihenfolge 3,5). */
+  function keyOf(v) { return Number.isInteger(v.order) && v.order >= 1 && v.order <= 9 ? String(v.order) : (v.id === 'analyse' ? '0' : null); }
+  function viewForKey(k) { return WF.views.find(v => keyOf(v) === k); }
   const viewState = {}; // id -> {root, mounted}
   function buildNav() {
     const nav = document.getElementById('nav');
@@ -108,7 +111,7 @@
     for (const v of WF.views) {
       const g = v.group || 'betrieb';
       if (g !== lastGroup) { nav.append(el('div', { class: 'nav-label', text: GROUPS[g] || g })); lastGroup = g; }
-      const b = el('button', { class: 'nav-item', 'data-view': v.id, title: v.title, html: icon(v.icon || 'dot') + `<span>${esc(v.title)}</span><span class="badge" data-badge="${v.id}"></span>` });
+      const b = el('button', { class: 'nav-item', 'data-view': v.id, title: v.title + (keyOf(v) ? ' · Taste ' + keyOf(v) : ''), html: icon(v.icon || 'dot') + `<span>${esc(v.title)}</span><span class="badge" data-badge="${v.id}"></span>` });
       b.onclick = () => app.navigate(v.id);
       nav.append(b);
     }
@@ -137,6 +140,8 @@
     try { v.show && v.show(params || {}); } catch (e) { console.error(e); }
     try { v.update && v.update(); } catch (e) { console.error(e); }
     document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('on', b.dataset.view === v.id));
+    const onItem = document.querySelector('.nav-item.on');
+    if (onItem && window.matchMedia('(max-width: 900px)').matches) { try { onItem.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); } catch (e) { /* alt */ } }
     settings.lastView = v.id; save();
     if (location.hash !== '#' + v.id) { try { history.replaceState(null, '', '#' + v.id); } catch (e) { /* Sandbox */ } }
     WF.bus.emit('navigate', { view: v.id, params: params || {} });
@@ -176,6 +181,10 @@
     d.classList.add('open');
     d.setAttribute('aria-hidden', 'false');
   }
+  /** Drawer ausblenden, Auswahl (z. B. hervorgehobener Auftrag in der Halle) aber behalten. */
+  app.hideDrawer = () => {
+    const d = drawer(); d.classList.remove('open'); d.setAttribute('aria-hidden', 'true'); drawerSpec = null;
+  };
   app.closeDrawer = () => {
     const d = drawer(); d.classList.remove('open'); d.setAttribute('aria-hidden', 'true');
     drawerSpec = null; app.selected = null; WF.bus.emit('select', { kind: null, id: null });
@@ -268,6 +277,7 @@
   };
   function onNotify(n) {
     if (!n || n.status !== 'open' || (n.sev !== 'crit' && n.sev !== 'warn')) return;
+    if (WF.tour && WF.tour.active && n.sev !== 'crit') return; // Tour nicht zudecken
     if (n._toasted) return; n._toasted = true;
     const now = performance.now();
     if (now - lastToast < 2500 && n.sev !== 'crit') return;
@@ -321,12 +331,21 @@
   }
 
   // ------------------------------------------------------------ TV-Modus (Leitstand an der Hallenwand)
-  css(`.app.tv{grid-template-columns:0 minmax(0,1fr)}.app.tv .side{display:none}
+  css(`.tv-exit{position:fixed;z-index:35;bottom:max(16px,env(safe-area-inset-bottom,0px));left:max(16px,env(safe-area-inset-left,0px));display:none;box-shadow:var(--shadow);opacity:.85}.tv-exit:hover{opacity:1}
+       .app.tv ~ .tv-exit,.tv-exit.on{display:inline-flex}
+       .app.tv{grid-template-columns:0 minmax(0,1fr)}.app.tv .side{display:none}
+       @media (max-width:900px){.app.tv{grid-template-columns:minmax(0,1fr)}}
        @media (max-width:900px){.app.tv{grid-template-rows:var(--top-h) 0 minmax(0,1fr)}}`, 'app-tv');
-  app.setTv = (on) => { document.getElementById('app').classList.toggle('tv', !!on); app.tv = !!on; WF.bus.emit('settings', settings); };
+  let tvBtn = null;
+  app.setTv = (on) => {
+    document.getElementById('app').classList.toggle('tv', !!on); app.tv = !!on;
+    if (!tvBtn) { tvBtn = el('button', { class: 'btn tv-exit', html: icon('x', 15) + ' TV-Modus beenden', onclick: () => app.setTv(false) }); document.body.append(tvBtn); }
+    tvBtn.classList.toggle('on', !!on);
+    WF.bus.emit('settings', settings);
+  };
 
   // ------------------------------------------------------------ Schleife
-  let last = 0, acc = 0, simAcc = 0;
+  let last = 0, acc = 0, simAcc = 0, lastSim = 0;
   function tick() {
     updateTop();
     updateBadges();
@@ -338,10 +357,13 @@
     const dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
     last = now;
     if (!app.paused && WF.sim && WF.sim.advance) {
-      simAcc += dt * app.speed;
+      // Simulationszeit folgt der echten Zeit (nicht der Bildrate) – auf langsamen Rechnern bleibt 600× auch 600×
+      const realDt = lastSim ? Math.min(2, (now - lastSim) / 1000) : 0;
+      simAcc += realDt * app.speed;
       const n = Math.floor(simAcc);
       if (n > 0) { try { WF.sim.advance(n); } catch (e) { console.error('[sim]', e); app.paused = true; markSpeed(); app.toast('Simulation angehalten: ' + e.message, 'crit'); } simAcc -= n; }
     }
+    lastSim = now;
     if (app.current && app.current.frame) { try { app.current.frame(dt); } catch (e) { console.error('[view frame]', e); } }
     acc += dt;
     if (acc >= 0.25) { acc = 0; tick(); }
@@ -361,7 +383,7 @@
       if (/INPUT|TEXTAREA|SELECT/.test(tag) || e.target.isContentEditable) return;
       if (e.key === 'Escape') { if (npEl) toggleNotifPanel(false); else if (drawerSpec) app.closeDrawer(); else if (app.tv) app.setTv(false); }
       else if (e.key === 'p' || e.key === 'P') app.togglePause();
-      else if (/^[1-9]$/.test(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey) { const v = WF.views[Number(e.key) - 1]; if (v) app.navigate(v.id); }
+      else if (/^[0-9]$/.test(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey) { const v = viewForKey(e.key); if (v) app.navigate(v.id); }
     });
     window.addEventListener('hashchange', () => { const id = location.hash.slice(1); if (id && (!app.current || app.current.id !== id) && WF.views.find(v => v.id === id)) app.navigate(id); });
     const fromHash = location.hash.slice(1);
