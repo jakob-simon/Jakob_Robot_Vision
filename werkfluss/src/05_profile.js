@@ -603,6 +603,17 @@
       description: 'Lohnfertiger für Präzisions-Dreh-, Fräs- und Schleifteile (Medizintechnik, Schienenfahrzeuge, Maschinenbau) mit eigener Montage für die Schwesterfirma Donau Verpackungstechnik.',
       demoNote: 'Fiktiver Beispielbetrieb, Profil angelehnt an typische Wiener Zerspanungsbetriebe. Alle Daten simuliert.',
     },
+    // Kosten – EINE Quelle für Engine, Analyse und Copilot (WF.sim.costs()):
+    //  · Strompreis energyEurPerKwh (Industrietarif netto inkl. Netzentgelt) → Energiekosten (kpis().energyEurToday, machineView().energyEurToday)
+    //  · Maschinenstundensätze stehen je Station in stations[].rate (€/h, Maschine inkl. Bediener) → Stillstandskosten lossEur
+    //  · labourEurPerHour = Personal-Vollkostensatz (Einrichter/Facharbeiter), overtimeSurchargePct = Überstundenzuschlag
+    costs: {
+      currency: 'EUR',
+      energyEurPerKwh: 0.19,
+      labourEurPerHour: 48,
+      overtimeSurchargePct: 50,
+      machineRates: 'stations[].rate',
+    },
     hall: {
       w: 64, d: 40, height: 9,
       doors: [

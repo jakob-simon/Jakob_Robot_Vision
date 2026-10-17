@@ -63,30 +63,26 @@
   .ls-shift{display:flex;align-items:stretch;background:var(--card);border:1px solid var(--line);border-radius:var(--r);min-width:0}
   .ls-sh{display:flex;align-items:center;gap:9px;padding:7px 13px;min-width:0}
   .ls-sh + .ls-sh{border-left:1px solid var(--line)}
-  .ls-sh .eyebrow{display:block;font-size:9.5px;margin-bottom:3px}
-  .ls-sh b{display:block;font-weight:600;font-size:13px;white-space:nowrap}
-  .ls-sh small{color:var(--muted);font-size:11.5px;white-space:nowrap}
+  .ls-sh .eyebrow{display:block;margin-bottom:4px}
+  .ls-sh b{display:block;font-weight:600;font-size:var(--fs-md);white-space:nowrap}
+  .ls-sh small{color:var(--muted);font-size:var(--fs-xs);white-space:nowrap}
   .ls-sh .ls-dot{width:8px;height:8px;border-radius:50%;background:var(--c,var(--st-run));box-shadow:0 0 0 3px color-mix(in srgb,var(--c,var(--st-run)) 22%,transparent);flex:none}
 
-  .ls-kpis{display:grid;gap:10px;grid-template-columns:minmax(0,1.45fr) repeat(5,minmax(0,1fr))}
-  .ls-kpis .kpi{position:relative;display:flex;flex-direction:column}
-  .ls-kpis .kpi.click{cursor:pointer}
+  /* Kennzahl-Leiste: eine .kpi-Anatomie (Eyebrow · Wert · 2 Zeilen · Verlauf unten), Hinweis nur über .warn/.crit */
+  .ls-kpis{display:grid;gap:10px;grid-template-columns:minmax(0,1.3fr) repeat(5,minmax(0,1fr))}
+  .ls-kpis .kpi.click{cursor:pointer;transition:border-color .15s ease}
   .ls-kpis .kpi.click:hover{border-color:var(--line2)}
-  .ls-kpis .kpi .v{display:flex;align-items:baseline;gap:6px}
-  .ls-kpis .kpi .v small{margin-left:0}
-  .ls-k-row{display:flex;align-items:flex-end;gap:12px;min-width:0}
-  .ls-k-row .v{flex:none}
-  .ls-k-spark{flex:1;min-width:60px;height:34px;margin-bottom:3px}
-  .ls-k-spark svg{display:block;width:100%;height:100%;overflow:visible}
+  .ls-kpis .kpi .s{-webkit-line-clamp:1;overflow-wrap:anywhere}
   .ls-kpis .kpi .s b{color:var(--text2);font-weight:600}
-  .ls-kpis .kpi .s .ok{color:var(--st-run)} .ls-kpis .kpi .s .warn{color:var(--st-wait)} .ls-kpis .kpi .s .crit{color:var(--st-fault)}
+  .ls-k-spark{height:30px}
+  .ls-k-spark svg{display:block;width:100%;height:100%;overflow:visible}
 
   .ls-main{display:grid;grid-template-columns:minmax(0,1fr) 344px;gap:14px;align-items:start}
   .ls-side{display:flex;flex-direction:column;gap:14px;min-width:0}
   .ls-machines{min-width:0}
   .ls-bar{display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;margin-bottom:10px}
   .ls-sum{display:flex;flex-wrap:wrap;gap:6px;flex:1;min-width:0}
-  .ls-sum button{--c:var(--st-idle);display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+  .ls-sum button{--c:var(--st-idle);display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 11px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--text2);font-size:var(--fs-sm);font-weight:600;cursor:pointer;white-space:nowrap;transition:border-color .15s ease,background-color .15s ease}
   .ls-sum button i{width:8px;height:8px;border-radius:50%;background:var(--c)}
   .ls-sum button b{font-variant-numeric:tabular-nums;color:var(--text)}
   .ls-sum button.zero{opacity:.5}
@@ -95,8 +91,8 @@
   .ls-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(256px,1fr))}
   .ls-empty-filter{grid-column:1/-1}
 
-  /* Maschinenkachel – Zustandsband als feine Zeitleiste an der Unterkante */
-  .ls-tile{--c:var(--st-idle);position:relative;display:flex;flex-direction:column;gap:7px;min-width:0;padding:11px 13px 0;background:var(--card);border:1px solid var(--line);border-radius:var(--r);cursor:pointer;overflow:hidden;outline-offset:2px;transition:border-color .15s ease,background-color .15s ease}
+  /* Maschinenkachel – Zustandsband als feine Zeitleiste innerhalb der Kachel */
+  .ls-tile{--c:var(--st-idle);position:relative;display:flex;flex-direction:column;gap:7px;min-width:0;padding:11px 13px 14px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);cursor:pointer;overflow:hidden;outline-offset:2px;transition:border-color .15s ease,background-color .15s ease}
   .ls-tile:hover{border-color:var(--line2);background:color-mix(in srgb,var(--card2) 55%,var(--card))}
   .ls-tile.sel{border-color:color-mix(in srgb,var(--accent) 70%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent)}
   .ls-tile.sev{box-shadow:inset 3px 0 0 var(--c)}
@@ -105,64 +101,64 @@
   .ls-tile.crit:hover{background:color-mix(in srgb,var(--st-fault) 10%,var(--card))}
   .ls-th{display:flex;align-items:center;gap:8px;min-width:0}
   .ls-name{display:flex;align-items:baseline;gap:7px;min-width:0;flex:1}
-  .ls-name b{font:600 18px/1.15 var(--f-cond);letter-spacing:.01em;white-space:nowrap;flex:none;max-width:70%;overflow:hidden;text-overflow:ellipsis}
-  .ls-name .ls-id{font:500 11.5px/1 var(--f-mono);color:var(--muted);flex:none}
-  .ls-name .ls-area{font:600 9.5px/1 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .ls-name b{font:600 var(--fs-xl)/1.15 var(--f-cond);letter-spacing:.01em;white-space:nowrap;flex:none;max-width:70%;overflow:hidden;text-overflow:ellipsis}
+  .ls-name .ls-id{font:500 var(--fs-xs)/1 var(--f-mono);color:var(--muted);flex:none}
+  .ls-name .ls-area{font:600 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
   .ls-th .conn{flex:none}
-  .ls-flag{--c:var(--info);flex:none;display:inline-flex;align-items:center;gap:4px;font:600 10px/1 var(--f-ui);letter-spacing:.04em;text-transform:uppercase;padding:3px 6px;border-radius:5px;color:var(--c);background:color-mix(in srgb,var(--c) 11%,transparent);border:1px solid color-mix(in srgb,var(--c) 34%,transparent)}
+  .ls-flag{--c:var(--info);flex:none;display:inline-flex;align-items:center;gap:4px;font:600 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.04em;text-transform:uppercase;padding:3px 6px;border-radius:5px;color:var(--c);background:color-mix(in srgb,var(--c) 11%,transparent);border:1px solid color-mix(in srgb,var(--c) 34%,transparent)}
   .ls-st{display:flex;align-items:center;gap:8px;min-width:0}
-  .ls-st .pill{font-size:12.5px;line-height:20px;padding:2px 10px 2px 8px}
+  .ls-st .pill{font-size:var(--fs-sm);line-height:20px;padding:2px 10px 2px 8px}
   .ls-st .pill i{position:relative;width:8px;height:8px}
   /* Aufmerksamkeit nur bei Störung/Warten – Ring über transform/opacity (Compositor), ruhige Produktion */
   .ls-tile.sev .ls-st .pill i::after{content:"";position:absolute;inset:0;border-radius:50%;background:var(--c);animation:lsRing 2s ease-out infinite;will-change:transform,opacity}
   @keyframes lsRing{0%{transform:scale(1);opacity:.6}70%,100%{transform:scale(2.7);opacity:0}}
-  .ls-since{font-size:11.5px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
-  .ls-cause{font-size:12px;line-height:1.38;color:var(--text2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+  .ls-since{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .ls-cause{font-size:var(--fs-sm);line-height:1.38;color:var(--text2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
   .ls-tile.crit .ls-cause{color:color-mix(in srgb,var(--st-fault) 55%,var(--text))}
   .ls-tile.sev:not(.crit) .ls-cause{color:color-mix(in srgb,var(--st-wait) 40%,var(--text))}
   .ls-ordb{display:flex;flex-direction:column;gap:2px;min-width:0;border-top:1px solid var(--line);padding-top:8px;margin-top:1px}
-  .ls-ord{display:flex;align-items:baseline;gap:6px;min-width:0;font-size:13px}
-  .ls-ord .mono{color:var(--text);font-weight:500;flex:none;font-size:12px}
+  .ls-ord{display:flex;align-items:baseline;gap:6px;min-width:0;font-size:var(--fs-md)}
+  .ls-ord .mono{color:var(--text);font-weight:500;flex:none;font-size:var(--fs-sm)}
   .ls-ord .ls-pn{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
-  .ls-risk{--c:var(--st-wait);flex:none;align-self:center;font:600 10px/1 var(--f-ui);letter-spacing:.03em;padding:3px 6px;border-radius:5px;color:var(--c);background:color-mix(in srgb,var(--c) 12%,transparent);border:1px solid color-mix(in srgb,var(--c) 32%,transparent)}
+  .ls-risk{--c:var(--st-wait);flex:none;align-self:center;font:600 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.03em;padding:3px 6px;border-radius:5px;color:var(--c);background:color-mix(in srgb,var(--c) 12%,transparent);border:1px solid color-mix(in srgb,var(--c) 32%,transparent)}
   .ls-ord.none .ls-pn{font-weight:500;color:var(--muted)}
-  .ls-op{font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ls-op b{font-weight:600;color:var(--muted);font-family:var(--f-mono);font-size:11px;margin-right:5px}
+  .ls-op{font-size:var(--fs-sm);color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ls-op b{font-weight:600;color:var(--muted);font-family:var(--f-mono);font-size:var(--fs-xs);margin-right:5px}
   .ls-op em{font-style:normal;color:var(--faint)}
   .ls-prog{display:flex;flex-direction:column;gap:4px}
-  .ls-prog-t{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap;min-width:0}
+  .ls-prog-t{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:var(--fs-sm);font-variant-numeric:tabular-nums;white-space:nowrap;min-width:0}
   .ls-prog-t b{font-weight:600;overflow:hidden;text-overflow:ellipsis;min-width:0}
   .ls-prog-t b em{display:none;font-style:normal;font-weight:500;color:var(--st-wait)}
   .ls-prog-t span{color:var(--muted);flex:none}
   .ls-prog .bar{height:5px}
   .ls-prog .bar i{width:100%;transform-origin:0 50%;transform:scaleX(0);transition:transform .5s linear}
   .ls-tool{--tc:var(--muted);display:flex;flex-direction:column;gap:2px;min-width:0;padding:5px 8px;border-radius:7px;background:color-mix(in srgb,var(--tc) 7%,var(--bg2));border:1px solid color-mix(in srgb,var(--tc) 16%,transparent)}
-  .ls-tool-n{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);min-width:0}
+  .ls-tool-n{display:flex;align-items:center;gap:6px;font-size:var(--fs-sm);color:var(--text2);min-width:0}
   .ls-tool-n .ico{color:var(--tc);flex:none}
   .ls-tool-n > span:not(.ls-wear){white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
   .ls-wear{display:inline-flex;align-items:center;gap:5px;flex:none}
   .ls-wear-b{display:block;width:34px;height:4px;border-radius:2px;background:var(--track);overflow:hidden}
   .ls-wear-b i{display:block;height:100%;background:var(--tc);border-radius:inherit}
-  .ls-wear b{font:500 10.5px/1 var(--f-mono);color:var(--muted);min-width:30px;text-align:right}
-  .ls-tool-s{font-size:11.5px;font-weight:600;color:color-mix(in srgb,var(--tc) 78%,var(--text));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:19px;font-variant-numeric:tabular-nums}
-  .ls-tool.u-ok .ls-tool-s{font-weight:500;color:var(--text2)}
+  .ls-wear b{font:500 var(--fs-2xs)/1 var(--f-mono);color:var(--muted);min-width:30px;text-align:right}
+  .ls-tool-s{font-size:var(--fs-xs);font-weight:600;color:color-mix(in srgb,var(--tc) 78%,var(--text));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:19px;font-variant-numeric:tabular-nums}
+  .ls-tool.u-ok .ls-tool-s,.ls-tool.u-rest .ls-tool-s{font-weight:500;color:var(--text2)}
   .ls-tool.u-faint{background:transparent;border-color:transparent;padding:0}
   .ls-tool.u-faint .ls-tool-n{color:var(--faint)}
   .ls-tool-x{display:none;font-weight:500;color:var(--muted)}
-  .ls-op8{display:flex;align-items:center;gap:7px;min-width:0;font-size:12px}
-  .ls-op8 .avatar{width:22px;height:22px;font-size:9.5px}
+  .ls-op8{display:flex;align-items:center;gap:7px;min-width:0;font-size:var(--fs-sm)}
+  .ls-op8 .avatar{width:22px;height:22px;font-size:var(--fs-2xs)}
   .ls-op8 .avatar.wait{color:var(--st-wait);border-color:color-mix(in srgb,var(--st-wait) 50%,transparent)}
   .ls-op8 .avatar.auto{color:var(--st-run);border-color:color-mix(in srgb,var(--st-run) 40%,transparent)}
   .ls-op8 .avatar.none{color:var(--faint)}
   .ls-op8 span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;color:var(--text2)}
   .ls-op8 span em{font-style:normal;color:var(--muted)}
   .ls-op8.wait span{color:color-mix(in srgb,var(--st-wait) 75%,var(--text))}
-  .ls-more{display:inline-grid;place-items:center;min-width:22px;height:20px;padding:0 5px;margin-left:2px;border-radius:11px;background:var(--raise);border:1px solid var(--line2);font:600 10px/1 var(--f-ui);color:var(--text2);flex:none}
+  .ls-more{display:inline-grid;place-items:center;min-width:22px;height:20px;padding:0 5px;margin-left:2px;border-radius:11px;background:var(--raise);border:1px solid var(--line2);font:600 var(--fs-2xs)/1 var(--f-ui);color:var(--text2);flex:none}
   /* Materialfluss am Platz: Eingang › Ausgang (Behälterplätze in Materialfarbe) */
-  .ls-foot{display:flex;align-items:center;gap:7px;min-width:0;margin-top:auto;padding-top:1px;font-size:10.5px;line-height:1;color:var(--muted);white-space:nowrap;overflow:hidden}
+  .ls-foot{display:flex;align-items:center;gap:7px;min-width:0;margin-top:auto;padding-top:1px;font-size:var(--fs-2xs);line-height:1;color:var(--muted);white-space:nowrap;overflow:hidden}
   .ls-bg{display:inline-flex;align-items:center;gap:5px;min-width:0}
-  .ls-bn{font:500 10.5px/1 var(--f-mono);color:var(--text2)}
-  .ls-barr{color:var(--faint);font-size:12px}
+  .ls-bn{font:500 var(--fs-2xs)/1 var(--f-mono);color:var(--text2)}
+  .ls-barr{color:var(--faint);font-size:var(--fs-sm)}
   .ls-slots{display:inline-flex;gap:2px}
   .ls-slots i{width:6px;height:10px;border-radius:2px;background:var(--track);border:1px solid var(--line2)}
   .ls-slots i.f{background:var(--mat);border-color:var(--mat)}
@@ -170,16 +166,24 @@
   .ls-mini{display:inline-block;width:30px;height:6px;border-radius:2px;background:var(--track);border:1px solid var(--line2);overflow:hidden}
   .ls-mini i{display:block;height:100%;background:var(--mat)}
   .ls-mini.full i{background:var(--st-wait)}
-  .ls-band{flex:none;margin:1px -13px 0;height:5px}
+  /* Zustandsband: innerhalb der Kachel, Fenster = letzte 4 h (ab Datenbeginn, nie leer), Achse bei Hover/Fokus */
+  .ls-band{position:relative;flex:none;height:4px;margin-top:3px}
   .ls-foot[hidden] + .ls-band{margin-top:auto}
-  .ls-band svg{display:block;height:5px;border-radius:0}
+  .ls-band svg{display:block;height:4px;border-radius:2px}
+  .ls-band span{position:absolute;top:6px;font:500 var(--fs-2xs)/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums;white-space:nowrap;opacity:0;transition:opacity .15s ease;pointer-events:none}
+  .ls-band .a0{left:0}
+  .ls-band .a1{right:0}
+  .ls-tile:hover .ls-band span,.ls-tile:focus-visible .ls-band span{opacity:1}
+  /* Ohne Schicht geplant „Bereit“ (nicht autonome Maschinen): ruhig, ohne Warnfarben */
+  .ls-tile.rest .ls-cause{color:var(--muted)}
+  .ls-tile.rest .ls-ord .ls-pn{color:var(--text2)}
 
   /* Abschluss-Kachel: Schichtverlauf + Als Nächstes (füllt die letzte Reihe) */
   .ls-x{cursor:default;gap:8px;padding-bottom:12px}
   .ls-x:hover{border-color:var(--line);background:var(--card)}
   .ls-x-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;min-width:0}
-  .ls-x-h .eyebrow{flex:none}
-  .ls-x-sh{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .ls-x-h h3{margin:0;font:600 var(--fs-lg)/1.25 var(--f-ui);flex:none}
+  .ls-x-sh{font-size:var(--fs-sm);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
   .ls-x-sh b{font-weight:600;color:var(--text)}
   .ls-x-tl{display:flex;flex-direction:column;gap:5px;padding-top:2px}
   .ls-x-tr{position:relative;height:8px;border-radius:3px;background:var(--track)}
@@ -187,63 +191,63 @@
   .ls-x-tr .bk{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--muted) 55%,transparent) 0 2px,transparent 2px 5px)}
   .ls-x-tr .tk{position:absolute;top:-3px;bottom:-3px;width:3px;margin-left:-1.5px;border-radius:2px;background:var(--c)}
   .ls-x-tr .nw{position:absolute;top:-5px;bottom:-5px;width:2px;margin-left:-1px;border-radius:1px;background:var(--text);box-shadow:0 0 0 2px var(--card)}
-  .ls-x-ax{position:relative;height:11px;font:500 10.5px/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums}
+  .ls-x-ax{position:relative;height:11px;font:500 var(--fs-2xs)/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums}
   .ls-x-ax span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}
   .ls-x-ax span.a0{transform:none}
   .ls-x-ax span.a1{transform:translateX(-100%)}
   .ls-x-ax span.nw{color:var(--text2);font-weight:600}
   .ls-x-lh{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid var(--line);padding-top:8px;margin-top:2px}
   .ls-x-list{display:flex;flex-direction:column;min-height:0;overflow:hidden;flex:1}
-  .ls-x-row{--c:var(--muted);display:grid;grid-template-columns:40px 16px minmax(0,1fr);gap:6px;align-items:center;font-size:12px;line-height:1.35;padding:3px 0;color:var(--text2)}
+  .ls-x-row{--c:var(--muted);display:grid;grid-template-columns:40px 16px minmax(0,1fr);gap:6px;align-items:center;font-size:var(--fs-sm);line-height:1.35;padding:3px 0;color:var(--text2)}
   .ls-x-row[data-ent]{cursor:pointer}
   .ls-x-row[data-ent]:hover span:last-child{color:var(--text)}
-  .ls-x-row .num{color:var(--muted);font-size:11.5px;white-space:nowrap}
+  .ls-x-row .num{color:var(--muted);font-size:var(--fs-xs);white-space:nowrap}
   .ls-x-list.wd .ls-x-row{grid-template-columns:62px 16px minmax(0,1fr)}
   .ls-x-row .ico{color:var(--c)}
   .ls-x-row span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ls-x-empty{font-size:12px;color:var(--muted);padding:2px 0}
+  .ls-x-empty{font-size:var(--fs-sm);color:var(--muted);padding:2px 0}
 
   .ls-side .card-h h3{display:flex;align-items:center;gap:7px}
   .ls-side .card-h h3 .ico{color:var(--muted)}
-  .ls-cnt{display:inline-grid;place-items:center;min-width:20px;height:18px;padding:0 6px;border-radius:9px;font:700 11px/1 var(--f-ui);background:var(--raise);color:var(--text2)}
+  .ls-cnt{display:inline-grid;place-items:center;min-width:20px;height:18px;padding:0 6px;border-radius:9px;font:700 var(--fs-xs)/1 var(--f-ui);background:var(--raise);color:var(--text2)}
   .ls-cnt.crit{background:var(--st-fault);color:#1b0606}
   .ls-cnt.warn{background:var(--st-wait);color:#231703}
   .ls-now-list{display:flex;flex-direction:column}
-  .ls-n{--c:var(--st-wait);position:relative;padding:11px 14px 11px 16px;border-bottom:1px solid var(--line);box-shadow:inset 3px 0 0 var(--c)}
+  .ls-n{--c:var(--st-wait);position:relative;padding:11px 14px 12px 16px;border-bottom:1px solid var(--line);box-shadow:inset 3px 0 0 var(--c)}
   .ls-n:last-child{border-bottom:0}
   .ls-n.ack{opacity:.72;box-shadow:inset 3px 0 0 color-mix(in srgb,var(--c) 45%,transparent)}
-  .ls-n-top{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);min-width:0;white-space:nowrap}
-  .ls-n-top .sev{font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:10px;color:var(--c);flex:none}
+  .ls-n-top{display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--muted);min-width:0;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .ls-n-top .sev{font-weight:700;letter-spacing:.08em;text-transform:uppercase;font-size:var(--fs-2xs);color:var(--c);flex:none}
   .ls-n-top > span:nth-child(2){overflow:hidden;text-overflow:ellipsis;min-width:0}
-  .ls-n-top .link{font-size:11.5px;margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45%;flex:none}
-  .ls-n-t{font-weight:600;font-size:13px;line-height:1.3;margin:4px 0 2px}
-  .ls-n-b{font-size:12px;color:var(--text2);line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-  .ls-n-s{margin-top:7px;font-size:12px;line-height:1.4;color:var(--text2);padding:6px 9px;border-radius:7px;background:color-mix(in srgb,var(--accent) 7%,var(--bg2));border:1px solid color-mix(in srgb,var(--accent) 18%,transparent)}
+  .ls-n-top .link{font-size:var(--fs-xs);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45%;flex:none}
+  .ls-n-t{font-weight:600;font-size:var(--fs-md);line-height:1.3;margin:5px 0 2px}
+  .ls-n-b{font-size:var(--fs-sm);color:var(--text2);line-height:1.42;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .ls-n-s{margin-top:8px;font-size:var(--fs-sm);line-height:1.42;color:var(--text2);padding:7px 10px;border-radius:7px;background:color-mix(in srgb,var(--accent) 7%,var(--bg2));border:1px solid color-mix(in srgb,var(--accent) 18%,transparent)}
   .ls-n-s b{color:var(--accent);font-weight:600}
-  .ls-n-a{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-  .ls-n-a .btn.sm{height:26px;font-size:11.5px;padding:0 9px}
-  .ls-n-st{font-size:11px;color:var(--muted);align-self:center}
-  .ls-now-ok{display:flex;gap:10px;align-items:flex-start;padding:14px;font-size:12.5px;color:var(--text2)}
+  .ls-n-a{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+  .ls-n-a .btn.sm{font-size:var(--fs-xs)}
+  .ls-n-st{font-size:var(--fs-xs);color:var(--muted);align-self:center}
+  .ls-now-ok{display:flex;gap:10px;align-items:flex-start;padding:14px;font-size:var(--fs-sm);color:var(--text2)}
   .ls-now-ok .ico{color:var(--st-run);flex:none;margin-top:1px}
-  .ls-now-more{display:block;width:100%;padding:9px 14px;border:0;border-top:1px solid var(--line);background:transparent;color:var(--accent);font-size:12px;font-weight:600;cursor:pointer;text-align:left}
+  .ls-now-more{display:block;width:100%;padding:10px 14px;border:0;border-top:1px solid var(--line);background:transparent;color:var(--accent);font-size:var(--fs-sm);font-weight:600;cursor:pointer;text-align:left}
 
   .ls-brief .card-b{display:flex;flex-direction:column;gap:9px}
-  .ls-brief-h{font-weight:600;font-size:13.5px;line-height:1.4}
+  .ls-brief-h{font-weight:600;font-size:var(--fs-md);line-height:1.4}
   .ls-brief ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px}
-  .ls-brief li{--c:var(--info);position:relative;padding-left:14px;font-size:12.3px;line-height:1.42;color:var(--text2)}
-  .ls-brief li::before{content:"";position:absolute;left:1px;top:.5em;width:6px;height:6px;border-radius:50%;background:var(--c)}
+  .ls-brief li{--c:var(--info);position:relative;padding-left:14px;font-size:var(--fs-sm);line-height:1.45;color:var(--text2)}
+  .ls-brief li::before{content:"";position:absolute;left:1px;top:.52em;width:6px;height:6px;border-radius:50%;background:var(--c)}
   .ls-brief li .link{font-size:inherit}
-  .ls-brief-f{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--faint);flex-wrap:wrap}
+  .ls-brief-f{display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--faint);flex-wrap:wrap}
   .ls-brief-f .spacer{flex:1}
-  .ls-mode{font:600 10px/1 var(--f-ui);letter-spacing:.06em;text-transform:uppercase;padding:3px 6px;border-radius:5px;color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);border:1px solid color-mix(in srgb,var(--accent) 28%,transparent)}
+  .ls-mode{font:600 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.06em;text-transform:uppercase;padding:3px 6px;border-radius:5px;color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);border:1px solid color-mix(in srgb,var(--accent) 28%,transparent)}
   .ls-ibtn{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}
   .ls-ibtn:hover{color:var(--text);border-color:var(--line2)}
 
   .ls-feed-list{display:flex;flex-direction:column;padding:4px 0}
-  .ls-ev{--c:var(--muted);display:grid;grid-template-columns:40px 22px minmax(0,1fr);gap:6px;align-items:start;padding:6px 14px;font-size:12px;line-height:1.38;border:0;background:transparent;color:inherit;text-align:left;width:100%}
+  .ls-ev{--c:var(--muted);display:grid;grid-template-columns:40px 22px minmax(0,1fr);gap:6px;align-items:start;padding:6px 14px;font-size:var(--fs-sm);line-height:1.38;border:0;background:transparent;color:inherit;text-align:left;width:100%}
   .ls-ev.link-ev{cursor:pointer}
   .ls-ev.link-ev:hover{background:color-mix(in srgb,var(--raise) 40%,transparent)}
-  .ls-ev .num{color:var(--muted);font-size:11.5px;padding-top:1px}
+  .ls-ev .num{color:var(--muted);font-size:var(--fs-xs);padding-top:1px}
   .ls-ev .ls-ev-i{display:grid;place-items:center;width:20px;height:20px;border-radius:6px;color:var(--c);background:color-mix(in srgb,var(--c) 13%,transparent)}
   .ls-ev .ls-ev-m{color:var(--text2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
   .ls-ev.new{animation:lsIn .6s ease}
@@ -251,13 +255,12 @@
 
   .ls-jump{display:none}
 
-  /* Kompakte KPI-Leiste: kleine Laptops, Beamer (1280×720), niedrige Fenster – eine Reihe, eine Zeile Erläuterung */
+  /* Kompakte KPI-Leiste: kleine Laptops, Beamer (1280×720), niedrige Fenster – eine Zeile Erläuterung */
   @media (max-width:1320px),(max-height:820px){
-    .ls-kpis .kpi{padding:9px 12px 9px}
-    .ls-kpis .kpi .v{font-size:24px}
-    .ls-kpis .kpi .v small{font-size:13px}
+    .ls-kpis .kpi{padding:10px 12px 10px;min-height:0}
+    .ls-kpis .kpi .v{font-size:var(--fs-2xl)}
     .ls-kpis .ls-s2{display:none}
-    .ls-k-spark{height:26px;margin-bottom:2px}
+    .ls-k-spark{height:24px}
     .ls-head .view-sub{margin-top:2px}
   }
   @media (max-width:1100px){
@@ -278,7 +281,6 @@
     .ls-shift{width:100%}
     .ls-tvbtn{display:none}
     .ls-grid{grid-template-columns:minmax(0,1fr)}
-    .ls-kpis .kpi .v{font-size:25px}
   }
   /* Telefon: KPI- und Schicht-Leiste zum Wischen, Maschinen als kompakte Statuszeilen, Sprungleiste */
   @media (max-width:560px){
@@ -287,112 +289,128 @@
     .ls-shift::-webkit-scrollbar,.ls-kpis::-webkit-scrollbar,.ls-jump::-webkit-scrollbar{display:none}
     .ls-sh{flex:none;scroll-snap-align:start}
     .ls-kpis{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;gap:8px;margin:0 -18px;padding:0 18px;scroll-padding:0 18px}
-    .ls-kpis .kpi{flex:0 0 72%;scroll-snap-align:start;padding:9px 12px}
+    .ls-kpis .kpi{flex:0 0 72%;scroll-snap-align:start;padding:10px 12px}
     .ls-kpis .ls-k-oee{flex-basis:84%}
-    .ls-kpis .kpi .v{font-size:24px}
     .ls-jump{display:flex;gap:6px;position:sticky;top:-18px;z-index:6;margin:-4px -18px -2px;padding:8px 18px;background:var(--bg);border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
-    .ls-jump button{flex:none;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--text2);font-size:12.5px;font-weight:600;cursor:pointer}
-    .ls-jump button b{display:inline-grid;place-items:center;min-width:18px;height:17px;padding:0 5px;border-radius:9px;font:700 10.5px/1 var(--f-ui);background:var(--raise);color:var(--text2)}
+    .ls-jump button{flex:none;display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--text2);font-size:var(--fs-sm);font-weight:600;cursor:pointer}
+    .ls-jump button b{display:inline-grid;place-items:center;min-width:18px;height:17px;padding:0 5px;border-radius:9px;font:700 var(--fs-2xs)/1 var(--f-ui);background:var(--raise);color:var(--text2)}
     .ls-jump button b.warn{background:var(--st-wait);color:#231703}
     .ls-jump button b.crit{background:var(--st-fault);color:#1b0606}
-    .ls-now,.ls-machines,.ls-brief,.ls-feed{scroll-margin-top:58px}
+    .ls-now,.ls-machines,.ls-brief,.ls-feed{scroll-margin-top:62px}
     .ls-sum{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -18px;padding:0 18px}
     .ls-sum::-webkit-scrollbar{display:none}
     .ls-sum button{flex:none}
     .ls-grid{gap:8px}
-    .ls-tile{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"th st" "cause cause" "ord ord" "prog prog" "band band";gap:4px 10px;padding:10px 12px 0}
+    .ls-tile{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"th st" "cause cause" "ord ord" "prog prog" "band band";gap:4px 10px;padding:10px 12px 12px}
     .ls-tile:not(.has-cause){grid-template-areas:"th st" "ord ord" "prog prog" "band band"}
     .ls-tile .ls-prog-t b em{display:inline}
     .ls-tile .ls-th{grid-area:th}
     .ls-tile .ls-st{grid-area:st}
-    .ls-tile .ls-cause{grid-area:cause;-webkit-line-clamp:1;font-size:12px}
+    .ls-tile .ls-cause{grid-area:cause;-webkit-line-clamp:1}
     .ls-tile .ls-ordb{grid-area:ord;border-top:0;padding-top:0;margin-top:0}
     .ls-tile .ls-prog{grid-area:prog;flex-direction:row;align-items:center;gap:8px}
     .ls-tile .ls-prog-t{display:contents}
     .ls-tile .ls-prog-t b{order:0;flex:0 1 auto}
-    .ls-tile .ls-prog-t span{order:2;font-size:11.5px}
+    .ls-tile .ls-prog-t span{order:2;font-size:var(--fs-xs)}
     .ls-tile .ls-prog .bar{order:1;flex:1 1 40px;min-width:30px}
-    .ls-tile .ls-band{grid-area:band;margin:5px -12px 0}
+    .ls-tile .ls-band{grid-area:band;margin-top:5px}
+    .ls-tile .ls-band span{display:none}
     .ls-tile .ls-op,.ls-tile .ls-tool,.ls-tile .ls-op8,.ls-tile .ls-foot,.ls-tile .ls-since,.ls-name .ls-area,.ls-th .conn{display:none !important}
-    .ls-tile .ls-name b{font-size:17px}
-    .ls-tile .ls-st .pill{font-size:11.5px;line-height:18px;padding:1px 9px 1px 7px}
+    .ls-tile .ls-st .pill{font-size:var(--fs-xs);line-height:18px;padding:1px 9px 1px 7px}
     .ls-tile .ls-prog .bar{height:4px}
     .ls-tile.ls-x{display:flex;padding-bottom:12px}
   }
+  /* Touch: Bedienflächen mindestens 40 px */
+  @media (pointer:coarse){
+    .ls-sum button{height:40px;padding:0 14px}
+    .ls-jump button{height:40px}
+    .ls-n-a .btn.sm{height:auto;min-height:40px;padding:0 14px}
+    .ls-ibtn{width:40px;height:40px}
+    .ls-now-more{min-height:44px}
+    .ls-brief-f .link,.ls-n-top .link{padding:10px 0;margin:-10px 0}
+  }
 
-  /* TV-Modus (Hallen-Wandtafel 1080p): keine Bedienelemente, große Schrift, 5 Spalten, alles ohne Scrollen */
+  /* TV-Modus (Hallen-Wandtafel 1080p, 3–5 m Betrachtungsabstand): keine Bedienelemente, große Schrift, 5 Spalten */
   .ls-tvinfo{display:none}
   .view.ls-tvview{padding-top:14px;padding-bottom:16px}
   .ls-root.ls-tv .ls-tvhide,.ls-root.ls-tv .ls-head,.ls-root.ls-tv .ls-brief,.ls-root.ls-tv .ls-feed,.ls-root.ls-tv .ls-jump,.ls-root.ls-tv .ls-n-a{display:none !important}
   .ls-root.ls-tv{gap:12px}
-  .ls-root.ls-tv .ls-tvinfo{display:block;margin-left:auto;font-size:13.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .ls-root.ls-tv .ls-tvinfo{display:block;margin-left:auto;font-size:16px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
   .ls-root.ls-tv .ls-tvinfo b{color:var(--text2);font-weight:600}
   .ls-root.ls-tv .ls-bar{flex-wrap:nowrap}
   .ls-root.ls-tv .ls-sum{flex:0 1 auto;flex-wrap:nowrap}
-  .ls-root.ls-tv .ls-sum button{height:32px;font-size:13.5px;cursor:default}
-  .ls-root.ls-tv .ls-kpis .kpi{padding:11px 15px 11px}
-  .ls-root.ls-tv .ls-kpis .kpi .v{font-size:36px}
-  .ls-root.ls-tv .ls-kpis .kpi .v small{font-size:17px}
-  .ls-root.ls-tv .ls-kpis .kpi .l{font-size:12px}
-  .ls-root.ls-tv .ls-kpis .kpi .s{font-size:13.5px}
+  .ls-root.ls-tv .ls-sum button{height:36px;font-size:16px;cursor:default;padding:0 13px}
+  .ls-root.ls-tv .ls-sum button i{width:10px;height:10px}
+  .ls-root.ls-tv .ls-kpis .kpi{padding:12px 16px 12px;min-height:0}
+  .ls-root.ls-tv .ls-kpis .kpi .l{font-size:14px;letter-spacing:.08em}
+  .ls-root.ls-tv .ls-kpis .kpi .v{font-size:44px;line-height:1.05;margin-top:6px}
+  .ls-root.ls-tv .ls-kpis .kpi .v small{font-size:20px}
+  .ls-root.ls-tv .ls-kpis .kpi .s{font-size:14px;margin-top:4px}
   .ls-root.ls-tv .ls-kpis .ls-s2{display:none}
-  .ls-root.ls-tv .ls-k-spark{height:40px}
-  .ls-root.ls-tv .ls-main{grid-template-columns:minmax(0,1fr) 340px}
-  .ls-root.ls-tv .ls-grid{grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
-  .ls-root.ls-tv .ls-tile{gap:6px;padding:12px 14px 0}
-  .ls-root.ls-tv .ls-band{margin:auto -14px 0;height:6px}
-  .ls-root.ls-tv .ls-band svg{height:6px}
-  .ls-root.ls-tv .ls-name b{font-size:24px}
-  .ls-root.ls-tv .ls-name .ls-id{font-size:13px}
-  .ls-root.ls-tv .ls-name .ls-area,.ls-root.ls-tv .ls-th .conn,.ls-root.ls-tv .ls-op,.ls-root.ls-tv .ls-tool-n{display:none}
-  .ls-root.ls-tv .ls-foot{margin-top:2px;font-size:12.5px;gap:8px}
-  .ls-root.ls-tv .ls-bn{font-size:12.5px}
-  .ls-root.ls-tv .ls-slots i{width:7px;height:12px}
-  .ls-root.ls-tv .ls-mini{width:36px;height:8px}
-  .ls-root.ls-tv .ls-flag{font-size:12px;padding:4px 7px}
-  .ls-root.ls-tv .ls-st .pill{font-size:15px;line-height:24px;padding:2px 12px 2px 10px}
-  .ls-root.ls-tv .ls-st .pill i{width:9px;height:9px}
+  .ls-root.ls-tv .ls-k-spark{height:28px}
+  .ls-root.ls-tv .ls-main{grid-template-columns:minmax(0,1fr) 400px}
+  .ls-root.ls-tv .ls-grid{grid-template-columns:repeat(auto-fill,minmax(290px,1fr))}
+  .ls-root.ls-tv .ls-tile{gap:6px;padding:12px 15px 12px}
+  .ls-root.ls-tv .ls-band{height:6px;margin-top:auto}
+  .ls-root.ls-tv .ls-band svg{height:6px;border-radius:3px}
+  .ls-root.ls-tv .ls-band span{display:none}
+  .ls-root.ls-tv .ls-name b{font-size:28px;line-height:1.1}
+  .ls-root.ls-tv .ls-name .ls-id{font-size:16px}
+  .ls-root.ls-tv .ls-name .ls-area,.ls-root.ls-tv .ls-th .conn,.ls-root.ls-tv .ls-op,.ls-root.ls-tv .ls-tool-n,.ls-root.ls-tv .ls-foot{display:none}
+  .ls-root.ls-tv .ls-flag{font-size:14px;padding:4px 8px}
+  .ls-root.ls-tv .ls-st .pill{font-size:16px;line-height:26px;padding:2px 13px 2px 11px}
+  .ls-root.ls-tv .ls-st .pill i{width:10px;height:10px}
   .ls-root.ls-tv .ls-since{font-size:14px}
-  .ls-root.ls-tv .ls-cause{font-size:14px}
+  .ls-root.ls-tv .ls-cause{font-size:14px;line-height:1.35}
   .ls-root.ls-tv .ls-tile.has-cause .ls-op8{display:none}
-  .ls-root.ls-tv .ls-ord{font-size:15.5px}
-  .ls-root.ls-tv .ls-ord .mono{font-size:14px}
-  .ls-root.ls-tv .ls-risk{font-size:12px;padding:4px 7px}
+  .ls-root.ls-tv .ls-ordb{padding-top:7px}
+  .ls-root.ls-tv .ls-ord{font-size:18px}
+  .ls-root.ls-tv .ls-ord .mono{font-size:16px}
+  .ls-root.ls-tv .ls-risk{font-size:14px;padding:4px 7px}
   .ls-root.ls-tv .ls-prog-t{font-size:14px}
-  .ls-root.ls-tv .ls-prog-t b{font-size:18px}
+  .ls-root.ls-tv .ls-prog-t b{font-size:20px}
   .ls-root.ls-tv .ls-prog .bar{height:7px}
   .ls-root.ls-tv .ls-tool{padding:5px 9px}
   .ls-root.ls-tv .ls-tool-s{padding-left:0;font-size:14px}
   .ls-root.ls-tv .ls-tool-x{display:inline}
   .ls-root.ls-tv .ls-op8{font-size:14px}
-  .ls-root.ls-tv .ls-op8 .avatar{width:26px;height:26px;font-size:10.5px}
+  .ls-root.ls-tv .ls-op8 .avatar{width:26px;height:26px;font-size:var(--fs-xs)}
+  .ls-root.ls-tv .ls-x-h h3{font-size:18px}
   .ls-root.ls-tv .ls-x-sh{font-size:14px}
   .ls-root.ls-tv .ls-x-tr{height:10px}
-  .ls-root.ls-tv .ls-x .eyebrow{font-size:11.5px}
-  .ls-root.ls-tv .ls-x-ax{font-size:12px;height:13px}
-  .ls-root.ls-tv .ls-x-row{font-size:14px;grid-template-columns:48px 18px minmax(0,1fr);padding:4px 0}
-  .ls-root.ls-tv .ls-x-row .num{font-size:13px}
-  .ls-root.ls-tv .ls-x-list.wd .ls-x-row{grid-template-columns:72px 18px minmax(0,1fr)}
-  .ls-root.ls-tv .ls-n-t{font-size:15px}
-  .ls-root.ls-tv .ls-n-top{font-size:12.5px}
-  .ls-root.ls-tv .ls-n-b,.ls-root.ls-tv .ls-n-s{font-size:13.5px}
-  .ls-root.ls-tv .ls-now .card-h h3{font-size:15px}
-  .ls-root.ls-tv .ls-now-more{pointer-events:none;color:var(--muted);font-size:13px}
-  .ls-root.ls-tv .ls-ev{font-size:13px;padding:6px 14px}
-  .ls-root.ls-tv .ls-ev .num{font-size:12.5px}
-  .ls-root.ls-tv .ls-feed .card-h h3{font-size:15px}
+  .ls-root.ls-tv .ls-x .eyebrow{font-size:14px}
+  .ls-root.ls-tv .ls-x-ax{font-size:14px;height:15px}
+  .ls-root.ls-tv .ls-x-row{font-size:15px;grid-template-columns:50px 18px minmax(0,1fr);padding:4px 0}
+  .ls-root.ls-tv .ls-x-row .num{font-size:14px}
+  .ls-root.ls-tv .ls-x-list.wd .ls-x-row{grid-template-columns:76px 18px minmax(0,1fr)}
+  /* „Jetzt wichtig“ in 16 px – nimmt im TV-Modus die ganze rechte Spalte ein */
+  .ls-root.ls-tv .ls-now .card-h{padding:13px 16px}
+  .ls-root.ls-tv .ls-now .card-h h3{font-size:19px}
+  .ls-root.ls-tv .ls-cnt{min-width:26px;height:24px;font-size:14px;border-radius:12px}
+  .ls-root.ls-tv .ls-n{padding:13px 16px 14px 18px}
+  .ls-root.ls-tv .ls-n-top{font-size:14px}
+  .ls-root.ls-tv .ls-n-top .sev{font-size:14px}
+  .ls-root.ls-tv .ls-n-top .link{font-size:14px}
+  .ls-root.ls-tv .ls-n-t{font-size:18px;line-height:1.28}
+  .ls-root.ls-tv .ls-n-b{font-size:16px;line-height:1.4}
+  .ls-root.ls-tv .ls-n-s{font-size:16px;line-height:1.4;padding:8px 11px}
+  .ls-root.ls-tv .ls-now-ok{font-size:16px}
+  .ls-root.ls-tv .ls-now-more{pointer-events:none;color:var(--muted);font-size:14px}
+  @media (max-width:1100px){
+    .ls-root.ls-tv .ls-bar{flex-wrap:wrap}
+    .ls-root.ls-tv .ls-sum{flex:1 1 auto;flex-wrap:wrap}
+    .ls-root.ls-tv .ls-tvinfo{flex:1 1 100%;margin-left:0;white-space:normal}
+  }
   /* 1080p und größer: Raster füllt genau die Höhe (3 Reihen à 5), Statuszeile unten neben „TV-Modus beenden“ */
   @media (min-width:1660px) and (min-height:940px){
     .ls-root.ls-tv{height:100%;display:grid;grid-template-rows:auto minmax(0,1fr)}
     .ls-root.ls-tv .ls-main{min-height:0;align-items:stretch}
     .ls-root.ls-tv .ls-machines{display:flex;flex-direction:column;min-height:0}
-    .ls-root.ls-tv .ls-bar{order:2;margin:10px 0 0;padding-left:196px;min-height:34px}
+    .ls-root.ls-tv .ls-bar{order:2;margin:10px 0 0;padding-left:210px;min-height:36px}
     .ls-root.ls-tv .ls-grid{flex:1;min-height:0;grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:minmax(0,1fr)}
     .ls-root.ls-tv .ls-side{min-height:0}
-    .ls-root.ls-tv .ls-now{flex:0 1 auto;min-height:0;display:flex;flex-direction:column}
-    .ls-root.ls-tv .ls-now-list{min-height:0;overflow:hidden}
-    .ls-root.ls-tv .ls-feed{display:flex !important;flex-direction:column;flex:1 1 0;min-height:150px}
-    .ls-root.ls-tv .ls-feed-list{flex:1;min-height:0;overflow:hidden;-webkit-mask-image:linear-gradient(#000 calc(100% - 36px),transparent);mask-image:linear-gradient(#000 calc(100% - 36px),transparent)}
+    .ls-root.ls-tv .ls-now{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+    .ls-root.ls-tv .ls-now-list{flex:1;min-height:0;overflow:hidden}
   }
   `, 'ls-css');
 
@@ -445,9 +463,10 @@
       <div class="ls-kpis" data-r="kpis">
         <div class="kpi ls-k-oee" data-r="kOee" title="Gesamtanlageneffektivität der Bearbeitungsmaschinen seit 00:00">
           <div class="l">OEE heute</div>
-          <div class="ls-k-row"><div class="v" data-r="kOeeV">–</div><div class="ls-k-spark" data-r="kOeeSpark"></div></div>
+          <div class="v" data-r="kOeeV">–</div>
           <div class="s" data-r="kOeeS1">–</div>
           <div class="s ls-s2" data-r="kOeeS2">–</div>
+          <div class="viz ls-k-spark" data-r="kOeeSpark"></div>
         </div>
         <div class="kpi click" data-r="kGood" data-nav="auftraege" title="Gutteile, die heute den letzten Bearbeitungsschritt ihres Auftrags abgeschlossen haben">
           <div class="l">Fertige Teile heute</div><div class="v" data-r="kGoodV">–</div><div class="s" data-r="kGoodS">–</div><div class="s ls-s2" data-r="kGoodS2">–</div>
@@ -460,8 +479,9 @@
         </div>
         <div class="kpi" data-r="kEn" title="Elektrische Leistung der Halle (Maschinen, AGVs, Grundlast) – gemessen bzw. aus Zustand geschätzt">
           <div class="l">Energie</div>
-          <div class="ls-k-row"><div class="v" data-r="kEnV">–</div><div class="ls-k-spark" data-r="kEnSpark"></div></div>
+          <div class="v" data-r="kEnV">–</div>
           <div class="s" data-r="kEnS">–</div>
+          <div class="viz ls-k-spark" data-r="kEnSpark"></div>
         </div>
         <div class="kpi click" data-r="kMsg" title="Offene Warnungen und Störungen">
           <div class="l">Offene Meldungen</div><div class="v" data-r="kMsgV">–</div><div class="s" data-r="kMsgS">–</div><div class="s ls-s2" data-r="kMsgS2">–</div>
@@ -603,7 +623,7 @@
       </div>
       <div class="ls-op8" data-r="opr"><span class="avatar" data-r="av"></span><span data-r="oprT"></span><span class="ls-more" data-r="more" hidden></span></div>
       <div class="ls-foot" data-r="buf"></div>
-      <div class="ls-band" data-r="band"></div>`;
+      <div class="ls-band" data-r="band"><div data-r="bandB"></div><span class="a0" data-r="bandA0"></span><span class="a1">jetzt</span></div>`;
     const r = refs(el);
     const open = () => WF.app.select('machine', id);
     el.addEventListener('click', open);
@@ -695,16 +715,26 @@
     return !/^Teil\s+\d+\s*\/\s*\d+\b/.test(mv.cause);
   }
 
-  function tileVM(mv, now) {
+  /** Beginn des Zustandsbands: höchstens 4 h zurück, aber nie vor dem ersten aufgezeichneten Zustand (kein leerer Anfang) */
+  function bandStart(segs, now) {
+    const first = segs && segs.length ? segs[0].t0 : now - BAND_SEC;
+    return Math.min(now - 1800, Math.max(now - BAND_SEC, first));
+  }
+  /** Ohne Schicht geplant „Bereit“ (nicht autonome Maschine wartet auf den Schichtbeginn) – ruhige Kachel, keine Warnung */
+  const restCause = /^Keine Schicht\s*[–-]\s*/;
+  function tileVM(mv, now, noShift) {
     const st = WF.STATE[mv.state] || WF.STATE.idle;
     const showCause = causeIsInfo(mv);
+    const rest = !!(noShift && mv.state === 'idle');
+    const restHold = rest && restCause.test(mv.cause || '');
+    const cause = restHold ? (s => s.charAt(0).toUpperCase() + s.slice(1))(String(mv.cause).replace(restCause, '')) : (mv.cause || '–');
     const vm = {
-      state: mv.state, color: st.color,
+      state: mv.state + (restHold ? '|rest' : ''), color: st.color, rest,
       sev: mv.state === 'fault' ? 'crit' : WAIT[mv.state] ? 'warn' : '',
-      pill: WF.ui.pill(mv.state),
+      pill: restHold ? WF.ui.pill('idle', 'Keine Schicht') : WF.ui.pill(mv.state),
       since: sinceText(mv.sinceSec),
       sinceTitle: 'seit ' + U.fmtDayClock(mv.since),
-      cause: mv.cause || '–', showCause,
+      cause, showCause,
       conn: 'L' + (mv.conn.level || 0), connL: String(mv.conn.level || 0),
       connTitle: `Anbindung Level ${mv.conn.level}: ${WF.sim.LABELS.conn[mv.conn.level] || ''} – ${mv.conn.protocol || ''}`,
     };
@@ -743,6 +773,8 @@
     }
     const tl = toolLine(mv, now);
     vm.toolN = tl ? tl.name : ''; vm.toolS = tl ? tl.status : ''; vm.toolU = tl ? tl.u : ''; vm.toolC = tl ? tl.c : ''; vm.toolTitle = tl ? tl.title : '';
+    // ohne Schicht: Werkzeugzeile neutral (der Wechsel kommt mit der nächsten Schicht – kein Handlungsbedarf jetzt)
+    if (rest && tl && tl.u !== 'faint' && tl.u !== 'crit') { vm.toolU = 'rest'; vm.toolC = 'var(--muted)'; }
     vm.wear = tl && tl.wear != null ? tl.wear : null;
     const op = operatorLine(mv);
     vm.oprCls = op.cls; vm.av = op.av; vm.avCls = op.avCls; vm.opr = op.html; vm.oprTitle = op.title;
@@ -750,16 +782,19 @@
     const b = bufHTML(mv); vm.buf = b.h; vm.bufTitle = b.title;
     const segs = mv.segments || [];
     const last = segs[segs.length - 1];
-    vm.bandKey = segs.length + '|' + (last ? last.state + last.t0 : '') + '|' + Math.floor(now / 60);
-    vm.bandTitle = `Zustände ${U.fmtClock(now - BAND_SEC)}–${U.fmtClock(now)} (letzte 4 h)`;
-    vm.aria = `${mv.short} ${mv.id}: ${st.label}, ${vm.since}. ${vm.cause}`;
+    vm.band0 = bandStart(segs, now);
+    vm.bandKey = segs.length + '|' + (last ? last.state + last.t0 : '') + '|' + Math.floor(now / 60) + '|' + Math.floor(vm.band0 / 60);
+    vm.bandA0 = tclock(vm.band0, now);
+    vm.bandTitle = `Zustände ${tclock(vm.band0, now)}–${U.fmtClock(now)}${now - vm.band0 >= BAND_SEC - 60 ? ' (letzte 4 h)' : ' (seit Aufzeichnungsbeginn)'}`;
+    vm.aria = `${mv.short} ${mv.id}: ${restHold ? 'Keine Schicht' : st.label}, ${vm.since}. ${vm.cause}`;
     return vm;
   }
 
-  function patchTile(t, mv, now) {
-    const vm = tileVM(mv, now), p = t.vm, r = t.r, el = t.el;
-    if (p.state !== vm.state) { el.dataset.state = vm.state; setVar(el, '--c', vm.color); setHTML(r.pill, vm.pill); }
+  function patchTile(t, mv, now, noShift) {
+    const vm = tileVM(mv, now, noShift), p = t.vm, r = t.r, el = t.el;
+    if (p.state !== vm.state) { el.dataset.state = mv.state; setVar(el, '--c', vm.color); setHTML(r.pill, vm.pill); }
     if (p.sev !== vm.sev) { el.classList.toggle('sev', !!vm.sev); el.classList.toggle('crit', vm.sev === 'crit'); }
+    if (p.rest !== vm.rest) el.classList.toggle('rest', vm.rest);
     if (p.showCause !== vm.showCause) { el.classList.toggle('has-cause', vm.showCause); setAttr(r.cause, 'hidden', !vm.showCause); }
     setText(r.since, vm.since); setAttr(r.since, 'title', vm.sinceTitle);
     setText(r.cause, vm.cause); setAttr(r.cause, 'title', vm.cause);
@@ -788,7 +823,8 @@
     setHTML(r.oprT, vm.opr); setAttr(r.opr, 'title', vm.oprTitle);
     setText(r.more, vm.more); setAttr(r.more, 'hidden', !vm.more); setAttr(r.more, 'title', vm.moreTitle);
     setHTML(r.buf, vm.buf); setAttr(r.buf, 'title', vm.bufTitle); setAttr(r.buf, 'hidden', !vm.buf);
-    if (p.bandKey !== vm.bandKey) setHTML(r.band, WF.ui.stateBand(mv.segments, now - BAND_SEC, now, { w: 280, h: 6 }));
+    if (p.bandKey !== vm.bandKey) setHTML(r.bandB, WF.ui.stateBand(mv.segments, vm.band0, now, { w: 280, h: 6 }));
+    setText(r.bandA0, vm.bandA0);
     setAttr(r.band, 'title', vm.bandTitle);
     setAttr(el, 'aria-label', vm.aria);
     t.vm = vm;
@@ -883,7 +919,7 @@
     const el = document.createElement('article');
     el.className = 'ls-tile ls-x';
     el.setAttribute('aria-label', 'Schichtverlauf und als Nächstes geplante Ereignisse');
-    el.innerHTML = `<div class="ls-x-h"><span class="eyebrow" data-r="xEy">Schichtverlauf</span><span class="ls-x-sh" data-r="xSh"></span></div>
+    el.innerHTML = `<div class="ls-x-h"><h3>Schichtverlauf</h3><span class="ls-x-sh" data-r="xSh"></span></div>
       <div class="ls-x-tl"><div class="ls-x-tr" data-r="xTr"></div><div class="ls-x-ax" data-r="xAx"></div></div>
       <div class="ls-x-lh"><span class="eyebrow" data-r="xLh">Als Nächstes · 2 h</span></div>
       <div class="ls-x-list" data-r="xList"></div>`;
@@ -1096,46 +1132,57 @@
     const Sx = S();
     return (Sx.notifications || []).filter(n => (n.status === 'open' || n.status === 'ack') && (n.sev === 'crit' || n.sev === 'warn'));
   }
+  /** Hinweis an einer Kennzahl-Kachel nur über .kpi.warn / .kpi.crit (UI_GUIDE Regel 14) */
+  function setHint(node, h) { if (node._hint !== h) { node._hint = h; node.classList.toggle('warn', h === 'warn'); node.classList.toggle('crit', h === 'crit'); } }
+  const valUnit = (v, unit) => `${esc(v)}${unit ? `<small>${esc(unit)}</small>` : ''}`;
+  const pctV = (x, dec) => (x == null ? '–' : valUnit(U.fmtNum(x * 100, dec), '%'));
   function updateKpis(now) {
     const k = WF.sim.kpis(), Sx = S(), H = Sx.history;
     // OEE (eine Wahrheit: kpis(), Formatierung 1 Nachkommastelle für OEE, V, L, Q)
-    setText(R.kOeeV, U.fmtPct(k.oee, 1));
+    setHTML(R.kOeeV, pctV(k.oee, 1));
+    setHint(R.kOee, k.oee != null && k.oee < TARGET_OEE ? 'warn' : '');
     const day0 = U.dayStart(now);
     let idx = H.t.findIndex(t => t >= day0);
     if (idx >= 0) while (idx < H.t.length - 1 && H.oee[idx] == null) idx++; // ab dem ersten Wert mit Planzeit (Schichtbeginn)
     const oeeVals = idx >= 0 ? H.oee.slice(idx) : [];
-    const sig = 'o' + H.t.length + '|' + (H.t[H.t.length - 1] || 0);
+    const sig = 'o' + H.t.length + '|' + (H.t[H.t.length - 1] || 0) + '|' + (k.oee != null && k.oee >= TARGET_OEE);
     if (R.kOeeSpark._sig !== sig) {
       R.kOeeSpark._sig = sig;
       R.kOeeSpark.innerHTML = sparkSVG(oeeVals, { target: TARGET_OEE, color: k.oee != null && k.oee >= TARGET_OEE ? 'var(--st-run)' : 'var(--st-wait)' });
       R.kOeeSpark.title = 'OEE-Verlauf heute (5-min-Werte, kumuliert seit 00:00) – gestrichelt: Ziel 75 %';
     }
     const apq = `V ${U.fmtPct(k.availability, 1)} × L ${U.fmtPct(k.performance, 1)} × Q ${U.fmtPct(k.quality, 1)}`;
-    if (k.oee == null) setHTML(R.kOeeS1, `Ziel ${U.fmtPct(TARGET_OEE)} · noch keine Planzeit heute`);
+    const g = k.ghost;   // nur ohne Schicht: autonome, für den unbemannten Lauf freigegebene Maschinen
+    const ghostTxt = g && g.autonomous ? `Geisterschicht: <b>${g.running} von ${g.autonomous}</b> autonomen Maschinen laufen` : g ? 'Geisterschicht: keine autonome Maschine eingeplant' : '';
+    if (ghostTxt) setHTML(R.kOeeS1, ghostTxt);
+    else if (k.oee == null) setHTML(R.kOeeS1, `Ziel ${U.fmtPct(TARGET_OEE)} · noch keine Planzeit heute`);
     else {
       const d = (k.oee - TARGET_OEE) * 100;
-      setHTML(R.kOeeS1, `Ziel ${U.fmtPct(TARGET_OEE)} · <span class="${d >= 0 ? 'ok' : 'warn'}">${d >= 0 ? '+' : '−'}${U.fmtNum(Math.abs(d), 1)} Pkt.</span>${k.oeeShift != null ? ` · ${WF.sim.shift().id ? 'Schicht' : 'Geisterschicht'} ${U.fmtPct(k.oeeShift, 0)}` : ''}`);
+      setHTML(R.kOeeS1, `Ziel ${U.fmtPct(TARGET_OEE)} · ${d >= 0 ? '+' : '−'}${U.fmtNum(Math.abs(d), 1)} Pkt.${k.oeeShift != null ? ` · Schicht <b>${U.fmtPct(k.oeeShift, 0)}</b>` : ''}`);
     }
+    setAttr(R.kOeeS1, 'title', g ? `Ohne Schicht laufen nur autonome Maschinen (Stangenlader, Palettenwechsler, Portallader).${g.stoppedIds && g.stoppedIds.length ? ' Stehen: ' + g.stoppedIds.join(', ') + '.' : ''}` : null);
     setHTML(R.kOeeS2, `V <b>${U.fmtPct(k.availability, 1)}</b> × L <b>${U.fmtPct(k.performance, 1)}</b> × Q <b>${U.fmtPct(k.quality, 1)}</b>`);
     setAttr(R.kOeeS2, 'title', 'Verfügbarkeit × Leistung × Qualität');
-    setAttr(R.kOee, 'title', `Gesamtanlageneffektivität der Bearbeitungsmaschinen seit 00:00 – ${apq}`);
+    setAttr(R.kOee, 'title', `Gesamtanlageneffektivität der Bearbeitungsmaschinen seit 00:00 – ${apq}${k.oeeShift != null ? ' · ' + (g ? 'Geisterschicht' : 'laufende Schicht') + ' ' + U.fmtPct(k.oeeShift, 1) : ''}`);
     // Teile
-    setHTML(R.kGoodV, `${U.fmtNum(k.goodFinished)}<small>Stk</small>`);
-    setHTML(R.kGoodS, `Arbeitsgänge: <b>${U.fmtNum(k.goodOps)}</b> Gutteile`);
+    setHTML(R.kGoodV, valUnit(U.fmtNum(k.goodFinished), 'Stk'));
+    setHTML(R.kGoodS, `Arbeitsgänge: <b>${U.fmtNum(k.goodOps)}</b> gut`);
     setHTML(R.kGoodS2, `Ausschuss ${U.fmtNum(k.scrap)} · FPY ${U.fmtPct(k.fpy, 1)}`);
-    // Termintreue
+    // Termintreue – Hinweis nur, wenn ein offener Auftrag verspätet ist
     const rc = riskCounts(now);
-    setText(R.kOtV, U.fmtPct(k.onTimePct, 0));
-    setHTML(R.kOtS, rc.late ? `<span class="crit">${rc.late} verspätet</span>${rc.tight ? ` · <span class="warn">${rc.tight} knapp</span>` : ''}` : rc.tight ? `<span class="warn">${rc.tight} knapp</span> · keiner verspätet` : '<span class="ok">alle offenen Aufträge im Plan</span>');
+    setHTML(R.kOtV, pctV(k.onTimePct, 0));
+    setHint(R.kOt, rc.late ? 'warn' : '');
+    setHTML(R.kOtS, rc.late ? `<b>${rc.late}</b> verspätet${rc.tight ? ` · ${rc.tight} knapp` : ''}` : rc.tight ? `${rc.tight} knapp · keiner verspätet` : 'alle offenen Aufträge im Plan');
     setText(R.kOtS2, rc.worst ? `${rc.worst.id}: ${U.fmtDur(-rc.worst.slackSec)} Verzug` : `${rc.open} offene Aufträge`);
     setAttr(R.kOt, 'title', `Termintreue ${U.fmtPct(k.onTimePct, 0)} – ${rc.late} Auftrag/Aufträge verspätet, ${rc.tight} mit weniger als 4 h Puffer (Prognose)`);
     // Stillstandkosten
-    setHTML(R.kLossV, `${esc(U.fmtEur(k.lossEur))}<small>heute</small>`);
+    const eur = U.fmtEur(k.lossEur);
+    setHTML(R.kLossV, valUnit(eur.replace(/\s*€$/, ''), '€'));
     const top = topLoss();
-    setHTML(R.kLossS, top ? `größter Posten <b>${esc(top.id)}</b> · ${U.fmtEur(top.lossEurToday)}` : 'kein Stillstand heute');
+    setHTML(R.kLossS, top ? `heute · größter Posten <b>${esc(top.id)}</b> ${U.fmtEur(top.lossEurToday)}` : 'heute kein Stillstand');
     setText(R.kLossS2, 'Rüsten, Warten, Störung');
     // Energie
-    setHTML(R.kEnV, `${U.fmtNum(k.powerKw, 0)}<small>kW</small>`);
+    setHTML(R.kEnV, valUnit(U.fmtNum(k.powerKw, 0), 'kW'));
     setText(R.kEnS, `heute ${U.fmtNum(k.energyKwh, 0)} kWh · Ø ${U.fmtNum(avgPower(H, day0), 0)} kW`);
     if (R.kEnSpark._sig !== sig) {
       R.kEnSpark._sig = sig;
@@ -1143,12 +1190,13 @@
       R.kEnSpark.innerHTML = sparkSVG(H.powerKw.slice(-n), { color: 'var(--info)', min: 0 });
       R.kEnSpark.title = 'Leistungsaufnahme der letzten 4 h (5-min-Mittelwerte)';
     }
-    // Meldungen
+    // Meldungen – kritisch, wenn eine Störung offen ist; sonst Warnung (nie bei 0)
     const on = openNotifs();
     const open = on.filter(n => n.status === 'open'), crit = open.filter(n => n.sev === 'crit').length;
     const acked = on.length - open.length;
-    setText(R.kMsgV, String(open.length));
-    setHTML(R.kMsgS, open.length ? `${crit ? `<span class="crit">${crit} kritisch</span> · ` : ''}<span class="warn">${open.length - crit} ${open.length - crit === 1 ? 'Warnung' : 'Warnungen'}</span>` : '<span class="ok">keine offenen Warnungen</span>');
+    setHTML(R.kMsgV, valUnit(String(open.length), 'offen'));
+    setHint(R.kMsg, crit ? 'crit' : open.length ? 'warn' : '');
+    setHTML(R.kMsgS, open.length ? `${crit ? `<b>${crit}</b> kritisch · ` : ''}${open.length - crit} ${open.length - crit === 1 ? 'Warnung' : 'Warnungen'}` : 'keine offenen Warnungen');
     const info = (Sx.notifications || []).filter(n => n.status === 'open' && n.sev === 'info').length;
     const roles = {};
     for (const n of open) roles[n.role || 'Leitstand'] = (roles[n.role || 'Leitstand'] || 0) + 1;
@@ -1171,7 +1219,7 @@
   function renderNow(force) {
     const now = WF.sim.t;
     const list = openNotifs().sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1) || SEV_RANK[a.sev] - SEV_RANK[b.sev] || b.t - a.t);
-    const LIMIT = 4;
+    const LIMIT = tv ? 8 : 4;   // TV: so viele, wie in die rechte Spalte passen (clipNow)
     const show = nowExpanded && !tv ? list.slice(0, 40) : list.slice(0, LIMIT);
     const openN = list.filter(n => n.status === 'open').length, critN = list.filter(n => n.status === 'open' && n.sev === 'crit').length;
     setText(R.nowCnt, String(openN));
@@ -1193,7 +1241,7 @@
     if (activeKey && document.activeElement !== active) { const n = nowNodes.get(activeKey[0]); const b = n && n.querySelector(`[data-k="${activeKey[1]}"]`); if (b) b.focus({ preventScroll: true }); }
     let hiddenN = list.length - show.length;
     if (tv) hiddenN += clipNow(show);
-    setAttr(R.nowMore, 'hidden', !(hiddenN > 0 || (nowExpanded && !tv && list.length > LIMIT)));
+    setAttr(R.nowMore, 'hidden', !(hiddenN > 0 || (nowExpanded && !tv && list.length > 4)));
     setText(R.nowMore, tv ? `+ ${hiddenN} weitere ${hiddenN === 1 ? 'Meldung' : 'Meldungen'}` : nowExpanded ? 'Weniger anzeigen' : `${hiddenN} weitere ${hiddenN === 1 ? 'Meldung' : 'Meldungen'} anzeigen`);
     void force;
   }
@@ -1232,8 +1280,11 @@
     const r = node._r, S0 = WF.SEV[n.sev] || WF.SEV.warn;
     setVar(node, '--c', S0.color);
     node.classList.toggle('ack', n.status === 'ack');
-    setText(r.sev, n.sev === 'crit' ? 'Störung' : 'Warnung');
-    setText(r.meta, `${tclock(n.t, now)} · ${n.role || ''}`);
+    setText(r.sev, S0.label);
+    // Zeitstempel wie im Benachrichtigungscenter: Entstehungszeit, ggf. „aktualisiert hh:mm“ (UI_GUIDE Regel 16)
+    setHTML(r.meta, `${WF.ui.notifTime(n)}${n.role ? ' · ' + esc(n.role) : ''}`);
+    setAttr(r.meta, 'title', `entstanden ${U.fmtDayClock(n.t)}${n.updatedT != null && n.updatedT - n.t > 60 ? ' · aktualisiert ' + U.fmtDayClock(n.updatedT) : ''}`);
+    void now;
     const ent = n.entity && n.entity.id && LINKABLE[n.entity.kind] ? n.entity : null;
     setAttr(r.ent, 'hidden', !ent);
     if (ent) { setText(r.ent, ent.kind === 'machine' || ent.kind === 'order' ? ent.id : WF.app.entityLabel(ent)); setAttr(r.ent, 'title', 'Öffnen: ' + WF.app.entityLabel(ent)); }
@@ -1397,10 +1448,11 @@
     const now = WF.sim.t;
     const tvNow = !!WF.app.tv;
     if (tvNow !== tv) setTvClass();
+    const noShift = !WF.sim.shift().id;
     for (const id of order) {
       const mv = WF.sim.machineView(id); if (!mv) continue;
       lastMVs[id] = mv;
-      patchTile(tiles[id], mv, now);
+      patchTile(tiles[id], mv, now, noShift);
     }
     updateSummary();
     applyOrder(false);

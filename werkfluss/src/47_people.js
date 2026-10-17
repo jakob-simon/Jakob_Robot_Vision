@@ -16,15 +16,21 @@
   const DAY = 86400;
 
   // ------------------------------------------------------------------ Konstanten
+  // Anzeige-Zustände: Engine-Zustand (state), dazu zwei abgeleitete für „idle“ ohne Aufgabe:
+  // tending = steht an eigenen, laufenden Maschinen (betreut sie) · lead = Schichtleitung im Leitstand.
+  // Beide sind im Einsatz (Kontur statt Fläche: keine Aufgabe, aber nicht „verfügbar“).
   const PST = {
     working: { c: 'var(--st-run)', label: 'Arbeitet' },
     driving: { c: 'var(--mat)', label: 'Fährt Stapler' },
     walking: { c: 'var(--info)', label: 'Unterwegs' },
+    tending: { c: 'var(--st-run)', label: 'Betreut Maschinen', o: true },
+    lead: { c: 'var(--st-run)', label: 'Leitet die Schicht', o: true },
     idle: { c: 'var(--st-idle)', label: 'Verfügbar' },
     break: { c: 'var(--st-wait)', label: 'Pause' },
     offShift: { c: 'var(--faint)', label: 'Nicht im Dienst' },
   };
-  const PST_ORDER = ['working', 'driving', 'walking', 'idle', 'break'];
+  const PST_ORDER = ['working', 'driving', 'walking', 'tending', 'lead', 'idle', 'break'];
+  const BUSY = { working: 1, driving: 1, walking: 1, tending: 1, lead: 1 };
   // Verlauf: je Abschnitt zuerst die Arbeitszeit laut Engine (workSec-Zuwachs: Arbeitsschritte, Staplerfahrten,
   // begleitete Bearbeitung), der Rest nach Zustand – „arbeitet“ ohne Zählerzuwachs = Bereitschaft an der Maschine.
   const SEG = {
@@ -65,8 +71,9 @@
   const tclock = (t, now) => (Math.floor(t / DAY) === Math.floor(now / DAY) ? U.fmtClock(t) : U.fmtDayClock(t));
   const mLabel = (id) => { const s = st(id); return s ? (s.kind === 'machine' || s.kind === 'qs' || s.kind === 'assembly' ? id + ' ' + s.short : s.short) : id; };
   const taskLabel = (type) => (WF.sim.LABELS && WF.sim.LABELS.task && WF.sim.LABELS.task[type]) || type;
-  const pLabel = (state) => (WF.sim.LABELS && WF.sim.LABELS.person && WF.sim.LABELS.person[state]) || (PST[state] || {}).label || state;
+  const pLabel = (state) => (PST[state] && PST[state].o ? PST[state].label : null) || (WF.sim.LABELS && WF.sim.LABELS.person && WF.sim.LABELS.person[state]) || (PST[state] || {}).label || state;
   const pColor = (state) => (PST[state] || PST.idle).c;
+  const pOutline = (state) => !!(PST[state] && PST[state].o);
   const shiftDef = (id) => P().shifts.find(s => s.id === id) || null;
   const shiftName = (id) => (shiftDef(id) || {}).name || id;
   const durMin = (sec) => (sec < 60 ? 'gerade eben' : U.fmtDur(Math.floor(sec / 60) * 60));
@@ -75,7 +82,7 @@
   function setVar(node, k, v) { const key = '_v' + k; if (node && node[key] !== v) { node[key] = v; node.style.setProperty(k, v); } }
   function setAttr(node, k, v) { const key = '_a' + k; if (node && node[key] !== v) { node[key] = v; if (v == null || v === false) node.removeAttribute(k); else node.setAttribute(k, v === true ? '' : v); } }
   const refs = (root) => { const r = {}; root.querySelectorAll('[data-r]').forEach(n => { r[n.dataset.r] = n; }); return r; };
-  const pill = (state, label) => `<span class="pill" style="--c:${pColor(state)}"><i></i>${esc(label || pLabel(state))}</span>`;
+  const pill = (state, label) => `<span class="pill${pOutline(state) ? ' pe-po' : ''}" style="--c:${pColor(state)}"${label && label.length > 18 ? ` title="${esc(label)}"` : ''}><i></i><span>${esc(label || pLabel(state))}</span></span>`;
   const hasDetail = (k) => !!(WF.details && WF.details[k]);
   /** Text escapen; Kennungen (FA-24117, M02 …) nicht umbrechen */
   const escNb = (t) => esc(t).replace(/\b([A-Z]{1,3}-\d{3,6}(?:\/\d+)?)\b/g, '<span style="white-space:nowrap">$1</span>');
@@ -222,6 +229,60 @@
     if (!s0) return { text: 'in der Halle', sid: null };
     if (s0.room || s0.kind === 'qs') return { text: placeText(n), sid: n };
     return { text: 'bei ' + (s0.kind === 'machine' || s0.kind === 'assembly' ? n + ' · ' + s0.short : s0.short), sid: n };
+  }
+
+  // ------------------------------------------------------------------ Anzeige-Zustand (betreut / leitet / verfügbar)
+  /** Laufende eigene Maschinen, die eine Person ohne Aufgabe gerade betreut (sie steht an ihrem Arbeitsplatz) – sonst null */
+  function tendOf(p) {
+    if (!p || p.state !== 'idle' || p.task || p.endShift || p.breakPending || p.onDuty === false) return null;
+    const Sx = S(), own = (p.machines || []).filter(id => Sx.machines[id]);
+    if (!own.length) return null;
+    const run = own.filter(id => Sx.machines[id].state === 'running');
+    if (!run.length) return null;
+    if (!p.atHome) { const w = whereOf(p); if (!w.sid || !own.includes(w.sid)) return null; }
+    return run;
+  }
+  /** Anzeige-Zustand: Engine-Zustand, „idle“ wird zu tending (betreut laufende eigene Maschinen) bzw. lead (Schichtleitung im Leitstand) */
+  function dstate(p) {
+    if (!p) return 'offShift';
+    if (p.state !== 'idle') return p.state;
+    if (tendOf(p)) return 'tending';
+    if (!p.task && !p.endShift && !p.breakPending && p.onDuty !== false && (p.skills || []).includes('lead') && whereOf(p).sid === 'OFFICE') return 'lead';
+    return 'idle';
+  }
+  const tendLabel = (run) => 'Betreut ' + run.slice(0, 2).join(' · ') + (run.length > 2 ? ' +' + (run.length - 2) : '');
+  /** Nächster Eingriff an einer laufenden Maschine laut Engine (Teilewechsel, geplanter Werkzeugwechsel, Arbeitsgangende) – je 15 Sim-s gecacht */
+  const NX = {};
+  function nextStep(mid, now) {
+    const k = Math.floor(now / 15), c = NX[mid];
+    if (c && c.k === k) return c.v;
+    let mv = null; try { mv = WF.sim.machineView(mid); } catch (e) { mv = null; }
+    const cand = [];
+    if (mv && mv.state === 'running') {
+      if (mv.loading === 'perPart' && mv.partEndT != null) cand.push({ t: mv.partEndT, what: 'Teilewechsel' });
+      for (const tl of mv.tools || []) { const pc = tl.plannedChange; if (pc && pc.etaT != null) cand.push({ t: pc.etaT, what: pc.action === 'index' ? 'Schneide wenden' : 'Werkzeugwechsel' }); }
+      if (mv.etaOpEnd != null) cand.push({ t: mv.etaOpEnd, what: 'Arbeitsgang fertig' });
+    }
+    cand.sort((a, b) => a.t - b.t);
+    const v = cand[0] ? Object.assign({ mid }, cand[0]) : null;
+    NX[mid] = { k, v };
+    return v;
+  }
+  /** Tätigkeitstext je Anzeige-Zustand (Karten, Drawer, Karte) */
+  function actText(p, ds, now, prev) {
+    let act = p.activity || '';
+    if (p.state === 'break' && p.breakUntil) act = `Pause bis ${U.fmtClock(p.breakUntil)}${p.breakMakeup ? ' (holt die Pause nach)' : ''}`;
+    if (ds === 'tending') {
+      const run = tendOf(p) || [];
+      let nx = null;
+      for (const mid of run) { const v = nextStep(mid, now); if (v && (!nx || v.t < nx.t)) nx = v; }
+      const what = run.length === 1 ? `Überwacht ${run[0]}` : `Überwacht ${run.length} Maschinen`;
+      act = nx ? `${what} – nächster Eingriff ca. ${tclock(Math.max(nx.t, now), now)} (${nx.what}${run.length > 1 ? ' ' + nx.mid : ''})` : `${what} – laufen autonom`;
+    } else if (ds === 'lead') act = 'Schichtleitung im Leitstand – übernimmt bei Bedarf Rüsten und Werkzeugwechsel';
+    else if (p.state === 'idle' && !p.task) act = p.endShift ? 'Schichtende – geht gleich' : p.breakPending ? 'Geht gleich in die Pause'
+      : (p.skills || []).includes('repair') ? 'Bereit für Störungen und Instandhaltung' : 'Wartet auf die nächste Aufgabe';
+    if (prev) act = (p.task ? 'Beendet noch die Aufgabe: ' : '') + act;
+    return act;
   }
 
   // ------------------------------------------------------------------ Tagesverlauf (lokale Aufzeichnung)

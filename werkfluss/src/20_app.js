@@ -51,6 +51,7 @@
       <div class="brand">${LOGO}<span>werk<b>fluss</b></span></div>
       <span class="sep"></span>
       <div class="company"><strong id="t-company">${esc(c.name)}</strong><span id="t-site">${esc(c.site)}</span></div>
+      <button class="btn ghost tv-exit" id="t-tvexit" title="TV-Modus beenden (Esc)">${icon('x', 15)}<span>TV-Modus beenden</span></button>
       <div class="clock"><span class="time" id="t-time">--:--</span><span class="shift-chip" id="t-shift">–</span></div>
       <div class="speed" role="group" aria-label="Simulationstempo">
         <button class="play" id="t-play" title="Pause / Weiter (P)">${icon('pause', 15)}</button>
@@ -74,6 +75,7 @@
     top.querySelector('#t-ai').onclick = () => WF.bus.emit('ai:open', {});
     const tb = top.querySelector('#t-tour'); if (tb) tb.onclick = () => WF.tour.start();
     top.querySelector('#t-settings').onclick = () => openSettings();
+    top.querySelector('#t-tvexit').onclick = () => app.setTv(false);
     markSpeed();
   }
   function markSpeed() {
@@ -280,9 +282,25 @@
   document.addEventListener('click', () => { if (npEl) toggleNotifPanel(false); });
 
   // ------------------------------------------------------------ Toasts
+  // Regeln: (1) Während der Demo-Tour keine Toasts – die Tour-Karte erzählt, die Glocke zählt weiter.
+  // (2) Bestätigung einer Aktion und Meldung zur selben Entität innerhalb von 2 s nur einmal zeigen
+  //     (die Meldung gewinnt, sie trägt Ursache und Folgen).
   let lastToast = 0;
+  const ENT_RX = /\b(?:M\d{2}|FA-\d{4,6}|AGV\d+|MAT-[A-Z0-9]+|QS)\b/g;
+  let recentToasts = []; // { t, ids:Set, el, notif }
   app.toast = (msg, sev = 'info', opts = {}) => {
+    if (WF.tour && WF.tour.active && !opts.force) return null;
     const box = document.getElementById('toasts');
+    if (!box) return null;
+    const now = performance.now();
+    recentToasts = recentToasts.filter(r => now - r.t < 2000 && r.el.isConnected);
+    const ids = new Set(String((opts.title || '') + ' ' + (msg || '')).match(ENT_RX) || []);
+    if (opts.entity && opts.entity.id) ids.add(opts.entity.id);
+    if (ids.size) {
+      const dup = recentToasts.find(r => r.notif !== !!opts.notif && [...r.ids].some(i => ids.has(i)));
+      if (dup && !opts.notif) return dup.el;          // Meldung sagt es bereits
+      if (dup && opts.notif) dup.el.remove();         // Meldung ersetzt die kurze Bestätigung
+    }
     const S = WF.SEV[sev] || WF.SEV.info;
     const t = el('div', { class: 'toast', style: { '--c': S.color }, role: 'status' },
       el('div', { class: 'tt', text: opts.title || msg }), opts.title ? el('div', { class: 'tb', text: msg }) : null);
@@ -290,20 +308,23 @@
     box.append(t);
     while (box.children.length > 4) box.firstChild.remove();
     setTimeout(() => t.remove(), opts.ms || 5200);
+    recentToasts.push({ t: now, ids, el: t, notif: !!opts.notif });
+    return t;
   };
   const SEV_RANK = { info: 0, ok: 0, warn: 1, crit: 2 };
   const toasted = new Map(); // key → höchste getoastete Schwere
   function markExisting() { for (const n of (WF.sim && WF.sim.state && WF.sim.state.notifications) || []) toasted.set(n.key || n.id, SEV_RANK[n.sev] || 0); }
   function onNotify(n) {
     if (!n || n.status !== 'open' || (n.sev !== 'crit' && n.sev !== 'warn')) return;
-    if (WF.tour && WF.tour.active && n.sev !== 'crit') return; // Tour nicht zudecken
     const key = n.key || n.id, rank = SEV_RANK[n.sev] || 0;
     if (toasted.has(key) && toasted.get(key) >= rank) return; // bekannt und nicht schwerer geworden
     toasted.set(key, rank);
+    // Tour: nichts über die Karte legen – kritische Meldungen zeigt die Karte selbst als Hinweiszeile
+    if (WF.tour && WF.tour.active) { if (n.sev === 'crit' && WF.tour.notify) { try { WF.tour.notify(n); } catch (e) { console.error(e); } } return; }
     const now = performance.now();
     if (now - lastToast < 2500 && n.sev !== 'crit') return;
     lastToast = now;
-    app.toast(n.body || '', n.sev, { title: n.title, onClick: () => { if (n.entity && n.entity.id) app.select(n.entity.kind, n.entity.id); } });
+    app.toast(n.body || '', n.sev, { title: n.title, notif: true, entity: n.entity, onClick: () => { if (n.entity && n.entity.id) app.select(n.entity.kind, n.entity.id); } });
   }
 
   // ------------------------------------------------------------ Modal
@@ -316,7 +337,26 @@
     const b = el('div', { class: 'modal-b' });
     if (typeof body === 'string') b.innerHTML = body; else if (body) b.append(body);
     const f = el('div', { class: 'modal-f' });
-    for (const a of actions) f.append(el('button', { class: 'btn' + (a.primary ? ' primary' : '') + (a.danger ? ' danger' : ''), text: a.label, onclick: () => { const r = a.onClick && a.onClick(); if (r !== false) close(); } }));
+    // Aktionen: {label, primary, danger, ghost, left (links im Fuß), confirm:{text, label} (Bestätigungsschritt im Fuß)}
+    // „Abbrechen“ ohne eigene Funktion wird automatisch zum ruhigen Ghost-Knopf.
+    const run = (a) => { const r = a.onClick && a.onClick(); if (r !== false) close(); };
+    const fillFooter = () => {
+      f.className = 'modal-f'; f.innerHTML = '';
+      for (const a of actions) {
+        const ghost = a.ghost || (!a.onClick && !a.primary && /^abbrechen$/i.test(a.label));
+        f.append(el('button', { class: 'btn' + (a.primary ? ' primary' : '') + (a.danger ? ' danger' : '') + (ghost ? ' ghost' : '') + (a.left ? ' mf-left' : ''),
+          html: (a.icon ? icon(a.icon, 15) : '') + esc(a.label), onclick: () => (a.confirm ? askConfirm(a) : run(a)) }));
+      }
+    };
+    const askConfirm = (a) => {
+      f.className = 'modal-f confirm'; f.innerHTML = '';
+      const q = el('div', { class: 'mf-q', role: 'alert', html: icon('alert', 17) + `<span>${a.confirm.html || esc(a.confirm.text || 'Wirklich ausführen?')}</span>` });
+      const no = el('button', { class: 'btn ghost', text: 'Abbrechen', onclick: () => { fillFooter(); } });
+      const yes = el('button', { class: 'btn' + (a.danger ? ' danger' : ' primary'), text: a.confirm.label || a.label, onclick: () => run(a) });
+      f.append(q, no, yes);
+      try { yes.focus(); } catch (e) { /* alt */ }
+    };
+    fillFooter();
     m.append(el('div', { class: 'modal-h' }, el('strong', { text: title }), el('span', { class: 'spacer' }), el('button', { class: 'icon-btn', 'aria-label': 'Schließen', html: icon('x'), onclick: close })), b);
     if (actions.length) m.append(f);
     back.append(m);
@@ -339,7 +379,10 @@
         <b>Über diese Demo.</b> ${esc(WF.profile.company.demoNote)} Profil: ${esc(WF.profile.company.description)}
         <br><span class="muted">werkfluss ${esc(WF.version)} · Simulation deterministisch (Seed ${WF.profile.sim.seed}).</span></div></div>`;
     app.modal({ title: 'Einstellungen', body, actions: [
-      { label: 'Simulation neu starten', danger: true, onClick: () => { WF.sim.actions && WF.sim.actions.reset ? WF.sim.actions.reset() : WF.sim.init(WF.profile); app.toast('Simulation neu gestartet (Mo 06:00, vorgerechnet bis 08:40)', 'ok'); app.closeDrawer(); } },
+      { label: 'Simulation neu starten', icon: 'refresh', danger: true, ghost: true, left: true,
+        confirm: { html: '<b>Simulation neu starten?</b> Die Schicht beginnt wieder Mo 06:00 (vorgerechnet bis 08:40). Alle Eingriffe dieser Sitzung – Störungen, Bestellungen, KI-Aufträge – werden zurückgesetzt.', label: 'Jetzt neu starten' },
+        onClick: () => { WF.sim.actions && WF.sim.actions.reset ? WF.sim.actions.reset() : WF.sim.init(WF.profile); app.closeDrawer(); app.toast('Simulation neu gestartet (Mo 06:00, vorgerechnet bis 08:40)', 'ok'); } },
+      { label: 'Abbrechen' },
       { label: 'Speichern', primary: true, onClick: () => {
         const n = body.querySelector('#set-company').value.trim(), s = body.querySelector('#set-site').value.trim();
         settings.companyName = n && n !== WF.profile.company.name ? n : null;
@@ -364,17 +407,32 @@
          .nav-item .badge.pill-warn,.nav-item .badge.pill-crit{position:static;min-width:16px;height:16px;padding:0 4px;font:700 10px/16px var(--f-ui);margin-left:2px;width:auto;border-radius:8px}}`, 'app-badges');
 
   // ------------------------------------------------------------ TV-Modus (Leitstand an der Hallenwand)
-  css(`.tv-exit{position:fixed;z-index:35;bottom:max(16px,env(safe-area-inset-bottom,0px));left:max(16px,env(safe-area-inset-left,0px));display:none;box-shadow:var(--shadow);opacity:.85}.tv-exit:hover{opacity:1}
-       .app.tv ~ .tv-exit,.tv-exit.on{display:inline-flex}
-       .app.tv{grid-template-columns:0 minmax(0,1fr)}.app.tv .side{display:none}
-       @media (max-width:900px){.app.tv{grid-template-columns:minmax(0,1fr)}}
-       @media (max-width:900px){.app.tv{grid-template-rows:var(--top-h) 0 minmax(0,1fr)}}`, 'app-tv');
-  let tvBtn = null;
+  // Chrome und Typografie: styles.css (.app.tv). Beenden-Knopf in der Kopfzeile, sichtbar nur nach Maus-/Touch-Aktivität (3 s).
+  let tvIdle = null, tvPtrAt = 0;
+  function tvActivity() {
+    if (!app.tv) return;
+    const now = performance.now();
+    if (now - tvPtrAt < 150) return; // pointermove feuert sehr oft
+    tvPtrAt = now;
+    document.getElementById('app').classList.add('tv-ptr');
+    clearTimeout(tvIdle);
+    tvIdle = setTimeout(() => { const a = document.getElementById('app'); if (a) a.classList.remove('tv-ptr'); }, 3000);
+  }
+  ['pointermove', 'pointerdown', 'touchstart', 'wheel'].forEach(ev => document.addEventListener(ev, tvActivity, { passive: true }));
   app.setTv = (on) => {
-    document.getElementById('app').classList.toggle('tv', !!on); app.tv = !!on;
-    document.body.classList.toggle('tv-on', !!on);
-    if (!tvBtn) { tvBtn = el('button', { class: 'btn tv-exit', html: icon('x', 15) + ' TV-Modus beenden', onclick: () => app.setTv(false) }); document.body.append(tvBtn); }
-    tvBtn.classList.toggle('on', !!on);
+    on = !!on;
+    const a = document.getElementById('app');
+    a.classList.toggle('tv', on); app.tv = on;
+    document.body.classList.toggle('tv-on', on);
+    clearTimeout(tvIdle); tvPtrAt = 0;
+    if (on) {
+      // Wandbildschirm: keine offenen Panels, keine Tour
+      if (npEl) toggleNotifPanel(false);
+      if (drawerSpec) app.closeDrawer();
+      WF.bus.emit('ai:close', {});
+      if (WF.tour && WF.tour.active) WF.tour.stop();
+      tvActivity();
+    } else a.classList.remove('tv-ptr');
     WF.bus.emit('settings', settings);
   };
 

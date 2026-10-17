@@ -2173,6 +2173,59 @@ function reviewPhase() {
       }
       note('review', `what-if: ${n} orders evaluated read-only at Mo 08:40; ${lateChecked} 'Termin gefährdet' samples checked (Eilauftrag only when no other order becomes late)`);
     });
+    scen('delay', () => {
+      // eine Wahrheit für die Verzugsursache: delayBreakdown (orderView/orderAdvice) → Ursache, „begrenzt durch“, Meldung
+      SIM.init(PROFILE);
+      const KINDS = new Set(['queue', 'ext', 'process', 'fault', 'tool', 'material', 'noShift']);
+      let checked = 0, sample = null;
+      for (let k = 0; k < 5; k++) {
+        if (k) SIM.advance(4 * H);
+        const fc = SIM.forecast(), t = st().t;
+        for (const id of Object.keys(st().orders)) {
+          const v = SIM.orderView(id), a = SIM.orderAdvice(id), f = fc.orders[id];
+          if (!v || v.status === 'fertig' || !f || f.done) continue;
+          checked++; R();
+          const d = v.delayBreakdown;
+          if (!Array.isArray(d) || !a || !Array.isArray(a.delayBreakdown) || a.delayBreakdown.length !== d.length) { fail('review', `${id}: delayBreakdown missing in orderView/orderAdvice (${short(d)})`, 'dbshape'); continue; }
+          let sum = 0, prev = Infinity;
+          for (const e of d) {
+            sum += e.sec;
+            if (!KINDS.has(e.kind) || typeof e.stationId !== 'string' || !num(e.seq) || !(e.sec >= 0) || !Array.isArray(e.blockingOrders) || typeof e.text !== 'string' || !e.text) fail('review', `${id}: delayBreakdown entry malformed ${short(e)}`, 'dbentry');
+            if (e.sec > prev) fail('review', `${id}: delayBreakdown not sorted by sec`, 'dbsort');
+            prev = e.sec;
+            if (e.blockingOrders.includes(id)) fail('review', `${id} blocks itself in ${short(e)}`, 'dbself');
+          }
+          const total = (v.etaRaw != null ? v.etaRaw : v.eta) - t, nOps = (f.ops || []).filter(Boolean).length;
+          if (num(total) && Math.abs(sum - total) > 60 * Math.max(1, nOps)) fail('review', `${id}: Σ delayBreakdown ${dur(sum)} ≠ eta − now ${dur(total)}`, 'dbsum');
+          // begrenzender Arbeitsgang: ohne Zeit außerhalb der Schicht
+          if (f.bottleneckStation && num(f.bottleneckSec)) {
+            const own = d.filter((e) => e.stationId === f.bottleneckStation && e.seq === f.bottleneckSeq && e.kind !== 'noShift').reduce((x, e) => x + e.sec, 0);
+            if (f.bottleneckSec > own + 120) fail('review', `${id}: bottleneckSec ${dur(f.bottleneckSec)} at ${f.bottleneckStation} includes no-shift time (working + queue ${dur(own)})`, 'dbns');
+          }
+          // Ursache nennt den größten Verzugsbeitrag
+          const big = d.filter((e) => ['queue', 'ext', 'fault', 'tool', 'material'].includes(e.kind) && e.sec >= 900);
+          if (big.length && a.causeKind !== 'material' && v.limit) {
+            const nm = v.limit.name || v.limit.stationId;
+            if (!String(a.cause).includes(nm.split(' ')[0])) fail('review', `${id}: orderAdvice.cause „${a.cause}“ does not name the largest delay contributor ${nm} (${short(big[0])})`, 'dbcause');
+            if (!a.limitText || !a.limitText.includes(nm.split(' ')[0])) fail('review', `${id}: limitText „${a.limitText}“ ≠ largest contributor ${nm}`, 'dblimit');
+          }
+          if (id === 'FA-24119' && k === 0) sample = `${id}: ${a.cause} | ${a.limitText} | ${d.slice(0, 4).map((e) => e.kind + ' ' + e.stationId + ' ' + dur(e.sec)).join(', ')}`;
+        }
+        // Terminwarnung: „begrenzt durch …“ = limitText der Empfehlung
+        for (const n of st().notifications) {
+          if (n.status === 'resolved' || !String(n.key).startsWith('late:')) continue;
+          const a = SIM.orderAdvice(n.key.slice(5)); R();
+          if (a && a.limitText && !String(n.body).includes(a.limitText.replace(/^Werks-Engpass |^begrenzt durch /, ''))) fail('review', `${n.key} body „${n.body}“ does not show limitText „${a.limitText}“`, 'dbnotif');
+        }
+      }
+      // Was-wäre-wenn: keine „(−0 s)“; Kosten aus dem Profil
+      for (const id of Object.keys(st().orders)) { const o = st().orders[id]; if (isDone(o) || o.priority === 'eil') continue; const w = SIM.whatIfPriority(id); R(); if (w && w.ok && /\([−+]\d+ s\)/.test(w.text)) fail('review', `whatIf text with seconds delta: „${w.text}“`, 'wi0s'); }
+      const c = SIM.costs && SIM.costs(), k2 = SIM.kpis();
+      R();
+      if (!c || !PROFILE.costs || c.energyEurPerKwh !== PROFILE.costs.energyEurPerKwh || !c.machineRates || !num(c.machineRates.M01)) fail('review', `costs() ${short(c)} does not match profile.costs ${short(PROFILE.costs)}`, 'costs');
+      else if (!num(k2.energyEurToday) || Math.abs(k2.energyEurToday - k2.energyKwh * c.energyEurPerKwh) > 0.6) fail('review', `kpis().energyEurToday ${k2.energyEurToday} ≠ energyKwh × price`, 'ecost');
+      note('review', `delay breakdown: ${checked} order views checked${sample ? '; ' + sample : ''}`);
+    });
     scen('qty-risk', () => {
       // Ausschuss nach AG 10 → sofort „Menge gefährdet“ mit Nachfertigung
       SIM.init(PROFILE);
@@ -2273,7 +2326,7 @@ function nightPhase() {
         checked2230 = true;
         const k = SIM.kpis();
         R();
-        if (!k.ghost || !num(k.ghost.autonomous) || !num(k.ghost.running) || !Array.isArray(k.ghost.stoppedIds) || k.ghost.running + k.ghost.stoppedIds.length !== k.ghost.autonomous) fail('night', `kpis().ghost at 22:30 malformed: ${short(k.ghost)}`, 'kghost');
+        if (!k.ghost || !num(k.ghost.autonomous) || !num(k.ghost.running) || !Array.isArray(k.ghost.stoppedIds) || !Array.isArray(k.ghost.idleIds) || k.ghost.running + k.ghost.stoppedIds.length + k.ghost.idleIds.length !== k.ghost.autonomous) fail('night', `kpis().ghost at 22:30 malformed: ${short(k.ghost)}`, 'kghost');
         const notIdle = [];
         for (const mid of MACHINE_IDS_LIST) {
           const m = S0.machines[mid]; R();
@@ -2285,7 +2338,7 @@ function nightPhase() {
         const mach = open.filter((n) => (n.entity && n.entity.kind === 'machine') || String(n.key).startsWith('ghost:'));
         R();
         if (mach.length > 4) fail('night', `${mach.length} machine-related warnings open at 22:30 (expected ≤ 4): ${mach.map((n) => n.key).join(', ')}`, 'warn2230');
-        note('night', `Mo 22:30: ${mach.length} machine-related warning(s) (${mach.map((n) => n.key).join(', ') || '–'}), ${open.length} warnings in total; kpis().ghost ${k.ghost ? k.ghost.running + '/' + k.ghost.autonomous + ' running, stopped ' + (k.ghost.stoppedIds.join(', ') || '–') : '–'}; oeeShift ${U3(k.oeeShift)}`);
+        note('night', `Mo 22:30: ${mach.length} machine-related warning(s) (${mach.map((n) => n.key).join(', ') || '–'}), ${open.length} warnings in total; kpis().ghost ${k.ghost ? k.ghost.running + '/' + k.ghost.autonomous + ' running, stopped ' + (k.ghost.stoppedIds.join(', ') || '–') + ', planned idle ' + (k.ghost.idleIds.join(', ') || '–') : '–'}; oeeShift ${U3(k.oeeShift)}`);
       }
     }
     // Verlust ohne Schicht nur für autonome Maschinen
@@ -2350,7 +2403,7 @@ function report(wallMs, simInfo) {
     const wl = [...t.warns.values()];
     for (const e of wl.slice(0, MAX_MSGS)) lines.push(`        warn ${e.msg}${e.n > 1 ? `  (×${e.n})` : ''}`);
     if (wl.length > MAX_MSGS) lines.push(`        … ${wl.length - MAX_MSGS} more warnings`);
-    const showNotes = VERBOSE || t.key === 'deadlock' || t.key === 'realism' || t.key === 'api' || t.key === 'regress' || t.key === 'week' || t.key === 'review';
+    const showNotes = VERBOSE || t.key === 'deadlock' || t.key === 'realism' || t.key === 'api' || t.key === 'regress' || t.key === 'week' || t.key === 'review' || t.key === 'night';
     if (showNotes) for (const n of t.notes.slice(0, VERBOSE ? 200 : 14)) lines.push(`        info ${n}`);
   }
   lines.push(`Totals: ${nP} PASS · ${nW} WARN · ${nF} FAIL${nS ? ` · ${nS} SKIP (not reached)` : ''}${wallMs > 20000 ? `  (suite took ${(wallMs / 1000).toFixed(1)} s > 20 s target)` : ''}`);

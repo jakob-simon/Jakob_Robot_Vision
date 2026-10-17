@@ -34,6 +34,8 @@ machine states: `WF.STATE[key].label`, severities: `WF.SEV[key].label`.
 | `whatIf(spec)` | §4.2 – forecast on a temporarily changed plan, read-only |
 | `whatIfPriority(orderId, priority = 'eil')` | = `whatIf({type:'setPriority', orderId, priority})` |
 | `orderAdvice(orderId)` | §4.3 – the one recommendation for an order (late notification, Leitstand card, AI) |
+| `costs()` | §12 – `{currency, energyEurPerKwh, labourEurPerHour, overtimeSurchargePct, machineRates {id: €/h}, assumed}` from `profile.costs` – the one price source for Analyse and Copilot |
+| `ghostCheck()` | §11 – copy of the current Geisterschicht-Check (`state.ghostCheck`) or `null` |
 | `snapshot()` | §6 compact JSON for the AI, always < 12 000 chars |
 | `actions.*`, `runAction(a)` | §8 |
 | `stationName(id)` | short name (`'INDEX G220'`, `'Messraum'` …) |
@@ -70,7 +72,11 @@ Bus events: `sim:event` (every Event), `sim:notify` (new/changed Notification), 
   input: [ContainerView], output: [ContainerView], inCap, outCap,
   oeeToday, oeeShift: { oee|null, availability|null, performance|null, quality, plannedSec, runSec },
                                                    // performance includes the running part pro rata (cycle × progress) – see §5
-  stateTimes { <stateKey>: seconds today }, goodToday, scrapToday, lossEurToday, energyKwhToday,
+  stateTimes { <stateKey>: seconds today (all seconds – state band) },
+  plannedStateTimes { <stateKey>: planned seconds today } (only OEE-planned time: shift time without breaks with an op, plus the
+                   ghost shift of autonomous machines – no-shift time is NOT in here; Σ = oeeToday planned time),
+  lossByState { <stateKey>: € today } (> 0.005 € only; Σ = lossEurToday – use this for the Analyse loss Pareto, not stateTimes),
+  goodToday, scrapToday, lossEurToday, energyKwhToday, energyEurToday (energyKwhToday × costs().energyEurPerKwh),
   powerKw (measured, level ≥ 1) | null, powerKwEst (model value, always), powerMeasured,
   signals: Signals,
   barStockM, barMagazineM, barReorderM, barMaterial (bar feeder only, else null),
@@ -128,6 +134,8 @@ comes from the crib (`replace`). Tool cost is booked per edge (`cost / edges`). 
   eta (published, smoothed; doneT when fertig) | null, etaRaw (latest computation), etaPending (unconfirmed jump) | null,
   late (eta > due, or delivered short), slackSec (due − eta), risk ('ok'|'knapp'|'spät'|'unbekannt'), riskLabel,
   onTime (fertig: on time AND complete) | null, bottleneck (label of the order's limiting op) | null, bottleneckStation | null, startT, doneT,
+  delayBreakdown: [DelayEntry] (§4.4, sorted by sec desc; [] when fertig), delayCause ('Wartezeiten an … und …')|null,
+  limit {kind, stationId, seq, name, sec, blockingOrders}|null (largest delay contributor), limitText ('begrenzt durch Härterei Wolf (AG 40)' | 'Werks-Engpass M07 Tiefbohren (AG 30)')|null,
   expectedQty (qty − scrap after op 1; op-1 scrap is re-made automatically),
   qtyRisk: null | { qty, expectedQty, scrapAfterFirst, remakeQty, remakes:[orderIds], missing (not covered by a remake), text },
   remakeOf (parent id of a re-make order) | null, remakes: [orderIds], template (intake template id) | null,
@@ -153,15 +161,18 @@ comes from the crib (`replace`). Tool cost is booked per edge (`cost / edges`). 
 { t,
   machines: { <machineId>: [{ orderId, seq, op, start, end (machine busy until), opEnd (op end), setupEnd, active, kind:'run' }] },  // Gantt
   orders: { <orderId>: { eta, etaRaw, etaStable, etaPending|null, late, slackSec, bottleneck|null (label), bottleneckStation|null (station id),
-                         bottleneckSeq|null, bottleneckSec|null,
+                         bottleneckSeq|null, bottleneckSec|null, delay:[DelayEntry] (§4.4), limit|null, delayCause|null, delayCause1|null,
                          ops: [ null (already complete) |
                                 { seq, station, start, end, first, busyStart, busyEnd, setupEnd, active }      // machine op
                               | { seq, station:'EXT', start, end, first, shipNext|null, shipLast|null, firstReturn|null, lastReturn, lotQty }
                               | { seq, station:'VERSAND', start, end, first } ] }
             | finished: { eta: doneT, late, slackSec, done:true, ops:[], etaRaw, etaStable:false, bottleneck:null, bottleneckStation:null } } }
 ```
-`bottleneck`/`bottleneckStation` = the order's own limiting operation (longest lead time in the plan). In texts this is
-„begrenzt durch M13 Montage (AG 70)“ – the word „Engpass“ is reserved for the plant bottleneck (§4.1, „Werks-Engpass“).
+`bottleneck`/`bottleneckStation` = the order's own limiting **machine** operation: the largest working span + queue from the
+delay breakdown (§4.4) – time outside shifts does **not** count (M13 no longer "wins" because its span crosses a night).
+The „begrenzt durch …“ line uses `limit` (largest delay contributor, may be the external partner): `limitTxt` →
+„begrenzt durch Härterei Wolf (AG 40)“ / „begrenzt durch M08 Liebherr LC 180 (AG 30)“ – the word „Engpass“ is reserved for the
+plant bottleneck (§4.1, „Werks-Engpass M07 Tiefbohren (AG 30)“).
 `eta` is the published value (one truth for order list, KPI on-time %, AI, "Termin gefährdet"): changes ≤ 15 min are
 taken immediately, larger jumps only after the next 5-min computation confirms them (`etaPending` shows the pending value).
 
@@ -184,11 +195,15 @@ as `actions.moveOp`). Forecast on a temporarily changed plan; the state is resto
   gainSec, recommend (gain ≥ 15 min AND newlyLate = laterLate = []), text ('Als Eilauftrag: FA-24122 fertig ca. Mi 14:32 statt Mi 20:05 (−5 h 33 min); FA-24119 dadurch Do 08:05 – 22 h zu spät') }
 | { ok:false, msg }
 ```
+Durations always via `fmtDur`; |Δ| < 1 min reads 'Als Eilauftrag: keine spürbare Änderung für FA-24132 (fertig ca. Mi 09:08)' (never '(−0 s)').
 
 ### 4.3 `orderAdvice(orderId)` – the one recommendation (late notification, Leitstand card, AI)
 ```
-null | { orderId, risk, lateSec (eta − due), eta, due, cause (short German), causeKind ('bottleneck'|'ext'|'material'|'done'|null),
-         bottleneckStation|null, text ('Ursache: … Empfehlung: <one primary action>.' ≤ ~180 chars – shown verbatim on cards),
+null | { orderId, risk, lateSec (eta − due), eta, due, cause (short German, from the delay breakdown – ≤ 2 contributors),
+         causeKind ('queue'|'ext'|'fault'|'tool'|'material'|'bottleneck' (no delay contributor ≥ 15 min – working span)|'done'|null),
+         bottleneckStation|null, limit|null, limitText|null, delayBreakdown:[DelayEntry] (= orderView.delayBreakdown),
+         text ('Ursache: … Empfehlung: <one primary action>.' ≤ ~180 chars – shown verbatim on cards; shortened to the largest
+               contributor, then without the parenthesis of the action, if longer),
          detail (long explanation incl. why a rush order does / does not help and the other options), primaryKind,
          action ({type:'setPriority',orderId,priority:'eil'} | {type:'moveOp',orderId,seq,stationId} | null), actionLabel|null,
          actions:[{label, action}] (primary first, then 'Auftrag öffnen' – identical to the late notification),
@@ -200,7 +215,21 @@ machine of the same group and capability exists, is not in fault, is not the lim
 recommends it (never for M07 – the only deep-hole drill); EXT-dominated delay → 'Expressdurchlauf bei <Partner> anfragen';
 missing raw material → 'Liefertermin … beschleunigen'; otherwise overtime at the limiting station (≤ 8 h late) or partial delivery.
 No identifiable cause → 'Ursache: … – Optionen im Copilot prüfen.' The `late:` notification uses `text`/`actions` (refreshed ≤ every 30 min)
-and its body is one line: 'Prognose Do 08:05 · Termin Mi 10:00 · 22 h 06 min zu spät · begrenzt durch M13 Montage (AG 70)'.
+and its body is one line: 'Prognose Do 08:05 · Termin Mi 10:00 · 22 h 06 min zu spät · begrenzt durch Härterei Wolf (AG 40)' (= `limitText`).
+Notification, Leitstand, Aufträge and Copilot all read the same `delayBreakdown` / `cause` / `limitText`.
+
+### 4.4 Delay breakdown (`orderView.delayBreakdown`, `orderAdvice.delayBreakdown`, `forecast().orders[id].delay`)
+```
+DelayEntry = { kind: 'queue'|'ext'|'process'|'fault'|'tool'|'material'|'noShift', stationId ('M08'|'EXT'|'VERSAND'…), seq, sec,
+               blockingOrders: [orderIds] (queue: orders occupying the machine meanwhile), text ('Warten an M08 Liebherr LC 180 (19 h, hinter FA-24125/FA-24130)') }
+```
+Computed from the forecast ops along the order's chain: the interval between the predecessor's completion and the op's own
+completion belongs to that op and is split into `queue` (machine busy with other orders: busyStart − predecessor end, work time),
+`process` (setup, first piece, processing), `noShift` (time outside any shift inside queue/processing, only for non-autonomous
+machines), `ext` (external lead time), `fault` (remaining repair of the active op), `tool` (waiting for a tool change, staffed),
+`material` (raw material missing for the active op, until the purchase ETA). Entries < 30 s are dropped; Σ sec = etaRaw − now.
+Sorted by `sec` desc. `delayCause` = up to 2 contributors of kinds queue/ext/fault/tool/material with ≥ 15 min, merged per station:
+'Wartezeiten an M08 Liebherr LC 180 (19 h, hinter FA-24125/FA-24130) und Einsatzhärten bei Härterei Wolf (1 T)'.
 
 ---------------------------------------------------------------------------------------------------------------
 
@@ -211,10 +240,15 @@ and its body is one line: 'Prognose Do 08:05 · Termin Mi 10:00 · 22 h 06 min z
   oeeShift|null (current shift), oeeLastShift|null, lastShift ('F'|'S')|null,
   good, goodOps (= good: good parts per operation – washing/QS count too), goodFinished (good parts of each order's last processing op),
   scrap, fpy (good/(good+scrap) per operation), onTimePct (0..1; finished orders count only if on time AND complete),
-  lossEur, energyKwh, powerKw, wip, transportsToday, toolCostToday, shippedToday,
+  lossEur, energyKwh, energyEurToday (energyKwh × costs().energyEurPerKwh), powerKw, wip, transportsToday, toolCostToday, shippedToday,
   scrapBy {'Maß','Werkzeugbruch','Erstteil n.i.O.'}, faultsToday, toolChangesToday, setupsToday, fpiOk, fpiNok,
-  occupancy (§5.1) }
+  occupancy (§5.1),
+  ghost: null (a shift is active) | { autonomous (auto machines with set-up, released op), running (running/toolchange),
+          stoppedIds:[ids standing with loss: waitTool/starved/blocked/fault], idleIds:[ids planned 'Bereit', e.g. saw cut ahead],
+          machines:[{id, state, since, cause}], until (next work start), ghostWindow (weekday night → planned time) } }
 ```
+`oeeShift` during the ghost shift (no shift active) is computed **only over the autonomous machines** (the others stand
+planned and are not part of the period); in a shift it covers all machines as before.
 `state.kpi` holds the last value (refreshed every 60 s); `state.history.oee[]` contains `null` for samples without planned time.
 
 OEE definition (per machine, plant = sum over kind 'machine'): planned time = shift time without breaks with an op assigned
@@ -249,7 +283,7 @@ production machines of work content / shift capacity per working day, 14.5 h), b
 
 `state = { t, startT, seed, machines{}, people{}, agvs{}, forklift, orders{}, containers{}, transports{}, materials{}, tools{},
 toolStock{}, tasks{}, purchases[], stations{}, events[], notifications[], measurements{}, history, kpi, toolCostToday,
-energyKwh, powerKw, today, shiftStats, shiftId, inBreak, lastShiftReport, etaPub, engineErrors[],
+energyKwh, powerKw, today, shiftStats, shiftId, inBreak, lastShiftReport, ghostCheck (§11)|null, etaPub, engineErrors[],
 intake {n, lastT, lastTpl}, orderSeq (last order number – never reused), archived (count) … }`
 Bounded for continuous operation: finished orders are removed `profile.sim.archiveAfterH` (72 h) after completion together with
 their containers, measurements and caches; shipped containers leave with the forwarder ≈ `shipPickupH` (2 h) after completion in
@@ -305,24 +339,39 @@ Mounted tools of a machine: `state.machines[id].tools` (array of tool ids). Last
 `state.purchases[] = { id, materialId, qty, orderedT, etaT, status ('bestellt'|'geliefert'), supplier, costEur, deliveredT?, kanban? }`
 **Kanban rule** (`kanban:true`, Rahmenvertrag): if stock + open purchases + bar magazines no longer cover the open demand of the
 released orders (first op, not yet issued), the engine calls off `reorderQty` (or a multiple) automatically (event `reorder`
-with `data.kanban`, msg 'Kanban-Abruf …'). The low-stock warning (`stock:`) still fires below `min`. Titanium (`kanban:false`) is
+with `data.kanban`, msg 'Kanban-Abruf …'). Below `min` the `stock:` notification is only 'info' for Kanban materials ('warn' for the others). Titanium (`kanban:false`) is
 ordered per order: the intake only releases titanium orders that the stock covers.
 
 ### 7.8 `state.notifications[]` (newest first, max 400)
 ```
-{ id, key (dedup: 'fault:M02', 'wait:M07', 'tool:M03', 'ghost:M03', 'fpi:M08', 'spc:FA-24117/10', 'missing:MAT-ALBL:M06',
+{ id, key (dedup: 'fault:M02', 'wait:M07', 'tool:M03', 'ghost:check', 'fpi:M08', 'spc:FA-24117/10', 'missing:MAT-ALBL:M06',
   'stock:MAT-ALBL', 'late:FA-24122', 'done:FA-24118', 'qty:FA-24118', 'intake:FA-24142', 'agvbat:AGV1', 'shift:<t>'),
   t, updatedT, sev ('info'|'warn'|'crit'|'ok'), title, body, role ('Schichtleitung'|'Einrichter'|'QS'|'Logistik'|'Instandhaltung'|'Einkauf'),
   entity {kind, id}|null, status ('open'|'ack'|'resolved'), ackBy, ackT, resolvedT, resolveNote?, suggestion,
   actions: [{ label, action: {type, …} }]  → run with WF.sim.runAction(action) (or app.runAction),
-  autoResolveT|null, spc? {machineId, orderId, seq, since, value}, ghost? {machineId, stopT, tool, types, gainSec, until},
+  autoResolveT|null, spc? {machineId, orderId, seq, since, value}, ghost? {t, staffEnd, until, nextStart, machines:[GhostEntry]} (ghost:check, §11),
   whatIf? {recommend, gainSec, newlyLate, laterLate, text} (late:) }
 ```
 Open notifications are updated in place (same key; `sim:notify` fires) and resolved automatically when the cause disappears.
+**Compact style (all keys)**: `body` is one short line (' · '-separated facts, no sentences, no line breaks); `suggestion` is
+'Ursache: <cause>. Empfehlung: <one action>.' ≤ ~180 chars (helper `brief`, verbatim on the Leitstand card). Long names are
+shortened (customers without legal form, tools 'CNMG 120408', 'VCGT 1103'). Verified by test group 15 for every key below.
+- `wait:` – 'M03 Citizen L20: Wartet auf Werkzeug seit 22:07'; raised when an episode lasts ≥ `waitWarnSec`/`toolWarnSec`
+  counted from max(episode start, shift start) – a machine that stood overnight and is served right at 06:00 raises nothing.
+  Each episode has its own notification: 'seit' is always the start of the current episode; on resolve the title is closed
+  ('M05 DMU 65: Wartet auf Bediener 16:42–16:52 (10 min)') so a resolved card is never shown with an open 'seit'.
+  Suggestion by state, e.g. night waitTool: 'Ursache: Schneide 1/2 von VCGT 1103 verschlissen, niemand im Haus. Empfehlung: Di 06:00
+  als Erstes wenden (1–2 min); künftig vor Schichtende vorbeugend wenden.' At night a stop announced in the Geisterschicht-Check
+  raises no separate `wait:` warning – the check card shows 'M03 steht seit 22:07 (VCGT 1103)' instead.
 - `tool:` – re-worded every sim minute from the current plan (time never before now); title 'Schneide wenden geplant' for pure
-  indexing (role Schichtleitung), else 'Werkzeugwechsel geplant'; while the change runs: 'Werkzeugwechsel läuft seit …'.
-  Staffing gaps are explained by reason: break ('In der Pause 12:00–12:30 …'), shift handover, or night/ghost shift
-  ('M02 steht seit 22:35 bis Schichtbeginn Di 06:00 …; Hinweis kam um 21:00 (Geisterschicht-Check)'); wording 'verfügbar', not 'im Dienst'.
+  indexing (role Schichtleitung), else 'Werkzeugwechsel geplant'; body 'CNMG 120408 (Schneide 1/4) → wenden nach Teil 16 ca. 14:02 ·
+  FA-24122 AG 20'; while the change runs: 'Schneide wenden läuft seit 08:41: DNMG 150608 · FA-24118 AG 20'. Staffing gaps by reason:
+  break, shift handover, before shift end ('… siehe Geisterschicht-Check'), night ('… niemand im Haus bis Di 06:00. Empfehlung:
+  Di 06:00 als Erstes wenden …'). `sev` 'warn' only if the machine will stop in staffed time and the stop is not already in the
+  Geisterschicht-Check; at night always 'info'.
+- `ghost:check` – one card per evening (§11); per-machine `ghost:<id>` notifications no longer exist.
+- `stock:` – 'info' for Kanban materials (the call-off follows the demand automatically), 'warn' otherwise.
+- `fpi:` – raised only in staffed time (counted from shift start), resolved at shift end (the first piece waits planned overnight).
 - `late:` – suggestion/actions from `orderAdvice` (§4.3).
 - `qty:` – 'Menge gefährdet: FA-24118 nur 11/12 – Nachfertigung ab Säge einplanen' (warn, Schichtleitung) as soon as a part is
   scrapped after op 1; action `{type:'planRemake', orderId}`; resolved when the re-make is planned or the order is finished.
@@ -385,7 +434,8 @@ Other: `state.today {day, good, goodFinished, scrap, scrapBy, fpiOk, fpiNok, tra
 | `planToolChange(machineId, types?, notBefore?, reason?)` | preventive change; without `types` the tools that will not last for the rest of the op are chosen; `notBefore` (sim time) = change at the first part boundary after it; refused while the last part runs |
 | `planRemake(orderId, qty?)` | re-make for scrap after op 1: new order (source 'Nachfertigung', priority 'eil', same routing from op 10, due = parent due or +2 working days, `remakeOf`); → `{ok, id, msg}`; refused without open shortfall |
 | `releaseIntake()` | demo: release the next order from the order pool now (same rules as the automatic intake) → `{ok, id, msg}` |
-| `run(action)` / `runAction(action)` | executes `{type:'reorder'|'setPriority'|'repair'|'triggerFault'|'moveOp'|'applyOffset'|'planToolChange'|'planRemake'|'releaseIntake'|'ack'|'resolve'|'select', …}` |
+| `refillBars(machineId)` | preventive bar refill (forklift task 'Stangen nachladen') even above the reorder mark – e.g. from the Geisterschicht-Check; refused without bar feeder / full magazine / no stock |
+| `run(action)` / `runAction(action)` | executes `{type:'reorder'|'setPriority'|'repair'|'triggerFault'|'moveOp'|'applyOffset'|'planToolChange'|'refillBars'|'planRemake'|'releaseIntake'|'ack'|'resolve'|'select', …}` |
 | `reset()` | |
 
 ---------------------------------------------------------------------------------------------------------------
@@ -416,3 +466,57 @@ toolKind, fpiStage, notifStatus, purchase, conn (level 0..3), loading, stackLigh
 - Each release emits event `orderIntake` and an info notification `intake:<id>` (Schichtleitung, auto-resolved after 30 sim-min),
   then runs the Kanban check (§7.7).
 - Verified by `test/sim.test.mjs` group 13 (7-day run: every weekday shift busy, open orders/WIP/state bounded, no deadlock).
+
+---------------------------------------------------------------------------------------------------------------
+
+## 11. Night and ghost shift
+
+- **Planned idle off shift**: without a shift, every machine that cannot run unattended (`loading` ≠ 'auto', or not set up and
+  released) stands planned: state `'idle'`, cause 'Keine Schicht – weiter Di 06:00 mit Einlegen FA-24129 AG 20' (next step and
+  start time). No notification, no loss, no availability penalty (not planned time). Only autonomous machines with a released op
+  can stop with waiting states, losses and warnings in the ghost shift.
+- **Saw cut-ahead / lot split**: when all output containers of the saw wait for full successor buffers, the saw is 'Bereit'
+  ('Zuschnitt auf Vorrat – 6 Behälter warten auf Haas VF-4, INDEX G220 (Folgemaschinen ausgelastet); weiter mit …'), not 'Ausgang voll'.
+  Any machine with ≥ 2 stuck containers switches to another released op whose successor has room (`ops[i].outHold`, normal setup,
+  cheap setup ≤ 15 min at once, otherwise after 60 min blocked) and splits the lot. M01 Zuschnitt-Ablage: `outCap` 6.
+  Test 15: saw 'blocked' < 5 % of staffed time (≈ 1 %).
+- **Geisterschicht-Check** (`notification key 'ghost:check'`, `state.ghostCheck`, `WF.sim.ghostCheck()`): from 1 h before the last
+  shift end of a day (21:00) re-evaluated every 10 min and after every relevant change (tool change ordered/done, op finished,
+  fault, bar refill); frozen at shift end; at night only the actual stops are added. One card:
+  - title 'Geisterschicht-Check: 3 von 4 autonomen Maschinen stoppen in der Nacht' (or 'kein vorzeitiger Stopp (n autonome Maschinen)'),
+  - body (one line) 'M03 ca. 22:07 (VCGT 1103) · M02 ca. 23:02 (CNMG 120408) · M05 ca. 23:30 (Schaftfräser Ø10 Z4) · M01 Zuschnitt-Vorrat voll'
+    – at night 'M03 steht seit 22:07 (VCGT 1103)',
+  - suggestion before shift end 'Ursache: nach 22:00 niemand im Haus bis Di 06:00. Empfehlung: M03 ca. 21:49 wechseln; M02 ca. 21:47 wenden;
+    M05 Schwesterwerkzeug prüfen.'; after shift end 'Ursache: Standzeit reicht nicht bis Di 06:00, niemand im Haus. Empfehlung: Di 06:00
+    als Erstes M03 wenden, M02 wenden, M05 wechseln; künftig vor Schichtende vorbeugend wenden/wechseln.',
+  - actions (staffed): per machine `planToolChange` ('M03: vor Schichtende wechseln') or `refillBars` ('M03: Stangen nachladen'), then 'Maschine öffnen',
+  - `sev` 'warn' if any machine stops, else 'info'; `autoResolveT` = end of the ghost window; resolved at shift start; created once per evening
+    (a card the user resolved is not re-created that evening).
+  ```
+  GhostEntry = { machineId, orderId, seq, reason: 'tool'|'bars'|'input'|'output'|'material'|'fpi'|'fault' (stops) | 'done' (op finishes
+                 in the night) | 'ahead' (saw cut-ahead full – planned) | 'through' (runs until the next shift start),
+                 stopT|null, tool|null (limiting tool type), types:[recommended tool types], gainSec, tLast (last reachable part boundary),
+                 rec (one sentence ≤ ~180, e.g. 'ca. 21:49 vorbeugend wechseln: VCGT 1103, Abstechplatte 1,5 mm – dann läuft M03 bis ca. 23:13 (+1 h 06 min)'),
+                 recShort, recNight, action|null, actionLabel?, atStart? (no boundary reachable before shift end → first task at shift start),
+                 waitingSince|null (night: machine actually stands since) }
+  ```
+  The projection runs part by part until the next shift start: tool life with the normal change rule until shift end, bar
+  magazine (refill until 15 min before shift end), raw material at the saw, parts in the input (predecessor not running unattended)
+  and room in the output/successor input; a preventive change at the last reachable boundary is recommended only if it gains
+  ≥ max(30 min, 3 cycles).
+- `kpis().ghost` (§5) and `oeeShift` over the autonomous machines only while no shift is active.
+- Test group 15 ("Night realism") checks at Mo 22:30: non-autonomous machines 'idle' with 'Keine Schicht – weiter …', ≤ 4
+  machine-related warnings (currently 1: the Geisterschicht-Check; total warnings 5 incl. 2 'late:' and 2 'qty:'), no loss off shift
+  for them, Σ lossEurBy = lossEur and Σ plannedStateSec = planned (day and shift stats), one ghost check per evening, compact texts,
+  fresh 'seit' and closed titles of resolved wait notifications, saw rarely blocked.
+
+## 12. Costs (`profile.costs`, `WF.sim.costs()`)
+
+```
+profile.costs = { currency:'EUR', energyEurPerKwh: 0.19, labourEurPerHour: 48, overtimeSurchargePct: 50, machineRates: 'stations[].rate' }
+```
+- **Strompreis** `energyEurPerKwh` (Industrietarif netto inkl. Netzentgelt) – the one value for energy cost: `kpis().energyEurToday`,
+  `machineView().energyEurToday`; Analyse and Copilot must read `WF.sim.costs().energyEurPerKwh` (not their own fallback).
+- **Maschinenstundensätze** live per station in `profile.stations[].rate` (€/h, machine incl. operator) – `machineView().rate`,
+  `costs().machineRates`; they price downtime (`lossEur`, 'Stillstand ca. 95 €/h') and tool-change stops.
+- `labourEurPerHour` / `overtimeSurchargePct` – personnel full-cost rate and overtime surcharge for overtime/extra-shift estimates.
