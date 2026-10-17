@@ -163,7 +163,7 @@
 /* ---------- Etiketten */
 .h3-labels{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden;contain:strict}
 .h3-lead{position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible;pointer-events:none}
-.h3-lead line{stroke-width:1.5px;stroke-linecap:round;opacity:.9}
+.h3-lead line{stroke-width:1.75px;stroke-linecap:round}
 .h3-lead circle{stroke:rgba(11,17,32,.85);stroke-width:1.5px}
 .h3-lb{--c:var(--st-idle);position:absolute;left:0;top:0;pointer-events:auto;cursor:pointer;white-space:nowrap;background:color-mix(in srgb,var(--bg) 84%,transparent);border:1px solid color-mix(in srgb,var(--c) 45%,var(--line2));border-radius:8px;padding:3px 8px 3px 6px;font:500 var(--fs-sm)/1.25 var(--f-ui);color:var(--text);box-shadow:0 4px 14px rgba(0,0,0,.42);transition:opacity .18s;will-change:transform}
 .h3-lb::after{content:"";position:absolute;left:50%;top:100%;width:1px;height:9px;background:linear-gradient(color-mix(in srgb,var(--c) 85%,transparent),transparent)}
@@ -2952,7 +2952,7 @@
   const PRESETS = [
     { id: 'uebersicht', label: 'Übersicht', short: 'Übersicht', icon: 'grid', phi: 46, th: 18 },
     { id: 'dreherei', label: 'Dreherei / Sonderbearbeitung', short: 'Dreherei', icon: 'factory', phi: 52, th: 12, zone: ['M01', 'M02', 'M03', 'M04', 'M07', 'M08'], fit: ['M01', 'M02', 'M03', 'M04', 'M07', 'M08'] },
-    { id: 'fraeserei', label: 'Fräserei / Schleiferei', short: 'Fräserei', icon: 'factory', phi: 43, th: 194, zone: ['M05', 'M06', 'M09', 'M10', 'M11'], fit: ['M05', 'M06', 'M09', 'M10', 'M11'] },
+    { id: 'fraeserei', label: 'Fräserei / Schleiferei', short: 'Fräserei', icon: 'factory', phi: 37, th: 194, zone: ['M05', 'M06', 'M09', 'M10', 'M11'], fit: ['M05', 'M06', 'M09', 'M10', 'M11'] },
     { id: 'logistik', label: 'Logistik & Lager', short: 'Logistik', icon: 'box', phi: 50, th: 6, zone: [], fit: ['RAW', 'CRIB', 'MAINT', 'PUF', 'CHG'] },
     { id: 'messraum', label: 'Messraum & Versand', short: 'Messraum', icon: 'target', phi: 50, th: 30, zone: ['QS', 'M13'], fit: ['QS', 'M13', 'VERSAND'] },
   ];
@@ -3045,8 +3045,11 @@
     let phi = p.phi, th = p.th;
     if (p.id === 'uebersicht') {
       if (asp < 0.95) { th = 74; phi = 50; }
-      for (const [x, z] of [[0, 0], [P.hall.w, 0], [0, P.hall.d], [P.hall.w, P.hall.d]]) pts.push(new THREE.Vector3(x, 0, z));
-      pts.push(new THREE.Vector3(0, 3, 0), new THREE.Vector3(P.hall.w, 3, 0), new THREE.Vector3(0, 3, P.hall.d));
+      // Hallenumriss alle ~8 m abtasten: keine Kante (und kein Lager an der Wand) verschwindet unter einem Bedienfeld
+      const HW = P.hall.w, HD = P.hall.d, nx = Math.ceil(HW / 8), nz = Math.ceil(HD / 8);
+      for (let i = 0; i <= nx; i++) { const x = HW * i / nx; pts.push(new THREE.Vector3(x, 0, 0), new THREE.Vector3(x, 0, HD)); }
+      for (let i = 1; i < nz; i++) { const z = HD * i / nz; pts.push(new THREE.Vector3(0, 0, z), new THREE.Vector3(HW, 0, z)); }
+      pts.push(new THREE.Vector3(0, 3, 0), new THREE.Vector3(HW, 3, 0), new THREE.Vector3(0, 3, HD));
     } else for (const id of p.fit) pushFoot(pts, P.stationById[id], 3, 0.6);
     return { kind: 'preset', id: p.id, pts, phi: phi * DEG, th: th * DEG, rMin: 16, rMax: 150 };
   }
@@ -3277,7 +3280,7 @@
     }
     const focus = !!(R.route && R.route.id);
     root.classList.toggle('focus', focus);
-    root.classList.toggle('xs', compact && avail < 420);
+    root.classList.toggle('xs', compact && avail < 370);
     root.classList.toggle('narrow', !compact && avail < 1060);
     root.classList.toggle('nomap', compact || R.short || focus || avail < 900);
     // Werkzeugleiste darf das Statusfeld nie überdecken: notfalls darunter
@@ -3528,7 +3531,7 @@
   function leader(l, on) {
     if (!on) { if (l.ln && l.lnOn) { l.ln.style.display = 'none'; l.dot.style.display = 'none'; l.lnOn = false; } return; }
     if (!l.ln) {
-      l.ln = sv('line', { stroke: l.col || '#ff9d3d' }, R.ui.lead); l.dot = sv('circle', { r: 3.5, fill: l.col || '#ff9d3d' }, R.ui.lead);
+      l.ln = sv('line', { stroke: 'rgba(229,235,245,.78)' }, R.ui.lead); l.dot = sv('circle', { r: 4, fill: l.col || '#ff9d3d' }, R.ui.lead);
       l.lk = '';
     }
     const px = clamp(l.sx, l._x, l._x + l._w), py = clamp(l.sy, l._y, l._y + l._h);
@@ -3815,8 +3818,10 @@
       zoomAt(e.clientX - r.left, e.clientY - r.top);
     });
     R.root.addEventListener('wheel', onWheel, { passive: false, capture: true });
-    R.controls.addEventListener('change', () => { R.hoverDirty = true; });
-    R.controls.addEventListener('start', () => { R.tween = null; R.introPending = false; dropFit(); });
+    // Einpassung/Voreinstellung enden erst, wenn die Nutzerin die Kamera wirklich bewegt (ein Klick allein zählt nicht)
+    R.controls.addEventListener('change', () => { R.hoverDirty = true; if (R.userCam) { R.tween = null; R.introPending = false; dropFit(); } });
+    R.controls.addEventListener('start', () => { R.userCam = true; });
+    R.controls.addEventListener('end', () => { R.userCam = false; });
   }
   function zoomAt(x, y) {
     const hit = pickAt(x, y);

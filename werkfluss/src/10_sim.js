@@ -1064,7 +1064,7 @@
     m.state = st; m.since = S.t;
     if (WAIT_STATES[from] && hasOpen('wait:' + m.id)) {
       // abgeschlossene Episode: Titel mit Beginn und Ende (eine neue Episode bekommt eine neue Meldung mit eigenem Beginn)
-      NIDX['wait:' + m.id].title = `${m.id} ${m.short}: ${WF.STATE[from].label} ${tclock(since0)}–${U.fmtClock(S.t)} (${U.fmtDur(S.t - since0)})`;
+      closeWait(m, WF.STATE[from].label, since0);
       resolveKey('wait:' + m.id, 'jetzt: ' + WF.STATE[st].label);
     }
     ev('state', st === 'fault' ? 'crit' : 'info', { kind: 'machine', id: m.id },
@@ -3042,7 +3042,12 @@
     shiftReport(old, nw);
     if (nw) restockCrib();
     // Geisterschicht-Check: zu Schichtbeginn erledigt; bei Schichtende auf den Nachttext umstellen
-    if (nw) { if (hasOpen('ghost:check')) resolveKey('ghost:check', 'Schichtbeginn'); S.ghostCheck = null; }
+    if (nw) {
+      // abgeschlossene Geisterschicht: Rückblick statt „steht seit“
+      const g = NIDX['ghost:check'];
+      if (g && g.status !== 'resolved') { g.title = g.title.replace('stoppen in der Nacht', 'standen in der Nacht').replace('stoppt in der Nacht', 'stand in der Nacht'); g.body = g.body.replace(/steht seit/g, 'stand ab'); resolveKey('ghost:check', 'Schichtbeginn'); }
+      S.ghostCheck = null;
+    }
     else if (hasOpen('ghost:check')) ghostCompose();
     if (!nw) for (let j = 0; j < MA.length; j++) if (hasOpen('fpi:' + MA[j].id)) resolveKey('fpi:' + MA[j].id, 'Schichtende – Erstteilprüfung zu Schichtbeginn');
     if (nw && S.intake) intakeAtShiftStart(nw);
@@ -3471,8 +3476,7 @@
         if (!planned && dur >= thr) notifyWait(m);
         else if (planned && hasOpen('wait:' + m.id)) {
           // Episode abgeschlossen (jetzt geplante Abwesenheit bzw. Person unterwegs) – Titel mit Zeitraum statt „seit“
-          const n0 = NIDX['wait:' + m.id], since0 = n0.since != null ? n0.since : m.since;
-          n0.title = `${m.id} ${m.short}: ${WF.STATE[m.state].label} ${tclock(since0)}–${U.fmtClock(S.t)} (${U.fmtDur(S.t - since0)})`;
+          closeWait(m, WF.STATE[m.state].label, m.since);
           resolveKey('wait:' + m.id, m.waitCode === 'walking' ? 'Person ist unterwegs' : 'geplante Abwesenheit (Pause/Schicht)');
         }
       }
@@ -3550,6 +3554,13 @@
   function refreshToolNotes() { for (let j = 0; j < MA.length; j++) { const m = MA[j]; if (m.op && !m.toolchange && hasOpen('tool:' + m.id)) planTools(m); } }
   /** Warte-Meldung anlegen bzw. mit der aktuellen Ursache aktualisieren – kompakt: Titel „seit“, Body eine Zeile,
       Empfehlung „Ursache: … Empfehlung: …“ (nachts: was zu Schichtbeginn zuerst zu tun ist) */
+  /** abgeschlossene Warte-Episode: Titel und Body mit Zeitraum und Stillstandskosten statt „seit“ */
+  function closeWait(m, label, since0) {
+    const n = NIDX['wait:' + m.id]; if (!n) return;
+    const d = S.t - since0, c = curOf(m);
+    n.title = `${m.id} ${m.short}: ${label} ${tclock(since0)}–${U.fmtClock(S.t)} (${U.fmtDur(d)})`;
+    n.body = `${label} ${tclock(since0)}–${U.fmtClock(S.t)}${c ? ' · ' + c.o.id + ' AG ' + c.r.seq : ''} · Stillstand ca. ${U.fmtEur(m.rate * d / 3600)}`;
+  }
   function notifyWait(m) {
     const key = 'wait:' + m.id;
     // nachts: im Geisterschicht-Check angekündigter Stopp → Sammelmeldung ergänzen (keine zweite Warnung)

@@ -302,7 +302,8 @@ Render only `state !== 'offShift'`. Internal: `homeNode, idx, route, dlT, dlV, a
 
 ### 7.2 `state.agvs[id]` / `state.forklift`
 AGV: `{ id, name, maxKg, speed, battery (0..100), state ('idle'|'toPickup'|'loading'|'toDrop'|'unloading'|'toCharge'|'charging'), pos {x,z}, heading, node, load (containerId)|null, loadKind ('container'|'empty'|null – 'empty' = Leergut stack, `loadN` bins, no container object), loadN, task (transportId)|null, taskLabel|null, waitRem, mustCharge, slot, distToday, transportsToday, freeSince }`
-Battery: drain 0.006 %/s while driving (≈ 4.6 h pure driving), charge 0.05 %/s; AGVs go to the charger when idle.
+Battery: drain 0.006 %/s while driving (≈ 4.6 h pure driving), charge 0.05 %/s; AGVs go to the charger when idle. Loaded
+(container or Leergut) an AGV drives at `speed × 0.8` (`config.agvLoadedFactor`).
 Forklift: `{ id:'STP1', name, pos {x,z}, heading, node, driver (personId)|null, state ('parked'|'driving'), reservedBy|null, load (containerId|'Stangen')|null }`
 
 ### 7.3 `state.containers[id]`
@@ -339,7 +340,8 @@ driver is missing (`waitReason` says which); 'unterwegs' = assigned/driving/load
   input goes back to the output of the station that filled it (raw containers to RAW); open Leergut transports of the same route stack
   (≤ 4 bins, `empties`); AGVs drive them only when no material transport waits. Counted in `state.today.emptyReturns`, not in
   `today.transports`.
-- Transfer batches in the profile are sized so a container fills in ≈ ≤ 75 min (`transferBatch`), i.e. regular moves; in the
+- Transfer batches in the profile are sized so a container fills in ≈ ≤ 75 min (`transferBatch`; small Swiss-lathe parts in boxes
+  of 40–100), washer program change 2 min, i.e. regular moves; in the
   default run an AGV or the forklift is driving ≈ 40–45 % of staffed time (≈ 50 % in the first 40 min after 08:40), ≈ 60 % incl.
   loading/unloading (test 15 requires ≥ 35 %).
 - Wash/measure programs stay set: a releasable op (no first piece, setup ≤ 10 min) re-activated for the next container of the
@@ -359,7 +361,8 @@ Mounted tools of a machine: `state.machines[id].tools` (array of tool ids). Last
 `{ id, name, form ('Stange'|'Platte'|'Stk'), unit ('m'|'Stk'), onHand, min, reorderQty, supplier, leadMin, pricePerUnit, location, onOrder, usedToday, kanban }`
 `state.purchases[] = { id, materialId, qty, orderedT, etaT, status ('bestellt'|'geliefert'), supplier, costEur, deliveredT?, kanban? }`
 **Kanban rule** (`kanban:true`, Rahmenvertrag): if stock + open purchases + bar magazines no longer cover the open demand of the
-released orders (first op, not yet issued), the engine calls off `reorderQty` (or a multiple) automatically (event `reorder`
+released orders (first op, not yet issued) **or stock + open purchases fall below the reorder point `min`** (≈ consumption during
+the lead time; the profile's starting stock covers the first lead time), the engine calls off `reorderQty` (or a multiple) automatically (event `reorder`
 with `data.kanban`, msg 'Kanban-Abruf …'). Below `min` the `stock:` notification is only 'info' for Kanban materials ('warn' for the others). Titanium (`kanban:false`) is
 ordered per order: the intake only releases titanium orders that the stock covers.
 
@@ -380,7 +383,8 @@ shortened (customers without legal form, tools 'CNMG 120408', 'VCGT 1103'). Veri
 - `wait:` – 'M03 Citizen L20: Wartet auf Werkzeug seit 22:07'; raised when an episode lasts ≥ `waitWarnSec`/`toolWarnSec`
   counted from max(episode start, shift start) – a machine that stood overnight and is served right at 06:00 raises nothing.
   Each episode has its own notification: 'seit' is always the start of the current episode; on resolve the title is closed
-  ('M05 DMU 65: Wartet auf Bediener 16:42–16:52 (10 min)') so a resolved card is never shown with an open 'seit'.
+  ('M05 DMU 65: Wartet auf Bediener 16:42–16:52 (10 min)', body 'Wartet auf Bediener 16:42–16:52 · FA-24131 AG 10 · Stillstand ca. 23 €')
+  so a resolved card is never shown with an open 'seit'. The resolved Geisterschicht-Check reads '… standen in der Nacht' / 'M03 stand ab 22:22 (…)'.
   Suggestion by state, e.g. night waitTool: 'Ursache: Schneide 1/2 von VCGT 1103 verschlissen, niemand im Haus. Empfehlung: Di 06:00
   als Erstes wenden (1–2 min); künftig vor Schichtende vorbeugend wenden.' At night a stop announced in the Geisterschicht-Check
   raises no separate `wait:` warning – the check card shows 'M03 steht seit 22:07 (VCGT 1103)' instead.
@@ -392,6 +396,10 @@ shortened (customers without legal form, tools 'CNMG 120408', 'VCGT 1103'). Veri
   Geisterschicht-Check; at night always 'info'.
 - `ghost:check` – one card per evening (§11); per-machine `ghost:<id>` notifications no longer exist.
 - `stock:` – 'info' for Kanban materials (the call-off follows the demand automatically), 'warn' otherwise.
+- `missing:<mat>:<machine>` – crit 'Material fehlt: 1.2842 Flach 45×25 für M01', body 'M01 steht · Bestand 0,02 m < 0,120 m je Teil ·
+  Lieferung ca. 14:10'; the delivery time is live (refreshed every sim minute): once the ETA has passed without delivery it reads
+  'Lieferung überfällig seit Mo 14:10 – beim Lieferanten nachfragen'. On resolve the card is closed: 'Material fehlte: … für M01
+  (11:21–11:22)', body 'M01 wartete 1 min · Material wieder verfügbar (Bestand 18 m)' – never a stale ETA.
 - `fpi:` – raised only in staffed time (counted from shift start), resolved at shift end (the first piece waits planned overnight).
 - `late:` – suggestion/actions from `orderAdvice` (§4.3).
 - `qty:` – 'Menge gefährdet: FA-24118 nur 11/12 – Nachfertigung ab Säge einplanen' (warn, Schichtleitung) as soon as a part is

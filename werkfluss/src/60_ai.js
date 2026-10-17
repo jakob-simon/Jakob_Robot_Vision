@@ -69,7 +69,13 @@
   /** Stückpreis: unter 100 € mit Cent (9,80 €), sonst ganze Euro */
   const eurUnit = (n) => U.fmtEur(n, n < 100 && Math.round(n) !== n ? 2 : 0);
   /** Strompreis (€/kWh): aus dem Profil, sonst Annahme Industrietarif */
-  const ENERGY_PRICE = () => { const p = PROF() || {}; const v = (p.energy && p.energy.eurPerKwh) || (p.company && p.company.eurPerKwh); return v > 0 ? { v, assumed: false } : { v: 0.19, assumed: true }; };
+  const ENERGY_PRICE = () => {
+    // eine Quelle: Engine-Kosten (profile.costs), sonst ältere Profilfelder, sonst Annahme
+    let c = null; try { c = WF.sim.costs ? WF.sim.costs() : null; } catch (e) { c = null; }
+    const p = PROF() || {};
+    const v = (c && c.energyEurPerKwh) || (p.costs && p.costs.energyEurPerKwh) || (p.energy && p.energy.eurPerKwh) || (p.company && p.company.eurPerKwh);
+    return v > 0 ? { v, assumed: false } : { v: 0.19, assumed: true };
+  };
 
   // ================================================================== Arbeitszeit-Kalender (Schichten ohne Pausen)
   let WW = null;

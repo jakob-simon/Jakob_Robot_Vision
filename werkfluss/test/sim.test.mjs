@@ -2386,6 +2386,9 @@ function nightPhase() {
       if (n.status === 'resolved') { if (n.key.startsWith('wait:') && !/\d\d:\d\d–\d\d:\d\d/.test(n.title)) badClosed.push(`${clk(n.t)} ${n.key} „${n.title}“`); continue; }
       if (String(n.sugg || '').length > 190 || !/^Ursache: .+ Empfehlung: .+/.test(String(n.sugg || ''))) longS.push(`${n.key} (${String(n.sugg || '').length}): „${short(n.sugg)}“`);
       if (/\n/.test(n.body || '') || String(n.body || '').length > 220) badB.push(`${n.key} (${String(n.body || '').length}): „${short(n.body)}“`);
+      // Liefertermine live: nie eine vergangene Uhrzeit als „Lieferung ca. …“
+      const dm = /Lieferung ca\. (?:(Mo|Di|Mi|Do|Fr|Sa|So) )?(\d\d):(\d\d)/.exec((n.body || '') + ' ' + (n.sugg || ''));
+      if (dm) { const DN = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'], d0 = Math.floor(n.t / DAY), dd = dm[1] ? d0 + ((DN.indexOf(dm[1]) - (d0 % 7) + 7) % 7) : d0, tt = dd * DAY + Number(dm[2]) * H + Number(dm[3]) * MIN; if (tt < n.t - 60) badB.push(`${clk(n.t)} ${n.key} shows a past delivery time as ETA: „${short(n.body)}“`); }
     }
     if (longS.length) fail('night', `${longS.length} notification suggestion(s) not compact 'Ursache: … Empfehlung: …' ≤ 190: ${longS[0]}`, 'ncompact');
     if (badB.length) fail('night', `${badB.length} notification body(ies) not one short line: ${badB[0]}`, 'nbody');
