@@ -392,7 +392,7 @@
     if (!P) throw new Error('WF.sim.init: kein Profil');
     R = U.rng((P.sim.seed >>> 0) || 1);
     RI = U.rng((((P.sim.seed >>> 0) ^ 0x1A7A4E) >>> 0) || 7);
-    U.resetUids(); NIDX = {}; FC = null; PBC = null; INB = null; CV = 0; PV = 0; GDIRTY = false; PUBNOW = false; ATR.clear(); OPX = null; WCC = null; RAWC = null; PLC.clear(); DIRTY.length = 0; for (const k in PROG) delete PROG[k];
+    U.resetUids(); NIDX = {}; FC = null; PBC = null; ADVC.clear(); INB = null; CV = 0; PV = 0; GDIRTY = false; PUBNOW = false; ATR.clear(); OPX = null; WCC = null; RAWC = null; PLC.clear(); DIRTY.length = 0; for (const k in PROG) delete PROG[k];
     ST = P.stationById || Object.fromEntries(P.stations.map(s => [s.id, s]));
     TT = P.toolTypeById || Object.fromEntries(P.toolTypes.map(t => [t.id, t]));
     GRAPH = P.graph;
@@ -1158,6 +1158,19 @@
       if (!m.op) { releaseAttendant(m); if (m.type === 'cmm') { const f = cmmFpi(); if (f) return cmmBusyState(m, f, null); } return setState(m, 'idle', m.idleCause || 'Kein Arbeitsgang eingeplant'); }
     }
     const o = S.orders[m.op.oid], i = m.op.idx, r = o.routing[i], op = o.ops[i];
+    // Los teilen (Aktion splitLot): nach afterParts Teilen unterbrechen und den Terminauftrag dazwischenschieben
+    if (m.splitPlan && !m.part) {
+      const sp = m.splitPlan, lo = S.orders[sp.forOrder];
+      const j = lo ? lo.routing.findIndex((rr, k) => rr.station === m.id && !lo.ops[k].complete) : -1;
+      if (!lo || lo.status === 'fertig' || j < 0 || o.id === lo.id) m.splitPlan = null;
+      else if (op.good + op.scrap + op.inProc - sp.startDone >= sp.afterParts || partsLeft(o, i) <= 0) {
+        m.splitPlan = null;
+        pauseOp(m, o, i, `${m.id} teilt das Los ${o.id} AG ${r.seq} nach ${sp.afterParts} Stk – ${lo.id} AG ${lo.routing[j].seq} wird dazwischengeschoben (Termin ${U.fmtDayClock(lo.due)}); Rest von ${o.id} danach`);
+        activateOp(m, lo, j, opLevel(m, lo, j));
+        etaNow();
+        return depth < 1 ? decide(m, depth + 1) : setState(m, 'idle', 'Arbeitsgang gewechselt');
+      }
+    }
     if (op.complete || checkOpComplete(o, i)) {
       finishOp(m, o, i);
       if (depth < 1) return decide(m, depth + 1);
@@ -4476,8 +4489,8 @@
   }
   /** nächstes Überstundenfenster an einer Station: 'abend' = 2 h nach dem letzten Schichtende eines Werktags,
       'samstag' = Samstag 06:00–14:00 */
-  function overtimeWin(kind) {
-    const d0 = Math.floor(S.t / DAY);
+  function overtimeWin(kind, atT) {
+    const d0 = Math.floor(Math.max(S.t, atT || 0) / DAY);
     if (kind === 'samstag') { let d = d0; for (let g = 0; g < 8; g++, d++) if (((d % 7) + 7) % 7 === 5 && d * DAY + 14 * 3600 > S.t) return { win: [Math.max(S.t, d * DAY + 6 * 3600), d * DAY + 14 * 3600], label: `Samstag ${U.fmtDayClock(d * DAY + 6 * 3600).slice(0, 2)} 06–14 Uhr`.replace(/^Samstag Sa/, 'Samstag') }; return null; }
     let d = d0; for (let g = 0; g < 8; g++, d++) { const dow = ((d % 7) + 7) % 7; if (dow < 5 && d * DAY + DAY_END + 2 * 3600 > S.t) { const a = Math.max(S.t, d * DAY + DAY_END), b = d * DAY + DAY_END + 2 * 3600; return { win: [a, b], label: `${U.fmtDayClock(a).slice(0, 2)} ${U.fmtClock(a)}–${U.fmtClock(b)}` }; } }
     return null;
@@ -4525,7 +4538,7 @@
         extra = { partner: xp.short || shortName(xp.name), surchargeEur: costEur };
       } else if (spec.type === 'overtime') {
         const sid = spec.stationId, m = S.machines[sid]; if (!m || m.kind !== 'machine') return fail('Maschine unbekannt: ' + sid);
-        const ow = overtimeWin(spec.window === 'samstag' ? 'samstag' : 'abend'); if (!ow) return fail('kein Überstundenfenster');
+        const ow = overtimeWin(spec.window === 'samstag' ? 'samstag' : 'abend', spec.atT); if (!ow) return fail('kein Überstundenfenster');
         FOV = { xwin: { [sid]: [ow.win] } }; undo.push(() => { FOV = null; });
         const h = (ow.win[1] - ow.win[0]) / 3600, c0 = costs();
         costEur = Math.round(h * (c0.labourEurPerHour || 48) * (1 + (c0.overtimeSurchargePct != null ? c0.overtimeSurchargePct : 50) / 100));
@@ -4550,6 +4563,11 @@
     const laterLate = others.filter(r => r.lateBefore && r.deltaSec > 300);   // schon späte Aufträge dürfen nicht noch später werden
     const gainSec = target ? target.before - target.after : 0;
     const recommend = !!target && gainSec >= 900 && !newlyLate.length && !laterLate.length;
+    // Abwägung (Los teilen): zusätzliche Verspätung anderer Aufträge gegen den Gewinn – vertretbar, wenn sie ≤ ¼ des Gewinns
+    // und je Auftrag ≤ 4 h ist und der Zielauftrag dadurch deutlich näher an den Termin rückt
+    let addedLateSec = 0, maxAdded = 0;
+    for (const r of others) { const a0 = Math.max(0, r.after - r.due) - Math.max(0, r.before - r.due); if (a0 > 0) { addedLateSec += a0; maxAdded = Math.max(maxAdded, a0); } }
+    const tradeOk = !!target && gainSec >= 900 && addedLateSec <= gainSec / 4 && maxAdded <= 4 * 3600;
     const hh = (t) => U.fmtDayClock(t);
     const sideTxt = newlyLate.concat(laterLate).slice(0, 3).map(r => `${r.orderId} dadurch ${hh(r.after)} – ${U.fmtDur(r.after - r.due)} zu spät`).join('; ');
     if (!what) what = spec.type === 'setPriority' ? (spec.priority || 'eil') === 'eil' ? 'Als Eilauftrag' : 'Normale Priorität' : `AG ${spec.seq} auf ${spec.stationId}`;
@@ -4557,7 +4575,8 @@
       (Math.abs(gainSec) < 60 ? `${what}: keine spürbare Änderung für ${o.id} (fertig ca. ${hh(target.after)})`
         : `${what}: ${o.id} fertig ca. ${hh(target.after)} statt ${hh(target.before)} (${gainSec >= 0 ? '−' : '+'}${U.fmtDur(Math.abs(gainSec))})`) +
       (sideTxt ? `; ${sideTxt}` : affected.length ? `; ${affected.length} ${affected.length === 1 ? 'Auftrag verschiebt' : 'Aufträge verschieben'} sich, keiner wird spät` : '; andere Aufträge unverändert');
-    return Object.assign({ ok: true, spec: Object.assign({}, spec), orderId: o.id, target, affected, newlyLate: newlyLate.map(r => r.orderId), laterLate: laterLate.map(r => r.orderId), gainSec, recommend, text, costEur }, extra);
+    return Object.assign({ ok: true, spec: Object.assign({}, spec), orderId: o.id, target, affected, newlyLate: newlyLate.map(r => r.orderId), laterLate: laterLate.map(r => r.orderId), gainSec, recommend, text, costEur,
+      addedLateSec: Math.round(addedLateSec), tradeOk, sideTxt: sideTxt || null }, extra);
   }
   const whatIfPriority = (orderId, priority) => whatIf({ type: 'setPriority', orderId, priority: priority || 'eil' });
   /** Empfehlung zu einem Auftrag – EINE Quelle für „Termin gefährdet“, Leitstand und KI (WF.sim.orderAdvice):
@@ -4566,7 +4585,16 @@
       Was-wäre-wenn-Rechnung einen Gewinn zeigt und kein anderer Auftrag dadurch spät (bzw. noch später) wird; sonst
       Verlagern (nur wenn eine gleichwertige Maschine existiert, frei von Störung und nicht selbst der Engpass), Überstunden
       am Engpass, Expressdurchlauf beim Fremdbearbeiter, Teillieferung. Ohne erkennbare Ursache: neutraler Text. */
+  /** Zwischenspeicher je Auftrag: gleiche Plan-Version, höchstens 60 s alt (die Hebel rechnen mehrere Was-wäre-wenn) */
+  const ADVC = new Map();
   function orderAdvice(orderId) {
+    const c0 = ADVC.get(orderId);
+    if (c0 && c0.pv === PV && S.t - c0.t < 60 && c0.s === S) return c0.res;
+    const res = orderAdvice0(orderId);
+    ADVC.set(orderId, { pv: PV, t: S.t, s: S, res });
+    return res;
+  }
+  function orderAdvice0(orderId) {
     const o = S.orders[orderId]; if (!o) return null;
     const open = { label: 'Auftrag öffnen', action: { type: 'select', kind: 'order', id: o.id } };
     if (o.status === 'fertig') return { orderId: o.id, risk: riskOf(o, o.doneT), lateSec: o.doneT - o.due, eta: o.doneT, due: o.due, cause: 'Auftrag fertig', causeKind: 'done', bottleneckStation: null,
@@ -4611,9 +4639,51 @@
         if (okM && (!move || wm.gainSec > move.gainSec)) move = { to: m2.id, gainSec: wm.gainSec, text: wm.text };
       }
     }
-    // 3) Überstunden am Engpass, Expressdurchlauf (Fremdbearbeitung), Teillieferung – immer konkret benannt
-    if (bnTxt && causeKind !== 'ext') alternatives.push({ kind: 'overtime', label: `Überstunden an ${bnId}`, ok: true, text: `Überstunden/Zusatzschicht ${isPlant ? 'am Werks-Engpass ' : 'an '}${bnTxt}${lateSec > 0 ? ' (ca. ' + U.fmtDur(lateSec) + ' fehlen)' : ''}`, action: null });
-    if (ext) alternatives.push({ kind: 'express', label: 'Expressdurchlauf anfragen', ok: true, text: `Expressdurchlauf bei ${shortName((ext.ext && ext.ext.partner) || 'dem Fremdbearbeiter')} anfragen (${(ext.ext && ext.ext.process) || ext.op})`, action: null });
+    // 3) quantifizierte Hebel für gefährdete Aufträge (Was-wäre-wenn): Los teilen an einer Maschine, an der der Auftrag hinter
+    //    einem laufenden Los wartet; Expressdurchlauf beim Fremdbearbeiter (mit Aufpreis); Überstunden/Samstag an der
+    //    begrenzenden Maschine (mit Kosten). Gewählt wird der größte Gewinn, bei Gleichstand (± 10 min) der günstigere.
+    const levers = [], atRisk = risk === 'spät' || risk === 'knapp';
+    const hh = (t) => U.fmtDayClock(t), gainTxt = (wi) => `−${U.fmtDur(wi.gainSec)} → ${wi.target ? hh(wi.target.after) : '–'}`;
+    if (atRisk) {
+      const seenS = new Set();
+      for (const d of delay) {
+        if (d.kind !== 'queue' || d.sec < 900 || seenS.has(d.stationId)) continue;
+        seenS.add(d.stationId);
+        const mq = S.machines[d.stationId]; if (!mq || !mq.op || mq.op.oid === o.id) continue;
+        const wi = whatIf({ type: 'splitLot', orderId: o.id, stationId: d.stationId });
+        if (!wi.ok) continue;
+        const okS = !!(wi.recommend || wi.tradeOk);
+        const side = wi.newlyLate.concat(wi.laterLate).slice(0, 1).map(id2 => { const r2 = wi.affected.find(x => x.orderId === id2); return r2 ? `${id2} dann ${U.fmtDur(r2.after - r2.due)} zu spät` : id2; })[0];
+        levers.push({ kind: 'splitLot', label: `Los ${wi.blockingOrderId} an ${d.stationId} teilen`, ok: okS, gainSec: wi.gainSec, costEur: 0, text: wi.text,
+          stationId: d.stationId, blockingOrderId: wi.blockingOrderId, afterParts: wi.afterParts, addedLateSec: wi.addedLateSec,
+          primary: `Los ${wi.blockingOrderId} an ${d.stationId} nach ${wi.afterParts} Stk teilen, ${o.id} vorziehen: ${gainTxt(wi)}${side ? ' (' + side + ')' : ''}`,
+          action: okS ? { type: 'splitLot', orderId: o.id, stationId: d.stationId, afterParts: wi.afterParts } : null });
+        if (levers.length >= 2) break;
+      }
+      const xi = o.routing.findIndex((r, k) => r.station === 'EXT' && !o.ops[k].complete && !o.ops[k].express);
+      if (xi >= 0) {
+        const wi = whatIf({ type: 'expressExt', orderId: o.id, seq: o.routing[xi].seq });
+        if (wi.ok) levers.push({ kind: 'expressExt', label: `Express bei ${wi.partner}`, ok: !!wi.recommend, gainSec: wi.gainSec, costEur: wi.costEur, text: wi.text, partner: wi.partner, seq: o.routing[xi].seq,
+          primary: `Express bei ${wi.partner}: ${gainTxt(wi)}, Aufpreis ca. ${U.fmtEur(wi.costEur)}`,
+          action: wi.recommend ? { type: 'expressExt', orderId: o.id, seq: o.routing[xi].seq } : null });
+      }
+      // Überstunden: an den personalgebundenen Maschinen mit der meisten Warte-/Arbeitszeit, am Abend des geplanten Arbeitsgangs bzw. Samstag
+      const per = {};
+      for (const d of delay) if ((d.kind === 'queue' || d.kind === 'process') && S.machines[d.stationId] && S.machines[d.stationId].kind === 'machine' && S.machines[d.stationId].loading !== 'auto') per[d.stationId] = (per[d.stationId] || 0) + d.sec;
+      const otSt = Object.entries(per).sort((a2, b2) => b2[1] - a2[1]).slice(0, 2).map(x => x[0]);
+      for (const sid of otSt) {
+        const k = o.routing.findIndex((r, kk) => r.station === sid && !o.ops[kk].complete), fo = k >= 0 && f.ops ? f.ops[k] : null;
+        for (const win of ['abend', 'samstag']) {
+          const wi = whatIf({ type: 'overtime', orderId: o.id, stationId: sid, window: win, atT: fo ? fo.start : S.t });
+          if (wi.ok) levers.push({ kind: 'overtime', label: `Überstunden an ${sid} ${wi.windowLabel}`, ok: !!wi.recommend, gainSec: wi.gainSec, costEur: wi.costEur, text: wi.text, stationId: sid, window: win,
+            primary: `Überstunden an ${sid} ${wi.windowLabel}: ${gainTxt(wi)}, ca. ${U.fmtEur(wi.costEur)}`, action: null });
+        }
+      }
+    }
+    for (const l of levers) alternatives.push(Object.assign({}, l));
+    // nicht bezifferte Rückfall-Optionen (wenn kein Hebel gerechnet wurde)
+    if (bnTxt && causeKind !== 'ext' && !levers.some(l => l.kind === 'overtime')) alternatives.push({ kind: 'overtime', label: `Überstunden an ${bnId}`, ok: true, text: `Überstunden/Zusatzschicht ${isPlant ? 'am Werks-Engpass ' : 'an '}${bnTxt}${lateSec > 0 ? ' (ca. ' + U.fmtDur(lateSec) + ' fehlen)' : ''}`, action: null });
+    if (ext && !levers.some(l => l.kind === 'expressExt')) alternatives.push({ kind: 'express', label: 'Expressdurchlauf anfragen', ok: true, text: `Expressdurchlauf bei ${shortName((ext.ext && ext.ext.partner) || 'dem Fremdbearbeiter')} anfragen (${(ext.ext && ext.ext.process) || ext.op})`, action: null });
     if (causeKind === 'material') alternatives.push({ kind: 'material', label: 'Liefertermin klären', ok: true, text: `Liefertermin ${S.materials[r0.material.id].name} beim Lieferanten beschleunigen`, action: null });
     alternatives.push({ kind: 'partial', label: 'Teillieferung abstimmen', ok: true, text: `Teillieferung mit ${shortName(o.customer)} abstimmen`, action: null });
     // Hauptaktion und Text
@@ -4624,8 +4694,14 @@
       : w.gainSec < 60 ? `Ein Eilauftrag bringt nichts – vor ${o.id} liegt nur bereits laufende bzw. ohnehin früher fertige Arbeit.` : w.gainSec < 900 ? `Ein Eilauftrag bringt kaum etwas (nur ${U.fmtDur(w.gainSec)} früher).` : '';
     const pa = alternatives.find(a => a.kind === 'priority'); if (pa) pa.note = why || null;
     const etaOf = (t) => t && t.target ? U.fmtDayClock(t.target.after) : null;
-    if (prioOk) { action = { type: 'setPriority', orderId: o.id, priority: 'eil' }; pKind = 'priority'; primary = `Als Eilauftrag kennzeichnen (fertig ca. ${etaOf(w)}, kein anderer Auftrag wird spät)`; }
-    else if (move) { action = { type: 'moveOp', orderId: o.id, seq: f.bottleneckSeq, stationId: move.to }; pKind = 'moveOp'; primary = `AG ${f.bottleneckSeq} auf ${move.to} ${stShort(move.to)} verlagern`; }
+    // bester Hebel: größter Gewinn, bei Gleichstand (± 10 min) der günstigere
+    const cands = [];
+    if (prioOk) cands.push({ kind: 'priority', gainSec: w.gainSec, costEur: 0, action: { type: 'setPriority', orderId: o.id, priority: 'eil' }, primary: `Als Eilauftrag kennzeichnen (fertig ca. ${etaOf(w)}, kein anderer Auftrag wird spät)` });
+    if (move) cands.push({ kind: 'moveOp', gainSec: move.gainSec, costEur: 0, action: { type: 'moveOp', orderId: o.id, seq: f.bottleneckSeq, stationId: move.to }, primary: `AG ${f.bottleneckSeq} auf ${move.to} ${stShort(move.to)} verlagern` });
+    for (const l of levers) if (l.ok) cands.push(l);
+    let best = null;
+    for (const c of cands) if (!best || c.gainSec > best.gainSec + 600 || (Math.abs(c.gainSec - best.gainSec) <= 600 && c.costEur < best.costEur)) best = c;
+    if (best) { action = best.action || null; pKind = best.kind; primary = best.primary; }
     else if (causeKind === 'ext' && ext) { pKind = 'express'; primary = `Expressdurchlauf bei ${shortName((ext.ext && ext.ext.partner) || 'dem Fremdbearbeiter')} anfragen`; }
     else if (causeKind === 'material') { pKind = 'material'; primary = `Liefertermin ${S.materials[r0.material.id].name} beschleunigen`; }
     else if (bnTxt && lateSec != null && lateSec <= 0) { pKind = 'overtime'; primary = `${isPlant ? 'Werks-Engpass ' : ''}${bnTxt} ohne Unterbrechung laufen lassen`; }
@@ -4638,10 +4714,12 @@
     if (text.length > 180 && primary) text = text.replace(/ \([^()]*\)\.$/, '.');
     const others = alternatives.filter(a => a.ok && a.kind !== 'priority' && a.kind !== pKind).map(a => a.text);
     const detail = `${lateTxt}. Ursache: ${cause || 'nicht eindeutig'}. ${why ? why + ' ' : ''}${w && w.ok ? 'Was-wäre-wenn Eilauftrag: ' + w.text + '. ' : ''}${primary ? 'Empfehlung: ' + primary + '. ' : ''}${others.length ? 'Weitere Optionen: ' + others.join('; ') + '.' : ''}`.trim();
-    const label = action ? (action.type === 'setPriority' ? 'Als Eilauftrag' : `AG ${action.seq} auf ${action.stationId} verlagern`) : null;
+    const label = !action ? null : action.type === 'setPriority' ? 'Als Eilauftrag' : action.type === 'moveOp' ? `AG ${action.seq} auf ${action.stationId} verlagern`
+      : action.type === 'splitLot' ? `Los an ${action.stationId} teilen` : action.type === 'expressExt' ? 'Express anfragen' : 'Ausführen';
     return { orderId: o.id, risk, lateSec, eta, due: o.due, cause: cause || lateTxt, causeKind, bottleneckStation: bnId, limit: lim, limitText: limitTxt(f, plantB ? plantB.stationId : null),
       delayBreakdown: delay.map(e => Object.assign({}, e, { blockingOrders: e.blockingOrders.slice() })), text, detail, primaryKind: pKind, action, actionLabel: label,
       actions: action ? [{ label, action }, open] : [open], alternatives, sideEffects,
+      levers: levers.map(l => ({ kind: l.kind, label: l.label, ok: l.ok, gainSec: l.gainSec, costEur: l.costEur, text: l.primary, action: l.action })),
       whatIf: w && w.ok ? { recommend: w.recommend, gainSec: w.gainSec, newlyLate: w.newlyLate, laterLate: w.laterLate, text: w.text } : null };
   }
 
@@ -5352,6 +5430,38 @@
     GDIRTY = true;
     return { ok: true, transportId: tr.id, msg: `Stangen nachladen für ${m.id} beauftragt (Stapler)` };
   }
+  /** Los teilen: laufendes Los an stationId nach afterParts Teilen unterbrechen und orderId dazwischenschieben */
+  function splitLot(orderId, stationId, afterParts) {
+    const o = S.orders[orderId]; if (!o) return fail('Auftrag unbekannt: ' + orderId);
+    const sp = splitSpec(o, stationId, afterParts); if (sp.msg) return fail(sp.msg);
+    const op = sp.A.ops[sp.ai];
+    sp.m.splitPlan = { forOrder: o.id, afterParts: sp.n, startDone: op.good + op.scrap + op.inProc, t: S.t, blockingOrderId: sp.A.id };
+    ev('splitLot', 'info', { kind: 'machine', id: sp.m.id }, `${sp.m.id}: Los ${sp.A.id} AG ${sp.ar.seq} wird nach ${sp.n} Stk geteilt – ${o.id} AG ${o.routing[sp.j].seq} kommt dazwischen (Leitstand)`, { orderId: o.id, blockingOrderId: sp.A.id, afterParts: sp.n });
+    planChanged(); etaNow();
+    return { ok: true, msg: `${sp.m.id}: ${sp.A.id} wird nach ${sp.n} Stk unterbrochen, ${o.id} wird vorgezogen` };
+  }
+  /** Expressdurchlauf beim Fremdbearbeiter beauftragen (Durchlaufzeit × expressFactor, Aufpreis) – mit Anfrage-Entwurf */
+  function expressExt(orderId, seq) {
+    const o = S.orders[orderId]; if (!o) return fail('Auftrag unbekannt: ' + orderId);
+    const i = seq != null ? o.routing.findIndex(r => r.seq === Number(seq) && r.station === 'EXT') : o.routing.findIndex((r, k) => r.station === 'EXT' && !o.ops[k].complete);
+    if (i < 0 || o.ops[i].complete) return fail(`${o.id}: keine offene Fremdbearbeitung`);
+    if (o.ops[i].express) return { ok: true, msg: `${o.id}: Expressdurchlauf ist bereits beauftragt`, draft: o.ops[i].express.draft };
+    const r = o.routing[i], xp = extPartner(r), sur = xp.expressSurchargeEur || 0;
+    o.ops[i].express = { t: S.t, surchargeEur: sur };
+    let ret = null;
+    for (const cid in S.containers) {
+      const c = S.containers[cid]; if (c.orderId !== o.id || c.idx !== i || c.state !== 'external') continue;
+      const nr = nextDayWindow(Math.max(S.t + 3600, c.location.sentT + extLeadSec(o, i)));
+      if (nr < c.location.returnT) c.location.returnT = nr;
+      ret = ret == null ? c.location.returnT : Math.max(ret, c.location.returnT);
+    }
+    const qty = opTargetIn(o, i), proc = (r.ext && r.ext.process) || r.op;
+    const draft = `An: ${xp.contact || xp.name}${xp.email ? ' <' + xp.email + '>' : ''}\nBetreff: Expressdurchlauf ${o.id} – ${proc}\n\nSehr geehrte Damen und Herren,\nfür unseren Auftrag ${o.id} (${qty} Stk ${o.part.name}, ${proc}) bitten wir um einen Expressdurchlauf${ret ? ' mit Rückgabe bis ca. ' + U.fmtDayClock(ret) : ''}. Der Liefertermin an ${shortName(o.customer)} ist ${U.fmtDayClock(o.due)}. Den Express-Aufpreis von ca. ${U.fmtEur(sur)} laut Rahmenvereinbarung übernehmen wir.\n\nMit freundlichen Grüßen\nFertigungssteuerung ${(P.company && P.company.name) || ''}`;
+    o.ops[i].express.draft = draft;
+    ev('expressExt', 'info', { kind: 'order', id: o.id }, `${o.id}: Expressdurchlauf bei ${xp.short || shortName(xp.name)} angefragt (${proc}, Aufpreis ca. ${U.fmtEur(sur)})${ret ? ' – Rückkehr jetzt ca. ' + U.fmtDayClock(ret) : ''}`, { orderId: o.id, seq: r.seq, surchargeEur: sur, returnT: ret });
+    planChanged(); etaNow();
+    return { ok: true, msg: `Expressdurchlauf bei ${xp.short || shortName(xp.name)} für ${o.id} beauftragt (Aufpreis ca. ${U.fmtEur(sur)})`, draft, surchargeEur: sur };
+  }
   /** Notification-Aktion ausführen ({type, ...}) */
   function runAction(a) {
     if (!a || !a.type) return fail('Aktion fehlt');
@@ -5366,6 +5476,8 @@
       case 'applyOffset': return applyOffset(a.orderId, a.seq, a.value, 'Leitstand');
       case 'planToolChange': return planToolChange(a.machineId, a.types, { notBefore: a.notBefore, reason: a.reason });
       case 'refillBars': return refillBars(a.machineId);
+      case 'splitLot': return splitLot(a.orderId, a.stationId, a.afterParts);
+      case 'expressExt': return expressExt(a.orderId, a.seq);
       case 'ack': return ack(a.id, a.by);
       case 'resolve': return resolveN(a.id);
       case 'select': WF.bus.emit('select', { kind: a.kind, id: a.id }); return { ok: true, msg: 'geöffnet' };
@@ -5405,7 +5517,7 @@
   const actions = {
     triggerFault, repair, ack, resolve: resolveN, reorder: (id, qty) => reorder(id, qty), setPriority, addOrder, moveOp, connectMachine, planRemake,
     releaseIntake: () => runAction({ type: 'releaseIntake' }),
-    applyOffset: (orderId, seq, value) => applyOffset(orderId, Number(seq), value, 'Leitstand'), planToolChange, refillBars, run: runAction,
+    applyOffset: (orderId, seq, value) => applyOffset(orderId, Number(seq), value, 'Leitstand'), planToolChange, refillBars, splitLot, expressExt, run: runAction,
     reset: () => { acc = 0; init(P || WF.profile); return { ok: true, msg: 'Simulation neu gestartet' }; },
   };
   WF.sim = {

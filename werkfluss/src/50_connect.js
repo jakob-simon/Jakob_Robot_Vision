@@ -1668,7 +1668,7 @@
   function runtimeText(id, sg) {
     const rt = runtimeSince(id);
     if (!rt || !rt.measured) return 'Laufzeit laut Tablet';
-    if (rt.since != null && rt.since >= U.dayStart(nowT())) return `Laufzeit seit ${U.fmtClock(rt.since)} ${U.fmtDur(rt.sec)}`;
+    if (rt.since != null && rt.since >= U.dayStart(nowT())) return `Laufzeit seit ${U.fmtClock(rt.since)}: ${fmtRun(rt.sec)}`;
     return `Laufzeit heute ${U.fmtDur(sg && sg.runtimeTodaySec != null ? sg.runtimeTodaySec : rt.sec)}`;
   }
   const setT = (e, v) => { if (e && e.textContent !== v) e.textContent = v; };
@@ -2309,7 +2309,9 @@
     setH(el('det'), det.cat ? WF.ui.pill(det.cat === 'run' ? 'running' : det.cat === 'fault' ? 'fault' : det.cat === 'setup' ? 'setup' : det.cat === 'off' || det.cat === 'stand' ? 'idle' : 'waitOperator', CAT[det.cat].l) : '<span class="muted">nicht eindeutig</span>');
     setT(el('detWhy'), det.why);
     setH(el('exp'), WF.ui.pill(x.state, sj.demo ? (x.state === 'running' ? 'Produktion' : 'Stillstand') : null));
-    setT(el('expWhy'), x.cause || '');
+    // L0: was werkfluss heute weiß, stammt aus Tablet-Meldungen – Quelle nennen
+    const m0 = !sj.demo && sj.cur === 0 ? S().machines[sj.id] : null;
+    setT(el('expWhy'), m0 ? `laut Tablet (letzte Meldung ${U.fmtClock(lastReportOf(m0))})${x.cause ? ' · ' + x.cause : ''}` : (x.cause || ''));
     const mt = el('match');
     if (mt) {
       const cls = !stateCheckDone ? 'pend' : match ? 'ok' : 'bad';
@@ -2386,6 +2388,8 @@
         ${WF.views.some(v => v.id === 'halle') ? `<button class="btn" data-act="nav" data-view="halle">${icon('cube', 15)}Halle 3D · Datenfluss</button>` : ''}
       </div>`;
   }
+  /** Laufzeit: „0 min“ statt „0 s“, sonst wie überall (fmtDur) */
+  const fmtRun = (sec) => sec == null ? '–' : sec <= 0 ? '0 min' : U.fmtDur(sec);
   /** Erfolgsseite „ab jetzt gemessen“: Zustandsband heute (vor der Anbindung schraffiert = Tablet), Kennwerte nur seit
       Messbeginn, Leistungsverlauf ab der Anbindung. Gerüst hier, Werte in patchDone(). */
   function measuredHtml(sj, D) {
@@ -2448,11 +2452,13 @@
     const rt = runtimeSince(id, since);
     const changes = (m.segments || []).filter(g => g.t0 > since).length;
     const note = c.querySelector('[data-w="dnote"]');
-    if (note && sinceOf(id, 'state') === since) setH(note, `Bis ${esc(at)} kannte werkfluss den Zustand nur aus Tablet-Meldungen – kurze Stillstände fehlten. Seit ${esc(at)} misst ${esc(lv === 1 ? 'der Stromsensor' : 'die Anbindung')} jeden Wechsel: <b>${changes} ${changes === 1 ? 'Zustandswechsel' : 'Zustandswechsel'}, ${esc(U.fmtDur(rt && rt.sec != null ? rt.sec : 0))} Laufzeit</b> in ${esc(U.fmtDur(now - since))}.`);
+    const who = lv === 1 ? 'der Stromsensor' : 'die Anbindung', el = U.fmtDur(Math.max(0, now - since));
+    if (note && sinceOf(id, 'state') === since) setH(note, `Bis ${esc(at)} kannte werkfluss den Zustand nur aus Tablet-Meldungen – kurze Stillstände fehlten. Seit ${esc(at)} misst ${esc(who)} jeden Wechsel: ` +
+      (changes ? `<b>${changes} Zustandswechsel, ${esc(fmtRun(rt && rt.sec))} Laufzeit</b> in ${esc(el)}.` : `seit der Anbindung durchgehend <b>${esc(WF.ui.machineStateLabel(WF.sim.machineView(id)))}</b> (${esc(el)}, gemessen).`));
     // Kennwerte – nur Gemessenes, Laufzeit erst ab Messbeginn
     const t = [];
     const rtNew = sinceOf(id, 'runtime') === since;
-    if (rt && rt.measured) t.push(rtNew ? ['Laufzeit seit ' + at, U.fmtDur(rt.sec), '', false, false, `in ${U.fmtDur(Math.max(0, now - since))} seit der Anbindung`] : ['Laufzeit heute', U.fmtDur(runtimeSince(id).sec), '', false, false, 'gemessen']);
+    if (rt && rt.measured) t.push(rtNew ? ['Laufzeit seit ' + at, fmtRun(rt.sec), '', false, false, `in ${el} seit der Anbindung`] : ['Laufzeit heute', fmtRun(runtimeSince(id).sec), '', false, false, 'gemessen']);
     // Leistung steht im Verlauf daneben (Wert oben rechts) – hier Strom und Signalsäule
     if (lv === 1) t.push(['Laststrom', U.fmtNum(sg.currentA, 1), 'A', false, false, 'Stromwandler L1'], ['Signalsäule', LIGHT_DE[sg.stackLight] || '–', '', false, false, 'Abgriff 24 V']);
     else if (lv >= 2) {

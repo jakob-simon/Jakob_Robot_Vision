@@ -458,8 +458,33 @@
   const isPlanned = (r) => !!r && r.status === 'open' && phaseOf(r) === 'geplant';
   /** Beginn der Logistik-Wartezeit (fällig seit) – vorgemerkte Zeit mit vollem Ziel zählt nicht */
   const waitStart = (r) => (r.dueT != null ? r.dueT : r.createdT);
-  /** Logistik-Wartezeit: fällig → Abholung (bzw. → jetzt); vorgemerkte Transporte haben keine Wartezeit */
-  function waitOf(r, now) { if (r.pickupT == null && isPlanned(r)) return 0; return Math.max(0, (r.pickupT != null ? r.pickupT : now) - waitStart(r)); }
+  /** Arbeitszeitfenster der Woche (Mo–Fr, Schichten ohne Pausen) – Staplertransporte brauchen eine Logistiker:in im Dienst */
+  let WWIN = null;
+  function workWins() {
+    if (WWIN) return WWIN;
+    const w = [];
+    for (let d = 0; d < 5; d++) for (const sh of PRO().shifts || []) {
+      let a = U.hm(sh.start);
+      for (const b of sh.breaks || []) { const b0 = U.hm(b[0]); if (b0 > a) w.push([d * DAY + a, d * DAY + b0]); a = U.hm(b[1]); }
+      const e = U.hm(sh.end); if (e > a) w.push([d * DAY + a, d * DAY + e]);
+    }
+    return (WWIN = w.sort((x, y) => x[0] - y[0]));
+  }
+  const WEEK = 7 * DAY;
+  function staffedSec(a, b) {
+    if (!(b > a)) return 0;
+    let sum = 0;
+    for (let base = Math.floor(a / WEEK) * WEEK; base < b; base += WEEK) for (const w of workWins()) { const x = Math.max(a, base + w[0]), y = Math.min(b, base + w[1]); if (y > x) sum += y - x; }
+    return sum;
+  }
+  const staffedNow = (t) => staffedSec(t, t + 1) > 0;
+  /** Logistik-Wartezeit: fällig → Abholung (bzw. → jetzt); vorgemerkte Transporte haben keine Wartezeit. Staplertransporte zählen nur
+      in der Arbeitszeit (nachts und in Pausen ist niemand mit Staplerschein im Dienst – geplant, kein Logistikverzug). */
+  function waitOf(r, now) {
+    if (r.pickupT == null && isPlanned(r)) return 0;
+    const a = waitStart(r), b = r.pickupT != null ? r.pickupT : now;
+    return Math.max(0, r.mode === 'Stapler' ? staffedSec(a, b) : b - a);
+  }
   /** Zeit, die ein Transport vorgemerkt war (Ziel voll), bevor er fällig wurde */
   const plannedSec = (r, now) => (r.everPlanned ? Math.max(0, (r.dueT != null ? r.dueT : r.pickupT != null ? r.pickupT : now) - r.createdT) : 0);
   /** Grund eines vorgemerkten Transports, ohne Doppelung mit „bereitgestellt“ (Engine: 'bereitgestellt – Abruf, sobald INDEX G220
@@ -1071,6 +1096,7 @@
   // Knoten: Position im Hallenkoordinatensystem (m), leicht auf Reihen ausgerichtet; Breite in SVG-Einheiten
   const NODE_DEF = [
     { id: 'RAW', x: 5.0, z: 4.4, kind: 'store', icon: 'rack', w: 160 },
+    { id: 'PUF', x: 34.5, z: 3.9, kind: 'store', icon: 'rack', w: 150 },
     { id: 'CHG', x: 45, z: 3.6, kind: 'charge', icon: 'plug', w: 104 },
     { id: 'M01', x: 5.25, z: 16.2 }, { id: 'M02', x: 15.25, z: 16.2 }, { id: 'M03', x: 24.3, z: 16.2 }, { id: 'M04', x: 33.5, z: 16.2 },
     { id: 'M07', x: 44.2, z: 16.2 }, { id: 'M08', x: 52.1, z: 16.2 }, { id: 'M13', x: 60.2, z: 16.2 },
@@ -1418,7 +1444,7 @@
       const isNode = !!V.nodeById[st.id];
       if (st.kind === 'machine' || st.kind === 'qs' || st.kind === 'assembly') {
         h += `<rect class="mt-fp" x="${f1(PX(fp.x))}" y="${f1(PY(fp.z))}" width="${f1(fp.w * KX)}" height="${f1(fp.d * KZ)}" rx="2"/>`;
-      } else if (!isNode || st.id === 'RAW' || st.id === 'VERSAND') {
+      } else if (!isNode || st.id === 'RAW' || st.id === 'VERSAND' || st.id === 'PUF') {
         h += `<rect class="mt-room" x="${f1(PX(fp.x))}" y="${f1(PY(fp.z))}" width="${f1(fp.w * KX)}" height="${f1(fp.d * KZ)}" rx="3"/>`;
         if (!isNode) h += `<text class="mt-room-t" x="${f1(PX(fp.x + fp.w / 2))}" y="${f1(PY(fp.z + fp.d / 2) + 3)}" text-anchor="middle">${esc(st.short || st.name)}</text>`;
       }
@@ -1678,6 +1704,10 @@
       const next = ext.map(c => c.location.returnT).sort((a, b) => a - b)[0];
       if (next != null) h += `<dt>Nächste Rückkehr</dt><dd>ca. ${tclock(next, now)}</dd>`;
     }
+    if (id === 'PUF' && st) {
+      const cap = (STN('PUF') || {}).cap || 12, ids = st.out.concat(st.inp);
+      h += `<dt>Belegt</dt><dd>${ids.length} / ${cap} Plätze${ids.length ? ' · ' + stk(inQty(ids)) : ''}</dd>`;
+    }
     if (id === 'RAW') {
       const low = Object.values(s.materials).filter(m => m.onHand < m.min);
       h += `<dt>Materialien</dt><dd>${Object.keys(s.materials).length}</dd><dt>Unter Mindestbestand</dt><dd>${low.length ? low.map(m => esc(m.name)).join(', ') : 'keine'}</dd>`;
@@ -1688,7 +1718,7 @@
     if (wait.length) h += `<dt>Abholbereit</dt><dd>${wait.length} Behälter · ${esc(whyShort(wait[0].waitReason || (wait[0].carrier ? wait[0].carrier + ' ist unterwegs' : 'wartet auf Zuteilung')))}</dd>`;
     if (plan.length) h += `<dt>Vorgemerkt</dt><dd>${plan.length} Behälter · ${esc(planReason(plan[0].waitReason))}</dd>`;
     h += `</dl>`;
-    h += `<div class="hint">${n.kind === 'machine' ? 'Klick: Maschinendetails öffnen' : id === 'RAW' ? 'Klick: zur Rohmaterial-Tabelle' : id === 'CHG' ? 'Klick: AGV-Details' : 'Klick: Behälter anzeigen'}</div>`;
+    h += `<div class="hint">${n.kind === 'machine' ? 'Klick: Maschinendetails öffnen' : id === 'RAW' ? 'Klick: zur Rohmaterial-Tabelle' : id === 'CHG' ? 'Klick: AGV-Details' : ['HAERT', 'EXT', 'SPERR', 'WE'].includes(id) ? 'Klick: Behälter anzeigen' : 'Klick: Transporte dieser Station filtern'}</div>`;
     return h;
   }
   function vehTip(id) {
@@ -1815,7 +1845,7 @@
     const planTxt = planned.length ? `<span class="mt-plan">${planned.length} vorgemerkt</span>` : '';
     kpiSet('kOpen', { v: U.fmtNum(due.length),
       sub: due.length ? `<b>${waiting.length}</b> wartend · <b>${moving.length}</b> in Fahrt<br>${longest && lw >= 60 ? `längste Wartezeit ${dur(lw)}${planTxt ? ' · ' : ''}` : ''}${planTxt}`
-        : planned.length ? `keiner fällig<br>${planTxt} – Ziel voll, Behälter bereitgestellt` : 'Alle Behälter sind zugestellt',
+        : planned.length ? `keiner fällig<br>${planTxt} (Ziel voll)` : 'Alle Behälter sind zugestellt',
       sev: lw > WAIT_CRIT ? 'crit' : lw > WAIT_WARN ? 'warn' : null });
     V.r.kWait.title = 'Ø Wartezeit von „fällig“ (Ziel hat Platz) bis zur Abholung – Zeit, in der ein Behälter wegen vollem Ziel vorgemerkt war, zählt nicht. Leergut fährt nachrangig und ist nicht enthalten.';
     V.r.kOpen.title = 'Offene Transporte = fällig (Ziel hat Platz) oder unterwegs. Vorgemerkte Behälter warten auf Platz am Ziel – das ist keine Wartezeit der Logistik.';
@@ -1998,6 +2028,11 @@
         const low = Object.values(s.materials).filter(m => m.onHand < m.min);
         const miss = (s.notifications || []).some(x => x.status === 'open' && String(x.key || '').indexOf('missing:') === 0);
         return miss ? { text: 'Material fehlt an Maschine', short: 'Material fehlt', cls: 'crit' } : low.length ? { text: low.length + ' unter Mindestbestand', short: low.length + ' unter Minimum', cls: 'warn' } : { text: Object.keys(s.materials).length + ' Materialien ok', cls: 'ok' };
+      }
+      case 'PUF': {
+        // Pufferlager: Behälter, deren Ziel voll war – bereitgestellt und vorgemerkt
+        const st = s.stations.PUF, n = st ? st.out.length + st.inp.length : 0, cap = (STN('PUF') || {}).cap || 12;
+        return n ? { text: `${n}/${cap} Plätze · vorgemerkt`, short: `${n}/${cap} belegt` } : { text: `frei · ${cap} Plätze`, short: 'frei' };
       }
       case 'WE': { const st = s.stations.WE; const n = st ? st.out.length + st.inp.length : 0; return { text: n ? n + ' Behälter abholbereit' : 'frei', short: n + ' abholbereit' }; }
       case 'EXT': {
@@ -2461,6 +2496,11 @@
       time = `<span class="mt-w mt-wplan">bereitgestellt</span><span class="mt-s">seit ${tclock(r.createdT, now)}</span>`;
       const s2 = s.transports[r.id];
       why = `<span class="mt-why">${esc(planReason((s2 && s2.waitReason) || r.planWhy))}</span>`;
+    } else if (r.mode === 'Stapler' && r.status === 'open' && !staffedNow(now)) {
+      // außerhalb der Arbeitszeit: geplantes Warten auf die nächste Schicht, keine laufende Wartezeit-Uhr
+      time = `<span class="mt-w mt-wplan">bis Schichtbeginn</span><span class="mt-s">${r.everPlanned ? 'fällig seit ' : 'bereit seit '}${tclock(waitStart(r), now)}</span>`;
+      const s2 = s.transports[r.id];
+      why = `<span class="mt-why">${esc((s2 && s2.waitReason) || r.waitReason || 'wartet auf Logistiker:in (Stapler)')}</span>`;
     } else {
       time = `<span class="mt-w${wcls}">wartet ${dur(w)}</span><span class="mt-s">${r.everPlanned ? 'fällig seit ' + tclock(waitStart(r), now) : 'bereit seit ' + tclock(r.createdT, now)}</span>`;
       const s2 = s.transports[r.id];
@@ -2658,7 +2698,7 @@
   }
 
   // ------------------------------------------------------------------ Behälter im Umlauf
-  const FLOW_ORDER = ['transit', 'RAW', 'M01', 'M02', 'M03', 'M04', 'M05', 'M06', 'M07', 'M08', 'EXT', 'ext', 'WE', 'M09', 'M10', 'M11', 'QS', 'M13', 'SPERR'];
+  const FLOW_ORDER = ['transit', 'RAW', 'PUF', 'M01', 'M02', 'M03', 'M04', 'M05', 'M06', 'M07', 'M08', 'EXT', 'ext', 'WE', 'M09', 'M10', 'M11', 'QS', 'M13', 'SPERR'];
   function ctLine(c, s, now) {
     const o = s.orders[c.orderId];
     const toR = o && c.idx < o.routing.length ? o.routing[c.idx] : null;
@@ -2730,7 +2770,7 @@
           const st = STN(k); title = st ? (st.short || st.name) : k; idTxt = k;
           const m = s.machines[k];
           if (m) { c0 = (WF.STATE[m.state] || WF.STATE.idle).color; stateTxt = `<span class="sdot" title="${esc(WF.STATE[m.state] ? WF.STATE[m.state].label : '')}"></span>`; icon = null; }
-          else icon = { RAW: 'rack', WE: 'inbox', EXT: 'truck', SPERR: 'lock', QS: 'target' }[k] || 'box';
+          else icon = { RAW: 'rack', PUF: 'rack', WE: 'inbox', EXT: 'truck', SPERR: 'lock', QS: 'target' }[k] || 'box';
           if (k === 'SPERR') { cls = 'scrap'; c0 = 'var(--st-fault)'; title = 'Sperrlager (nicht im Umlauf)'; }
         }
         const items = g.items.map(c => ({ c, ln: ctLine(c, s, now), slot: c.location && c.location.kind === 'station' ? c.location.slot : null }));

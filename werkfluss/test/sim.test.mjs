@@ -2157,7 +2157,7 @@ function reviewPhase() {
           const eil = (nn.actions || []).find((a) => a.action && a.action.type === 'setPriority');
           lateChecked++; R();
           if (eil && !(nn.whatIf && nn.whatIf.recommend && !nn.whatIf.newlyLate.length)) fail('review', `${nn.key} offers 'Als Eilauftrag' although the what-if says ${short(nn.whatIf)}`, 'lateeil');
-          if (!eil && !/Überstunden|Teillieferung|Eilauftrag|Expressdurchlauf|Copilot|Unterbrechung|Liefertermin|verlagern/.test(nn.suggestion || '')) fail('review', `${nn.key}: recommendation without alternative („${(nn.suggestion || '').slice(0, 80)}“)`, 'latealt');
+          if (!eil && !/Überstunden|Teillieferung|Eilauftrag|Express|Copilot|Unterbrechung|Liefertermin|verlagern|Los .+ teilen/.test(nn.suggestion || '')) fail('review', `${nn.key}: recommendation without alternative („${(nn.suggestion || '').slice(0, 80)}“)`, 'latealt');
           if (/verlagern/.test(nn.suggestion || '') && !(nn.actions || []).some((a) => a.action && a.action.type === 'moveOp')) fail('review', `${nn.key} says 'verlagern' without a moveOp action („${nn.suggestion.slice(0, 90)}“)`, 'latemove');
         }
         // eine Empfehlungsquelle: orderAdvice

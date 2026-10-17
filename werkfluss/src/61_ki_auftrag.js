@@ -272,7 +272,9 @@
         // Zeile 0: Kunde | Erstellt
         s.line(X + 76, Y, X + 76, Y + 7, { w: 0.3 });
         lab(X, Y, 'KUNDE'); val(X + 13, Y + 5.3, i.customer, 3.2);
+        s.line(X + 99, Y, X + 99, Y + 7, { w: 0.3 });
         lab(X + 76, Y, 'GEZ. / GEPR.'); val(X + 76, Y + 6.3, i.drawn || 'ML / TB', 2.9);
+        lab(X + 99, Y, 'DATUM'); val(X + 99, Y + 6.3, i.date || '–', 2.9);
         // Zeile 1: Benennung | Maßstab | Projektion
         s.line(X + 76, Y + 7, X + 76, Y + 19, { w: 0.3 }); s.line(X + 100, Y + 7, X + 100, Y + 19, { w: 0.3 });
         lab(X, Y + 7, 'BENENNUNG'); val(X, Y + 16.6, i.name, 6, 600);
@@ -370,11 +372,12 @@
     s.line(250, y0 + 26.5, 255.5, y0 + 26.5, { w: 0.3 }); s.arrow(256.8, y0 + 26.5, 0, { len: 2.6, half: 0.8 });
     s.text(258.6, y0 - 24.6, 'A', { size: 4.6, weight: 600 }); s.text(258.6, y0 + 29.7, 'A', { size: 4.6, weight: 600 });
     // Bezüge A/B + Oberflächen (oben)
-    s.datum(51, y0 - 22.5, 'A', -1); s.datum(196, y0 - 20, 'B', -1);
+    s.datum(56, y0 - 22.5, 'A', -1); s.datum(196, y0 - 20, 'B', -1);
     s.surf(63, y0 - 22.5, 'Ra 0,4'); s.surf(203.5, y0 - 20, 'Ra 0,4');
-    // Freistiche
-    s.leader([[191.5, y0 - 20.3], [183, y0 - 30.6], [134, y0 - 30.6]]);
-    s.text(182, y0 - 31.7, '2× Freistich DIN 509-F1×0,2', { anchor: 'end', size: 3.8 });
+    // Freistiche an beiden Lagersitz-Schultern (Flansch/Ø45 und Ø42/Ø40): zwei Hinweislinien auf eine Bezugslinie
+    s.leader([[46.7, y0 - 22.9], [51, y0 - 38], [158, y0 - 38]]);
+    s.leader([[191.5, y0 - 20.3], [158, y0 - 38]]);
+    s.text(104.5, y0 - 39.1, '2× Freistich DIN 509-F1×0,2', { anchor: 'middle', size: 3.8 });
     // Planlauf Flansch, Rundlauf Zapfen
     s.fcf(15.5, 24, [{ sym: 'runout' }, { t: '0,02' }, { t: 'A-B' }]);
     s.leader([[29.6, y0 - 20], [22, y0 - 20], [22, 29.6]]);
@@ -403,7 +406,7 @@
     ], 72);
     s.surfGeneral(205, 153, 'Ra 3,2', ['Ra 0,4', 'Ra 0,8']);
     s.titleBlock({ customer: 'Kärntner Antriebstechnik GmbH', name: 'Flanschwelle', scale: '1:1', no: 'FW-6024-01', rev: 'A',
-      material: '42CrMo4+QT (1.7225)', mass: '2,3 kg', tol: 'ISO 2768-mK', edges: 'ISO 13715 −0,3' });
+      material: '42CrMo4+QT (1.7225)', mass: '2,3 kg', tol: 'ISO 2768-mK', edges: 'ISO 13715 −0,3', date: '2026-10-12' });
     return s.svg(attrs, vb);
   }
 
@@ -446,7 +449,7 @@
     ], 138);
     s.surfGeneral(205, 153, 'Ra 3,2', ['Ra 1,6', 'Ra 0,8']);
     s.titleBlock({ customer: 'Hydrava Pumpen GmbH', name: 'Lagerbuchse', scale: '5:1', no: 'LB-1107-02', rev: 'B',
-      material: '1.4404 (X2CrNiMo17-12-2)', mass: '7 g', tol: 'ISO 2768-fH', edges: 'ISO 13715 −0,1' });
+      material: '1.4404 (X2CrNiMo17-12-2)', mass: '7 g', tol: 'ISO 2768-fH', edges: 'ISO 13715 −0,1', date: '2026-09-28' });
     return s.svg(attrs, vb);
   }
 
@@ -473,6 +476,7 @@
     s.dimV(Y0, Y0 + H, 164.4, { label: '75' });
     s.leader([[cx + 48.6, cy + 31.1], [146, 112.5], [171, 112.5]], { label: '4× M10 – durch', dx: -24.6 });
     s.leader([[cx - 35.6, cy + 3.6], [68, 89.5], [96, 89.5]], { label: '2× Ø10 – durch', dx: -27.6 });
+    s.leader([[X0 + R - R * Math.SQRT1_2, Y0 + H - R + R * Math.SQRT1_2], [30, 111], [17, 111]], { label: '4× R8' });
     // Schnittverlauf B–B
     for (const x of [X0 - 4.5, X0 + W + 0.5]) s.line(x, cy, x + 4, cy, { w: 0.75, stroke: C.ink });
     s.line(X0 - 2.5, cy, X0 - 2.5, cy + 6.5, { w: 0.3 }); s.arrow(X0 - 2.5, cy + 7.7, Math.PI / 2, { len: 2.6, half: 0.8 });
@@ -529,7 +533,7 @@
     ], 110);
     s.surfGeneral(205, 153, 'Ra 3,2', ['Ra 1,6', 'Ra 0,8']);
     s.titleBlock({ customer: 'Pinzgauer Fördertechnik GmbH', name: 'Halteplatte', scale: '1:1', no: 'HP-1175-03', rev: 'A',
-      material: 'EN AW-6082 T651 (AlMgSi1)', mass: '0,30 kg', tol: 'ISO 2768-mK', edges: 'ISO 13715 −0,3' });
+      material: 'EN AW-6082 T651 (AlMgSi1)', mass: '0,30 kg', tol: 'ISO 2768-mK', edges: 'ISO 13715 −0,3', date: '2026-10-07' });
     return s.svg(attrs, vb);
   }
 
@@ -564,8 +568,8 @@
             char: { name: 'Ø 45,3 Schleifaufmaß', nominal: 45.3, tolMinus: -0.02, tolPlus: 0.02, unit: 'mm', sigma: 0.004, driftAt100: 0.008 },
             reason: 'Dreh-Fräszentrum mit Gegenspindel: beide Seiten in einer Aufspannung, Passfedernut und M10 mit angetriebenen Werkzeugen; Lagersitze mit 0,3 mm Schleifaufmaß' },
           { op: 'Induktionshärten Lagersitze', station: 'EXT', transferBatch: 20,
-            ext: { partner: HAERTEREI, process: 'Induktionshärten 55+3 HRC, Rht 1,5+1', leadMin: 360 },
-            reason: 'Lohnhärten: Rht 1,5+1 mm an Ø45/Ø40 – ganzes Los als eine Charge' },
+            ext: { partner: HAERTEREI, process: 'Induktionshärten 55+3 HRC, Rht 1,5+1 · Tagesdurchlauf (Rahmenvertrag)', leadMin: 360 },
+            reason: 'Lohnhärten: Rht 1,5+1 mm an Ø45/Ø40 – ganzes Los als eine Charge. Rahmenvertrag mit täglicher Abholung: 6 h beim Partner (ohne Rahmenvertrag üblich 2–5 Arbeitstage)' },
           { op: 'Rundschleifen Lagersitze + Zapfen', station: 'M09', setupMin: 30, cycleMin: 7.5, transferBatch: 20, firstPiece: true,
             tools: [{ type: 'TT-SSR', cutMinPerPart: 6 }],
             char: { name: 'Ø 45 k6 geschliffen', nominal: 45.010, tolMinus: -0.008, tolPlus: 0.008, unit: 'mm', sigma: 0.0016, driftAt100: 0.003 },
@@ -630,8 +634,8 @@
             reason: 'Planfräsen beidseitig, Kontur R8, Ø30 H7 zirkular gefräst, Bohrbild und M10 – 3-Achs genügt' },
           { op: 'Entgraten + Reinigen', station: 'M11', setupMin: 5, cycleMin: 0.4, transferBatch: 12, firstPiece: false, reason: 'Kühlschmierstoff und Späne vor dem Eloxieren entfernen' },
           { op: 'Eloxieren E6/EV1 natur', station: 'EXT', transferBatch: 24,
-            ext: { partner: 'Eloxalwerk Simmering (Beispiel)', process: 'Eloxieren E6/EV1 natur 10–15 µm, Ø30 abgedeckt', leadMin: 480 },
-            reason: 'Fremdvergabe an Eloxierer, Ø30 H7 abgedeckt' },
+            ext: { partner: 'Eloxalwerk Simmering (Beispiel)', process: 'Eloxieren E6/EV1 natur 10–15 µm, Ø30 abgedeckt · 24-h-Service', leadMin: 1440 },
+            reason: 'Fremdvergabe an Eloxierer, Ø30 H7 abgedeckt – 24-h-Service (Standard 3–5 Arbeitstage)' },
           { op: 'Endprüfung KMG', station: 'QS', setupMin: 0, cycleMin: 3, transferBatch: 12, firstPiece: false, reason: 'Ø30 H7, Rechtwinkligkeit, Ebenheit und Lochbild am KMG; Schichtdicke Stichprobe' },
         ],
         notes: ['Passung Ø30 H7 und Eloxal: die Schicht wächst ca. 5–7 µm je Seite – Bohrung abdecken oder mit Vorhalt fertigen.'],
@@ -783,7 +787,7 @@
     const dec = mt.unit === 'm' ? 1 : 0;
     const suggest = Math.max(mt.reorderQty, Math.ceil(Math.max(0, mt.min - afterQ)));
     const shortParts = ok ? 0 : Math.ceil((need - Math.max(0, free)) / Math.max(1e-9, perPart));
-    return { id, mt, perPart, need, res, before, resBefore, free, freeAtStart, viaOrder, open, ok, readyT, needsOrder, after: afterQ, laterList: after, laterShort, belowMin: afterQ < mt.min, suggest, dec, shortParts };
+    return { id, mt, perPart, need, res, before, resBefore, free, freeAtStart, viaOrder, open, early, s0, ok, readyT, needsOrder, after: afterQ, laterList: after, laterShort, belowMin: afterQ < mt.min, suggest, dec, shortParts };
   }
   const qtyU = (v, mt) => nf(v, mt && mt.unit === 'm' ? (v < 1 ? (Math.round(v * 1000) % 10 ? 3 : 2) : v < 10 ? 2 : 1) : (Math.round(v * 1000) % 1000 ? (Math.round(v * 1000) % 10 ? 3 : 2) : 0)) + ' ' + (mt ? mt.unit : '');
 
@@ -985,8 +989,8 @@
   const num = (v) => { const x = typeof v === 'string' ? numDe(v) : Number(v); return isFinite(x) ? x : NaN; };
   function extDefaults(process, op) {
     const t = (process || '') + ' ' + (op || '');
-    if (/elox/i.test(t)) return { partner: 'Eloxalwerk Simmering (Beispiel)', leadMin: 480 };
-    if (/beschicht|verzink|galvan|vernickel|chrom|brünier|lackier|passivier|beiz/i.test(t)) return { partner: 'Oberflächentechnik Wien (Beispiel)', leadMin: 600 };
+    if (/elox/i.test(t)) return { partner: 'Eloxalwerk Simmering (Beispiel)', leadMin: 1440 };
+    if (/beschicht|verzink|galvan|vernickel|chrom|brünier|lackier|passivier|beiz/i.test(t)) return { partner: 'Oberflächentechnik Wien (Beispiel)', leadMin: 1440 };
     if (/induktion/i.test(t)) return { partner: HAERTEREI, leadMin: 360 };
     if (/vakuum/i.test(t)) return { partner: HAERTEREI, leadMin: 420 };
     return { partner: HAERTEREI, leadMin: 480 };
@@ -1121,7 +1125,7 @@
       const lim = cap ? cap.what : s.type === 'cmm' ? 'Messraum mit 3D-KMG (Prüfung)' : s.type === 'washer' ? 'Kammerreinigung (Waschen)' : s.type === 'assembly' ? 'Handmontage' : s.type === 'saw' ? 'Zuschnitt Stangen/Blöcke bis 320 mm' : s.type === 'deephole' ? 'BTA/ELB-Tiefbohren bis 3.200 mm' : s.type === 'hobber' ? 'Wälzfräsen Stirnräder' : s.type === 'cylgrinder' ? 'Außen-/Innenrundschleifen' : s.type === 'surfgrinder' ? 'Flachschleifen' : '';
       lines.push(`${id} | ${s.type} | ${s.name} (${s.vendor} ${s.model}) | ${lim} | ${s.rate} €/h`);
     }
-    lines.push('EXT | extern | Fremdbearbeitung (Härterei Wolf: Induktions-, Einsatz-, Vakuumhärten 6–8 h; Eloxal/Beschichten ca. 8–10 h) | ext.partner, ext.process, ext.leadMin angeben | –');
+    lines.push('EXT | extern | Fremdbearbeitung – Härterei Wolf (Rahmenvertrag mit täglicher Abholung, Tagesdurchlauf): Induktions-, Einsatz-, Vakuumhärten 360–480 min beim Partner; Eloxal/Beschichten (24-h-Service) ca. 1440 min; ohne Rahmenvertrag üblich 2–5 Arbeitstage | ext.partner, ext.process, ext.leadMin angeben | –');
     const tools = P().toolTypes.map(t => `${t.id} | ${t.name} | ${t.kind} | Standzeit ${t.lifeMin} min`).join('\n');
     const mats = Object.values(st.materials).map(m => `${m.id} | ${m.name} | ${m.form} | ${m.unit} | ${nf(m.pricePerUnit, 2)} €/${m.unit} | Bestand ${nf(m.onHand, m.unit === 'm' ? 1 : 0)} ${m.unit}`).join('\n');
     const ex = src.kind === 'example' ? exById(src.id) : null;
@@ -1346,8 +1350,12 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-stock .trk i{display:block;height:100%}
   .ka-stock .mn{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;border-radius:1px;background:var(--st-wait);box-shadow:0 0 0 1.5px var(--card)}
   .ka-stock .lg{display:flex;gap:4px 12px;flex-wrap:wrap;margin-top:6px;font-size:var(--fs-xs);color:var(--muted)}
-  .ka-stock .lg span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
-  .ka-stock .lg i{width:9px;height:9px;border-radius:2px;display:inline-block}
+  .ka-stock .lg span{display:inline-flex;align-items:center;gap:5px;white-space:normal;min-width:0}
+  .ka-stock .lg i{width:9px;height:9px;border-radius:2px;display:inline-block;flex:none}
+  .ka-stock .lg .w{color:color-mix(in srgb,var(--st-wait) 80%,var(--text))}
+  .ka-stock .lg .x{color:color-mix(in srgb,var(--st-fault) 80%,var(--text))}
+  .ka-stock .trk i + i{box-shadow:inset 1px 0 0 var(--card)}
+  .ka-stock .oh{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;border-radius:1px;background:var(--text2);opacity:.75;box-shadow:0 0 0 1.5px var(--card)}
   .ka-feats{padding:12px 14px 14px;min-width:0}
   .ka-feats .eyebrow{display:flex;justify-content:space-between;margin-bottom:8px}
   .ka-fl{display:flex;flex-direction:column;gap:5px}
@@ -1519,6 +1527,25 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-esteps li .who{font-size:var(--fs-2xs);font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:3px 7px;border-radius:5px;white-space:nowrap}
   .ka-esteps li .who.c{color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent)}
   .ka-esteps li .who.w{color:var(--st-run);background:color-mix(in srgb,var(--st-run) 10%,transparent)}
+  .ka-esteps li .who.p{color:var(--text2);background:var(--card2);border:1px solid var(--line2)}
+  .ka-tag{position:absolute;top:5px;right:5px;padding:2px 6px;border-radius:4px;font:600 var(--fs-2xs)/1.2 var(--f-ui);color:var(--text2);background:var(--card2);border:1px solid var(--line2);white-space:nowrap}
+  .ka-goff{flex:0 1 auto;color:var(--muted)}
+  .ka-gorow .ka-goff + .btn{flex:1 1 auto}
+  @media (max-width:560px){.ka-gorow{flex-wrap:wrap}.ka-gorow .ka-goff{flex:1 1 100%}}
+  .ka-off{padding-bottom:6px}
+  .ka-nexs{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;margin-top:12px}
+  .ka-nex{display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:12px;align-items:center;padding:6px 12px 6px 6px;border-radius:9px;border:1px solid var(--line2);background:var(--bg2);color:var(--text2);cursor:pointer;text-align:left;font:inherit}
+  .ka-nex:hover{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--bg2))}
+  .ka-nex .th{display:block;aspect-ratio:2.35/1;border-radius:4px;overflow:hidden;box-shadow:0 0 0 1px var(--line)}
+  .ka-nex .th svg{display:block;width:100%;height:100%}
+  .ka-nex .tx{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .ka-nex b{font-size:var(--fs-md);font-weight:600;color:var(--text)}
+  .ka-nex small{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ka-nex > .ico{color:var(--accent)}
+  .ka-offsteps{padding:4px 18px 16px}
+  .ka-offsteps .eyebrow{display:flex;justify-content:space-between;gap:10px;margin-top:6px}
+  .ka-offsteps .ka-esteps{margin-top:8px}
+  @media (pointer:coarse){.ka-nex{min-height:48px}}
   .ka-cap{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
   .ka-cap .eyebrow{display:flex;justify-content:space-between;gap:10px}
   .ka-capg{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:6px;margin-top:9px}
@@ -1741,7 +1768,11 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
         act: mt.onOrder ? null : { label: `${qtyU(m.suggest, mt)} nachbestellen`, act: 'reorder' } });
       else if (m.belowMin) H.push({ sev: 'warn', ic: 'box', t: 'Bestand fällt unter Mindestbestand', p: `${mt.name}: nach diesem Auftrag und den Reservierungen${resTxt} noch ${qtyU(Math.max(0, m.after), mt)} (Mindestbestand ${qtyU(mt.min, mt)})${mt.onOrder ? ' – bestellt: ' + qtyU(mt.onOrder, mt) : ''}.`,
         act: mt.onOrder ? null : { label: `${qtyU(Math.max(mt.reorderQty, m.suggest), mt)} nachbestellen`, act: 'reorder' } });
-      else H.push({ sev: 'ok', ic: 'box', t: m.viaOrder ? 'Material kommt rechtzeitig' : 'Material aus dem Lager', p: m.viaOrder ? `Bestellung ${m.viaOrder.qty ? qtyU(m.viaOrder.qty, mt) + ' ' : ''}${mt.name} trifft ${fRel(m.viaOrder.etaT)} ein – vor dem Start dieses Auftrags.` : `${qtyU(m.need, mt)} ${mt.name} frei verfügbar – danach ${qtyU(m.after, mt)} (Mindestbestand ${qtyU(mt.min, mt)}).` });
+      else if (m.viaOrder) {
+        const ev = (m.early || []).filter(x => x.etaT <= m.viaOrder.etaT), names = ev.map(x => x.id).join(', ') || m.viaOrder.id;
+        H.push({ sev: 'ok', ic: 'box', t: `Gedeckt durch Bestellung ${names} (${fRel(m.viaOrder.etaT)})`,
+          p: `${qtyU(m.need, mt)} ${mt.name}: ${qtyU(Math.max(0, Math.min(m.need, m.free)), mt)} aus dem Lager, ${qtyU(Math.max(0, m.need - Math.max(0, m.free)), mt)} aus ${names} – Lieferung ${fRel(m.viaOrder.etaT)}, vor dem geplanten Start ${m.s0 != null ? fRel(m.s0) : ''}.`.replace(' .', '.') });
+      } else H.push({ sev: 'ok', ic: 'box', t: 'Material aus dem Lager', p: `${qtyU(m.need, mt)} ${mt.name} frei verfügbar – danach ${qtyU(m.after, mt)} (Mindestbestand ${qtyU(mt.min, mt)}).` });
       if (m.ok && m.viaOrder && m.belowMin && !m.laterShort) H.push({ sev: 'info', ic: 'box', t: 'Bestand danach unter Mindestbestand', p: `${mt.name}: nach diesem Auftrag ${qtyU(Math.max(0, m.after), mt)} (Mindestbestand ${qtyU(mt.min, mt)}).` });
     } else if (q.raw && !q.raw.materialId) H.push({ sev: 'info', ic: 'box', t: 'Rohteil nicht im Lager', p: `${q.raw.text} – Beistellung durch den Kunden oder Beschaffung klären${q.raw.costPerPart ? ` (geschätzt ${eur(q.raw.costPerPart)} je Teil)` : ''}.` });
     const bw = plantBottleneck();
@@ -1863,7 +1894,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     const s = ui.src;
     R.exs.innerHTML = EXAMPLES.map(ex => `<button type="button" class="ka-ex${s.kind === 'example' && s.id === ex.id ? ' on' : ''}" data-act="ex" data-id="${ex.id}" title="${esc(ex.title + ' – ' + ex.sub)}">
         <span class="th">${ex.draw(' aria-hidden="true" preserveAspectRatio="xMidYMid slice"', ex.thumb)}</span><b>${esc(ex.title)}</b></button>`).join('') +
-      `<button type="button" class="ka-ex up${s.kind === 'upload' ? ' on' : ''}" data-act="up" title="Eigene Zeichnung als Bild oder PDF hochladen"><span class="th">${icon('upload', 18)}<span style="font-size:10.5px">Bild / PDF</span></span><b>${ui.upload ? esc(ui.upload.name) : 'Eigene Zeichnung'}</b></button>`;
+      `<button type="button" class="ka-ex up${s.kind === 'upload' ? ' on' : ''}" data-act="up" title="${ai.state === 'off' ? 'Eigene Zeichnungen wertet Claude aus – verfügbar, wenn werkfluss auf claude.ai läuft' : 'Eigene Zeichnung als Bild oder PDF hochladen'}"><span class="th">${icon('upload', 18)}<span style="font-size:10.5px">Bild / PDF</span></span><b>${ui.upload ? esc(ui.upload.name) : 'Eigene Zeichnung'}</b>${ai.state === 'off' ? '<span class="ka-tag">nur mit Claude</span>' : ''}</button>`;
   }
   function selectExample(id, first) {
     const ex = exById(id); if (!ex) return;
@@ -1883,7 +1914,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     if (ui.upload && ui.upload.url) { try { URL.revokeObjectURL(ui.upload.url); } catch (e) { /* egal */ } }
     ui.upload = { kind: isPdf ? 'pdf' : 'image', file, name: file.name || 'Zeichnung', size: file.size, type: file.type, url: isImg ? URL.createObjectURL(file) : null, w: 0, h: 0 };
     if (ui.src.kind !== 'upload') { ui.customer = ''; R.cust.value = ''; }
-    ui.src = { kind: 'upload' }; ui.notice = null;
+    ui.src = { kind: 'upload' }; ui.notice = ai.state === 'off' ? 'offline' : null;
     resetResult();
     renderExamples(); renderStage(); renderGo(); renderOut();
     R.srcHint.textContent = (isPdf ? 'PDF' : 'Bild') + ' · ' + (file.name || '');
@@ -1938,13 +1969,15 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     let hint;
     if (busy) hint = run.live ? 'Antworten mit Bild dauern meist 20–60 s' : 'Auswertung läuft …';
     else if (s.kind === 'upload' && !ui.upload) hint = 'Zuerst eine Zeichnung ablegen oder auswählen.';
-    else if (s.kind === 'upload' && !live) hint = 'Eigene Zeichnungen liest Claude – hier ohne Claude-Verbindung';
+    else if (s.kind === 'upload' && !live) hint = ai.state === 'checking' ? 'Verbindung zu Claude wird geprüft …' : 'Eigene Zeichnungen wertet Claude aus, wenn werkfluss auf claude.ai läuft. Hier ohne Claude-Verbindung: mit einer der drei Beispielzeichnungen weiterrechnen.';
     else if (useLive) hint = ai.img ? 'Claude liest die Zeichnung · Preis und Termin rechnet werkfluss live' : 'Claude liest den Zeichnungstext · Preis und Termin rechnet werkfluss live';
     else hint = 'Vorberechnete Auswertung · Preis, Material und Termin live aus der Belegung';
     put(R.go, `${exMode ? `<div class="ka-mode"><span>Auswertung</span><div class="seg"><button type="button" data-act="mode" data-v="live" class="${ui.mode === 'live' ? 'on' : ''}">${icon('sparkles', 12)} Claude live</button><button type="button" data-act="mode" data-v="demo" class="${ui.mode === 'demo' ? 'on' : ''}">Vorberechnet</button></div></div>` : ''}
       <div class="ka-gorow">${busy
         ? `<button type="button" class="btn primary ka-gobtn" disabled><span class="spin"></span>Analysiere …</button>${run.live ? `<button type="button" class="btn ka-gobtn" style="flex:0 0 auto" data-act="stop">Abbrechen</button>` : ''}`
-        : `<button type="button" class="btn primary ka-gobtn" data-act="go">${icon('sparkles', 17)}${quote ? 'Erneut analysieren' : 'Analysieren'}</button>`}</div>
+        : s.kind === 'upload' && ui.upload && !live && ai.state !== 'checking'
+          ? `<button type="button" class="btn ka-gobtn ka-goff" disabled title="Die Auswertung eigener Zeichnungen braucht Claude">${icon('sparkles', 16)}Analyse nur mit Claude</button><button type="button" class="btn primary ka-gobtn" data-act="exgo" title="Flanschwelle (Beispiel) vorberechnet auswerten – Preis und Termin live">${icon('arrowRight', 16)}Mit Beispiel weiterrechnen</button>`
+          : `<button type="button" class="btn primary ka-gobtn" data-act="go">${icon('sparkles', 17)}${quote ? 'Erneut analysieren' : 'Analysieren'}</button>`}</div>
       <div class="ka-gohint">${icon('info', 14)}<span>${esc(hint)}</span></div>`);
     updateStick();
   }
@@ -1953,7 +1986,10 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     const txt = { checking: 'Claude: Verbindung wird geprüft', ready: 'Claude verbunden · liest Zeichnungen', noimg: 'Claude verbunden · ohne Bildfreigabe', off: 'Ohne Claude · vorberechnete Beispiele' }[ai.state];
     n.dataset.s = ai.state; n.title = ai.state === 'off' ? 'Auf claude.ai veröffentlicht liest Claude die Zeichnung live. Hier: vorberechnete Auswertung der drei Beispiele; Preis und Termin werden trotzdem live gerechnet.' : '';
     n.innerHTML = `<i></i><span>${esc(txt)}</span>`;
+    if (R.exs) renderExamples();
+    if (ui.src.kind === 'upload' && ui.upload && ai.state === 'off' && !run) ui.notice = 'offline';
     renderGo();
+    if (!run) renderOut();
   }
   async function initAI() {
     let s = null;
@@ -2142,26 +2178,51 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     renderBanner();
   }
 
+  /** Materialbalken – dieselbe Rechnung wie der Hinweis (matInfo): Verbrauch in Plan-Reihenfolge über Bestand + offene Bestellungen.
+      Rot („fehlt“) nur, wenn Bestand und alle Bestellungen nach den vorher eingeplanten Aufträgen nicht reichen. */
+  function stockHtml(m) {
+    const mt = m.mt, onH = Math.max(0, mt.onHand), now = S().t;
+    const sumOpen = m.open.reduce((a, p) => a + p.qty, 0), supply = onH + sumOpen;
+    const freeS = Math.max(0, m.free), freeE = Math.max(0, m.freeAtStart), freeAll = Math.max(0, m.free + sumOpen);
+    const A = Math.min(m.resBefore, supply);                                   // vorher eingeplante Aufträge
+    const B = Math.min(m.need, freeS);                                         // dieser Auftrag aus dem Lager
+    const C = Math.min(m.need - B, Math.max(0, freeE - freeS));                // … aus Bestellungen vor dem Planstart
+    const L = Math.min(m.need - B - C, Math.max(0, freeAll - freeE));          // … aus Bestellungen nach dem Planstart
+    const M = Math.max(0, m.need - B - C - L);                                 // nicht gedeckt (nur bei nötiger Bestellung)
+    const resAfter = m.laterList.reduce((a, x) => a + x.amount, 0);
+    const E = Math.min(resAfter, Math.max(0, supply - A - B - C - L));         // später eingeplante Aufträge
+    const F = Math.max(0, supply - A - B - C - L - E);                         // frei danach
+    const scale = Math.max(supply + M, mt.min) * 1.04 || 1, pc = (x) => (x / scale * 100).toFixed(2) + '%';
+    const hatch = (c) => `repeating-linear-gradient(135deg,${c} 0 3px,color-mix(in srgb,${c} 35%,transparent) 3px 6px)`;
+    const seg = (x, bg, tip) => (x > 1e-6 ? `<i style="width:${pc(x)};background:${bg}" title="${esc(tip)}"></i>` : '');
+    const ids = (l) => l.map(x => x.id).join(', ');
+    const buyTxt = (list) => list.map(p => `${p.id} (${fRel(p.etaT)})`).join(', ');
+    const early = (m.early || []).slice(), late = m.open.filter(p => !early.includes(p));
+    const lg = [];
+    if (A > 1e-6) lg.push(`<span><i style="background:var(--line2)"></i>vorher eingeplant ${qtyU(m.resBefore, mt)} (${esc(ids(m.before))})</span>`);
+    lg.push(`<span><i style="background:var(--mat)"></i>dieser Auftrag ${qtyU(m.need, mt)}${B > 1e-6 && (C + L) > 1e-6 ? ` – ${qtyU(B, mt)} aus dem Lager` : B > 1e-6 ? ' aus dem Lager' : ''}</span>`);
+    if (C > 1e-6) lg.push(`<span><i style="background:${hatch('var(--mat)')}"></i>${qtyU(C, mt)} aus ${esc(buyTxt(early))}</span>`);
+    if (L > 1e-6) lg.push(`<span class="w"><i style="background:${hatch('var(--mat)')}"></i>${qtyU(L, mt)} aus ${esc(buyTxt(late))} – nach dem Planstart</span>`);
+    if (M > 1e-6) lg.push(`<span class="x"><i style="background:var(--st-fault)"></i>fehlt ${qtyU(M, mt)} – Bestellung nötig</span>`);
+    if (E > 1e-6) lg.push(`<span><i style="background:${hatch('var(--line2)')}"></i>später eingeplant ${qtyU(resAfter, mt)} (${esc(ids(m.laterList))})</span>`);
+    lg.push(`<span><i style="background:color-mix(in srgb,var(--st-run) 45%,transparent)"></i>frei danach ${qtyU(Math.max(0, m.after), mt)}</span>`);
+    lg.push(`<span><i style="background:var(--st-wait);width:2px;border-radius:1px"></i>Mindestbestand ${qtyU(mt.min, mt)}</span>`);
+    const tip = `Lagerbestand ${qtyU(onH, mt)}${sumOpen ? ' + bestellt ' + qtyU(sumOpen, mt) : ''} · vorher eingeplant ${qtyU(m.resBefore, mt)} · dieser Auftrag ${qtyU(m.need, mt)} · später eingeplant ${qtyU(resAfter, mt)}`;
+    return `<div class="ka-stock" title="${esc(tip)}">
+        <div class="bw"><div class="trk">${seg(A, 'var(--line2)', 'vorher eingeplant')}${seg(B, 'var(--mat)', 'dieser Auftrag aus dem Lager')}${seg(C, hatch('var(--mat)'), 'dieser Auftrag aus Bestellung (vor Planstart)')}${seg(L, hatch('var(--mat)'), 'dieser Auftrag aus Bestellung (nach Planstart)')}${seg(E, hatch('var(--line2)'), 'später eingeplant')}${seg(F, 'color-mix(in srgb,var(--st-run) 45%,transparent)', 'frei danach')}${seg(M, 'var(--st-fault)', 'fehlt')}</div>
+          ${sumOpen > 1e-6 ? `<span class="oh" style="left:${pc(onH)}" title="Lagerbestand ${esc(qtyU(onH, mt))} | dahinter offene Bestellungen ${esc(qtyU(sumOpen, mt))}"></span>` : ''}<span class="mn" style="left:${pc(mt.min)}"></span></div>
+        <div class="lg">${lg.join('')}</div></div>`;
+  }
   // ------------------------------------------------------------------ 1 Erkanntes Teil
   function partHtml() {
     const q = quote, c = calc, m = c.mat, p = q.part;
     const badge = q.source === 'claude' ? `<span class="ka-badge ai">${icon('sparkles', 12)} Claude${run.ms ? ' · ' + secTxt(run.ms) : ''}</span>` : `<span class="ka-badge">Vorberechnete Auswertung</span>`;
     const est = q.source === 'claude' ? ' class="ka-est" title="Von Claude aus der Zeichnung geschätzt – vor Freigabe prüfen"' : '';
     let stock = '';
-    if (m && !m.none) {
-      const mt = m.mt, onH = mt.onHand, scale = Math.max(onH + (mt.onOrder || 0), m.res.total + m.need, mt.min) * 1.04 || 1;
-      const resW = Math.min(m.res.total, onH) / scale * 100;
-      const mine = Math.min(m.need, Math.max(0, onH - m.res.total)) / scale * 100;
-      const short = Math.max(0, m.need - Math.max(0, onH - m.res.total)) / scale * 100;
-      const rest = Math.max(0, onH - m.res.total - m.need) / scale * 100;
-      const ord = (mt.onOrder || 0) / scale * 100;
-      stock = `<div class="ka-stock" title="Lagerbestand ${qtyU(onH, mt)} · reserviert ${qtyU(m.res.total, mt)} · Mindestbestand ${qtyU(mt.min, mt)}">
-        <div class="bw"><div class="trk"><i style="width:${resW.toFixed(1)}%;background:var(--line2)"></i><i style="width:${mine.toFixed(1)}%;background:var(--mat)"></i><i style="width:${short.toFixed(1)}%;background:var(--st-fault)"></i><i style="width:${rest.toFixed(1)}%;background:color-mix(in srgb,var(--st-run) 45%,transparent)"></i><i style="width:${ord.toFixed(1)}%;background:repeating-linear-gradient(45deg,color-mix(in srgb,var(--info) 45%,transparent) 0 3px,transparent 3px 6px)"></i>
-</div><span class="mn" style="left:${(mt.min / scale * 100).toFixed(1)}%"></span></div>
-        <div class="lg">${m.res.total > 1e-6 ? `<span><i style="background:var(--line2)"></i>reserviert ${qtyU(m.res.total, mt)} (${m.res.list.map(x => x.id).join(', ')})</span>` : ''}<span><i style="background:var(--mat)"></i>dieser Auftrag ${qtyU(m.need, mt)}</span>${short > 0 ? `<span><i style="background:var(--st-fault)"></i>fehlt ${qtyU(m.need - Math.max(0, onH - m.res.total), mt)}</span>` : ''}${mt.onOrder ? `<span><i style="background:color-mix(in srgb,var(--info) 55%,transparent)"></i>bestellt ${qtyU(mt.onOrder, mt)}</span>` : ''}<span><i style="background:var(--st-wait);width:2px;border-radius:1px"></i>Mindestbestand ${qtyU(mt.min, mt)}</span></div></div>`;
-    }
+    if (m && !m.none) stock = stockHtml(m);
     const matTxt = m && !m.none ? `${qtyU(m.need, m.mt)}` : '–';
-    const matSub = m && !m.none ? `${nf(c.qty)} × ${qtyU(q.raw.perPart, m.mt)} · Bestand ${qtyU(m.mt.onHand, m.mt)} · ${m.mt.location === 'RAW' ? 'Kragarmregal' : esc(m.mt.location)}` : 'kein Lagermaterial – beigestellt bzw. separat beschafft';
+    const onOrd = m && !m.none ? m.open.reduce((a, x) => a + x.qty, 0) : 0;
+    const matSub = m && !m.none ? `${nf(c.qty)} × ${qtyU(q.raw.perPart, m.mt)} · Bestand ${qtyU(m.mt.onHand, m.mt)}${onOrd > 1e-6 ? ' + bestellt ' + qtyU(onOrd, m.mt) : ''} · ${m.mt.location === 'RAW' ? 'Kragarmregal' : esc(m.mt.location)}` : 'kein Lagermaterial – beigestellt bzw. separat beschafft';
     let n = 0;
     const feats = q.features.map((f, i) => `<div class="ka-feat" data-fi="${i}">${f.pos ? `<span class="no">${i + 1}</span>` : `<span class="no x">–</span>`}<span class="ic" title="${esc(FEAT[f.kind] || '')}">${featIcon(f.kind)}</span><div style="min-width:0"><div class="t"><b>${esc(f.text)}</b>${f.critical ? '<span class="crit">kritisch</span>' : ''}</div><div class="d">${esc(f.detail || FEAT[f.kind] || '')}</div></div></div>`).join('');
     n = q.features.filter(f => f.critical).length;
@@ -2506,23 +2567,41 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
         (isBn ? `\nEngpass im Werk – ${bw.why || ''}` : '');
       return `<div class="c${isBn ? ' bn' : ''}" style="--c:${stColor(id)}" title="${esc(tipTxt)}"><i></i><span class="nmw"><span class="id">${id}</span><span class="nm">${esc(sn.short)}</span>${isBn ? `<span class="bnt" aria-label="Engpass im Werk">${icon('gauge', 13)}</span>` : ''}</span><span class="frw">${fr}${bis ? `<span class="bis">${esc(bis)}</span>` : ''}</span><span class="occ" aria-hidden="true">${bar}</span></div>`;
     }).join('');
-    const step = (ic, t, d, who) => `<li><span class="d">${icon(ic, 16)}</span><div><b>${t}</b><span>${d}</span></div><span class="who ${who === 'Claude' ? 'c' : 'w'}">${who}</span></li>`;
+    const off = ai.state === 'off';
+    // ohne Claude ehrlich: die Beispiele sind vorberechnet gelesen, Preis und Termin rechnet werkfluss trotzdem live
+    const intro = off
+      ? 'Eine Beispielzeichnung wählen und „Analysieren“ klicken. Ohne Claude-Verbindung zeigt werkfluss die vorberechnete Auswertung der drei Beispiele; Preis, Material und Liefertermin rechnet werkfluss live aus der aktuellen Belegung Ihrer Fertigung – und lastet den Auftrag auf Wunsch sofort ein. Eigene Zeichnungen liest Claude, wenn werkfluss auf claude.ai läuft.'
+      : 'Eine Beispielzeichnung wählen oder eine eigene ablegen und „Analysieren“ klicken. Claude liest die Zeichnung; werkfluss rechnet Preis und Liefertermin aus der aktuellen Belegung Ihrer Fertigung – und lastet den Auftrag auf Wunsch sofort ein.';
     return `<div class="ka-empty"><div class="hd"><span class="ic">${icon('sparkles', 22)}</span><div><h2>Vom Zeichnungsstand zum Angebot – in einer Minute</h2>
-        <p>Eine Beispielzeichnung wählen oder eine eigene ablegen und „Analysieren“ klicken. Claude liest die Zeichnung; werkfluss rechnet Preis und Liefertermin aus der aktuellen Belegung Ihrer Fertigung – und lastet den Auftrag auf Wunsch sofort ein.</p></div></div>
-      <ol class="ka-esteps">
+        <p>${esc(intro)}</p></div></div>
+      ${stepsHtml(off)}
+      <div class="ka-cap"><div class="eyebrow"><span>Live-Belegung der Arbeitsplätze · nächste 48 h</span><span>${esc(WF.sim.clock())}</span></div><div class="ka-capg">${caps}</div>
+        <div class="ka-caplg"><span><i class="a"></i>laufender Auftrag</span><span><i></i>eingeplant</span>${bw && bw.stationId ? `<span class="bnl" title="${esc(bw.why || '')}">${icon('gauge', 13)}Engpass im Werk</span>` : ''}<span>„frei“ = erste Lücke von mindestens 2 h laut Plantafel</span></div></div></div>`;
+  }
+  /** Die fünf Schritte der Auswertung – wer was macht (Claude liest, werkfluss rechnet); ohne Claude vorberechnet */
+  function stepsHtml(off) {
+    const who = (w) => (off && w === 'Claude' ? 'Vorberechnet' : w);
+    const step = (ic, t, d, w) => `<li><span class="d">${icon(ic, 16)}</span><div><b>${t}</b><span>${d}</span></div><span class="who ${w === 'Claude' ? (off ? 'p' : 'c') : 'w'}">${esc(who(w))}</span></li>`;
+    return `<ol class="ka-esteps">
         ${step('eye', 'Zeichnung lesen', 'Bemaßung, Schriftfeld, Werkstoff, Masse und Hinweise.', 'Claude')}
         ${step('target', 'Merkmale', 'Passungen, Oberflächen, Härte, Form- und Lagetoleranzen – nummeriert auf der Zeichnung.', 'Claude')}
         ${step('route', 'Arbeitsplan', `Nur mit den ${P().machines.length} Arbeitsplätzen und ${P().toolTypes.length} Werkzeugtypen dieses Werks – jede Station und jedes Werkzeug geprüft.`, 'Claude')}
         ${step('euro', 'Kalkulation', 'Lagermaterial, Maschinenstundensätze, Werkzeugverschleiß, Fremdbearbeitung, Zuschlag – jede Formel sichtbar.', 'werkfluss')}
         ${step('clock', 'Termin', 'Warteschlangen der Maschinen, Schichtkalender, Härterei-Lieferfenster und Materialbestand – live.', 'werkfluss')}
-      </ol>
-      <div class="ka-cap"><div class="eyebrow"><span>Live-Belegung der Arbeitsplätze · nächste 48 h</span><span>${esc(WF.sim.clock())}</span></div><div class="ka-capg">${caps}</div>
-        <div class="ka-caplg"><span><i class="a"></i>laufender Auftrag</span><span><i></i>eingeplant</span>${bw && bw.stationId ? `<span class="bnl" title="${esc(bw.why || '')}">${icon('gauge', 13)}Engpass im Werk</span>` : ''}<span>„frei“ = erste Lücke von mindestens 2 h laut Plantafel</span></div></div></div>`;
+      </ol>`;
   }
   function noticeHtml(kind) {
+    if (kind === 'offline') {
+      // eigene Zeichnung ohne Claude: kein Leerlauf – erklären, was mit Claude passiert, und sofort mit einem Beispiel weiter
+      const exs = EXAMPLES.map(e => `<button type="button" class="ka-nex" data-act="exgo" data-id="${e.id}"><span class="th">${e.draw(' aria-hidden="true" preserveAspectRatio="xMidYMid slice"', e.thumb)}</span><span class="tx"><b>${esc(e.title)}</b><small>${esc(e.sub)}</small></span>${icon('arrowRight', 15)}</button>`).join('');
+      return `<div class="ka-note ka-off"><span class="ic" style="--c:var(--accent)">${icon('sparkles', 20)}</span><div>
+          <h3>Eigene Zeichnungen – mit Claude verfügbar</h3>
+          <p>Diese Demo läuft gerade ohne Claude-Verbindung (z. B. lokal geöffnet). Veröffentlicht auf claude.ai liest Claude Ihre Zeichnung live; Preis, Material und Liefertermin rechnet werkfluss danach aus der aktuellen Belegung. Ausprobieren lässt sich der Ablauf hier mit einer der drei Beispielzeichnungen – vorberechnet gelesen, Preis und Termin live.</p>
+          <div class="ka-nexs">${exs}</div></div></div>
+        <div class="ka-offsteps"><div class="eyebrow"><span>So läuft die Auswertung mit Claude</span><span>ca. 20–60 s</span></div>${stepsHtml(false)}</div>`;
+    }
     const exBtns = EXAMPLES.map(e => `<button type="button" class="btn sm" data-act="ex" data-id="${e.id}">${esc(e.title)}</button>`).join('');
     const T = {
-      offline: ['Eigene Zeichnungen liest Claude', 'Diese Demo läuft gerade ohne Claude-Verbindung (z. B. lokal geöffnet). Auf claude.ai veröffentlicht liest Claude Ihre Zeichnung live. Hier können Sie eine der Beispielzeichnungen verwenden – Preis, Material und Termin rechnet werkfluss trotzdem live aus der aktuellen Belegung.', 'plug'],
       pdf: ['PDF bitte als Bild', 'Claude liest Zeichnungen hier als Bild. Bitte die Zeichnung als PNG oder JPG exportieren (oder ein Foto aufnehmen) und erneut ablegen.', 'file'],
       noimg: ['Bilder sind hier nicht freigegeben', 'Claude ist verbunden, darf in dieser Ansicht aber keine Bilder lesen. Für die Beispielzeichnungen erhält Claude den Zeichnungsinhalt als Text.', 'eye'],
     }[kind] || ['Hinweis', '', 'info'];
@@ -2561,16 +2640,28 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   function place() {
     if (!quote || !run || !run.done) return null;
     const spec = buildSpec(); if (!spec) return null;
+    // Prognose aller offenen Aufträge vorher (ungeglättet) – danach zeigt die Plantafel, wer sich verschiebt
+    const etaOf = (fc) => { const m = {}; for (const oid in fc.orders) { const f = fc.orders[oid]; if (f && !f.done) m[oid] = f.etaRaw != null ? f.etaRaw : f.eta; } return m; };
+    let before = {};
+    try { before = etaOf(WF.sim.forecast(0)); } catch (e) { before = {}; }
     let id;
     try { id = WF.sim.actions.addOrder(spec); } catch (e) { id = { ok: false, msg: e.message }; }
     if (!id || typeof id !== 'string') { WF.app.toast((id && id.msg) || 'Auftrag konnte nicht eingelastet werden.', 'warn', { title: 'Einlastung abgelehnt' }); return null; }
-    let etaPlan = null;
-    try { const f = WF.sim.forecast(0).orders[id]; etaPlan = f ? f.eta : null; } catch (e) { etaPlan = null; }
-    placed = { id, t: S().t, key: quoteKey(), etaQuote: calc.sch.eta, etaPlan, total: calc.pr.total, qty: calc.qty };
-    WF.app.toast(`${nf(spec.qty)} Stk „${spec.part.name}“ für ${spec.customer} · Termin ${fDay(spec.due)}${etaPlan ? ' · Plantafel: ' + fDay(etaPlan) : ''}. Der Auftrag läuft jetzt durch die Fertigung.`, 'ok', { title: `${id} eingelastet`, onClick: () => WF.app.select('order', id), ms: 7000 });
+    let etaPlan = null, after = {};
+    try { const fc = WF.sim.forecast(0), f = fc.orders[id]; etaPlan = f ? (f.etaRaw != null ? f.etaRaw : f.eta) : null; after = etaOf(fc); } catch (e) { etaPlan = null; }
+    const shifted = Object.keys(before).filter(oid => after[oid] != null && after[oid] - before[oid] >= 10 * 60).sort((a, b) => (after[b] - before[b]) - (after[a] - before[a]));
+    placed = { id, t: S().t, key: quoteKey(), etaQuote: calc.sch.eta, etaPlan, total: calc.pr.total, qty: calc.qty, shifted };
+    // Meldung sagt, was wirklich passiert: wann der erste Arbeitsgang beginnt, Prognose und Termin, wer sich verschiebt
+    let v = null; try { v = WF.sim.orderView(id); } catch (e) { v = null; }
+    const op1 = v && v.ops && v.ops[0];
+    const now = S().t;
+    const startTxt = op1 ? (op1.state === 'active' ? `Start jetzt an ${op1.stationName || op1.station}` : op1.plannedStart != null ? `Start ${op1.stationName || op1.station} (AG ${op1.seq}) ${op1.plannedStart <= now + 300 ? 'sofort' : 'ca. ' + fRel(op1.plannedStart)}` : '') : '';
+    const body = [startTxt, etaPlan != null ? `Prognose ${fDay(etaPlan)} (Termin ${fDay(spec.due)})` : `Termin ${fDay(spec.due)}`,
+      shifted.length ? `${shifted.length} ${shifted.length === 1 ? 'Auftrag verschiebt' : 'Aufträge verschieben'} sich` : 'kein anderer Auftrag verschiebt sich'].filter(Boolean).join(' · ');
+    WF.app.toast(body, 'ok', { title: `${id} eingelastet · ${nf(spec.qty)} Stk ${spec.part.name}`, onClick: () => WF.app.select('order', id), ms: 9000 });
     recalc(); renderSections(); renderRecent();
-    WF.app.navigate('auftraege');
-    WF.app.select('order', id);
+    // Plantafel mit dem neuen Auftrag hervorgehoben (neue Blöcke reihen sich ein), verschobene Aufträge kurz markiert
+    if (hasView('auftraege')) WF.app.navigate('auftraege', { mode: 'gantt', order: id, fresh: true, shifted });
     return id;
   }
   function quoteText() {
@@ -2682,12 +2773,13 @@ Erstellt mit werkfluss KI-Auftrag · ${WF.sim.clock()}`;
     const a = b.dataset.act;
     if (a === 'ex') selectExample(b.dataset.id);
     else if (a === 'up' || a === 'pick') {
-      if (a === 'up' && ui.src.kind !== 'upload') { cancelRun(); ui.src = { kind: 'upload' }; ui.notice = null; ui.customer = ''; R.cust.value = ''; resetResult(); renderExamples(); renderStage(); renderGo(); renderOut(); R.srcHint.textContent = 'Bild oder PDF ablegen'; if (ui.upload) return; }
+      if (a === 'up' && ui.src.kind !== 'upload') { cancelRun(); ui.src = { kind: 'upload' }; ui.notice = ai.state === 'off' ? 'offline' : null; ui.customer = ''; R.cust.value = ''; resetResult(); renderExamples(); renderStage(); renderGo(); renderOut(); R.srcHint.textContent = 'Bild oder PDF ablegen'; if (ui.upload) return; }
       R.file.click();
     }
     else if (a === 'zoom') openZoom();
     else if (a === 'go') { if (run && run.error) run = null; analyze(); }
     else if (a === 'demo') { run = null; analyze({ demo: true }); }
+    else if (a === 'exgo') { selectExample(b.dataset.id || 'flanschwelle'); analyze({ demo: true }); }
     else if (a === 'stop') { cancelRun(); run = null; renderOut(); renderStageFx(); renderGo(); }
     else if (a === 'qm') stepQty(-1);
     else if (a === 'qp') stepQty(1);

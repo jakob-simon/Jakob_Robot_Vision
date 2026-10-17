@@ -72,8 +72,11 @@
     if (pc && pc.by) return pc.by;
     const s = S();
     if (s) for (const id in s.tasks) { const tk = s.tasks[id]; if (tk.type === 'toolChange' && tk.machineId === machineId && tk.data && tk.data.index && tk.assignee) return pName(tk.assignee); }
+    // wie die Engine: Bediener:in im Dienst, die diese Maschine führt (nicht, wer gerade zufällig einlegt)
+    const st = P.stationById[machineId], sk = st && st.skill;
+    if (s) for (const pid in s.people) { const p = s.people[pid]; if (p.onDuty && !p.endShift && p.state !== 'offShift' && (p.machines || []).includes(machineId) && (!sk || (p.skills || []).includes(sk))) return shortName(p.name); }
     const mx = mx0 || mxOf(machineId), op = mx && mx.mv ? mx.mv.operator : null;
-    return op && op.name ? shortName(op.name) : null;
+    return op && op.name && op.responsible ? shortName(op.name) : null;
   }
   function idxWho(machineId, pc) {
     const n = idxName(machineId, pc);
@@ -95,6 +98,8 @@
   const refs = (root) => { const r = {}; root.querySelectorAll('[data-r]').forEach(n => { r[n.dataset.r] = n; }); return r; };
   const chip = (label, c, cls) => `<span class="tl-chip${cls ? ' ' + cls : ''}" style="--c:${c}">${esc(label)}</span>`;
   const stLabel = (s) => (WF.sim && WF.sim.label ? WF.sim.label('toolStatus', s) : s);
+  /** Statuslabel eines Werkzeugs – „Wird gewendet“ statt „Wird gewechselt“, wenn gerade eine Schneide gewendet wird */
+  const stLabelT = (t) => (t && t.status === 'changing' && /gewendet/.test(t.explain || '') ? 'Wird gewendet' : stLabel(t ? t.status : ''));
   const kindLabel = (k) => (WF.sim && WF.sim.label ? WF.sim.label('toolKind', k) : k);
 
   /** Schlüsselbasiertes Patchen einer Liste: bestehende Knoten bleiben (Fokus, Hover), nur geänderte werden neu befüllt */
@@ -1251,7 +1256,8 @@
     let html, c = 'var(--st-tool)', cls = '';
     const mName = (mx) => `${esc(mx.short)} (${esc(mx.id)})`;
     if (chg) {
-      html = `<span class="tl-nx-t"><small>bis ca.</small>${esc(tclock(Math.max(now, chg.mx.changing.t1), now))}</span><span class="tl-nx-b"><span class="eyebrow">Werkzeugwechsel läuft</span><b>${mName(chg.mx)} · ${esc(chg.tools.map(toolShort).join(', '))}</b><small>${esc(chg.by)} wechselt seit ${esc(tclock(chg.mx.changing.t0, now))}</small></span>`;
+      const cIdx = chg.mx.changing.list.length > 0 && chg.mx.changing.list.every(x => x.action === 'index');
+      html = `<span class="tl-nx-t"><small>bis ca.</small>${esc(tclock(Math.max(now, chg.mx.changing.t1), now))}</span><span class="tl-nx-b"><span class="eyebrow">${cIdx ? 'Schneide wenden läuft' : 'Werkzeugwechsel läuft'}</span><b>${mName(chg.mx)} · ${esc(chg.tools.map(toolShort).join(', '))}</b><small>${esc(chg.by)} ${cIdx ? 'wendet an der Maschine' : 'wechselt'} seit ${esc(tclock(chg.mx.changing.t0, now))}</small></span>`;
       R.next.dataset.sel = chg.sel;
     } else if (plan && (!proj || plan.t <= proj.t + 60)) {
       if (plan.g.waitFromT != null) c = 'var(--st-wait)';
@@ -1740,7 +1746,7 @@
       return `<li class="tl-step ${cls}" style="--c:${sc}"><span class="tl-sn">${cls === 'done' ? icon('check', 12) : i + 1}</span><div><div class="tl-st-t">${esc(title)}${tg}</div><div class="tl-st-d">${d}</div></div></li>`;
     }).join('');
     const head = `<div class="tl-ex-tool" data-sel="tool|${esc(t.id)}" tabindex="0" role="button" title="Werkzeugdetails öffnen">
-        <div class="tl-ex-tn">${chip(stLabel(t.status), c, 'dot' + (t.status === 'changing' ? ' pulse' : ''))}${eg ? `<span class="tl-idx" title="Wendeplatte: Schneide ${eg.no} von ${eg.of}">Schneide ${eg.no}/${eg.of}</span>` : ''}<span class="spacer"></span><span class="mono">${esc(t.machineId)} ${esc(mx ? mx.short : '')}</span></div>
+        <div class="tl-ex-tn">${chip(stLabelT(t), c, 'dot' + (t.status === 'changing' ? ' pulse' : ''))}${eg ? `<span class="tl-idx" title="Wendeplatte: Schneide ${eg.no} von ${eg.of}">Schneide ${eg.no}/${eg.of}</span>` : ''}<span class="spacer"></span><span class="mono">${esc(t.machineId)} ${esc(mx ? mx.short : '')}</span></div>
         <b class="tl-ex-name">${esc(t.name)}</b>
         ${ladder(t, { running })}
       </div>`;
@@ -1781,7 +1787,7 @@
         <div class="tl-tn c-n"><b title="${esc(t.name)}">${showM ? `<span class="mono" style="color:var(--muted);font-weight:500;margin-right:6px">${esc(t.machineId)}</span>` : ''}${esc(t.name)}</b><small>${esc(sub)}<span class="tl-mid">${t.mountedT != null ? ' · eingebaut ' + esc(tclock(t.mountedT, now)) : ''}${t.parts != null ? ' · ' + esc(teile(t.parts)) + ' mit Schneide' : ''}</span></small></div>
         <div class="c-w">${wearBar(t)}</div>
         <div class="tl-rest c-r r"><b>${esc(rest)}</b><small>${esc(restSub)}</small></div>
-        <div class="c-st">${chip(stLabel(t.status), c, 'dot' + (t.status === 'changing' ? ' pulse' : ''))}</div>
+        <div class="c-st">${chip(stLabelT(t), c, 'dot' + (t.status === 'changing' ? ' pulse' : ''))}</div>
         <div class="tl-pl c-p ${pl.cls}" title="${esc(plMain(pl) + (pl.sub ? ' – ' + pl.sub : ''))}">${plHtml(pl)}</div>
         <div class="tl-mt c-mt r">${t.mountedT != null ? esc(tclock(t.mountedT, now)) : '–'}<small>${mountedSec != null ? esc(ago(mountedSec)) : ''}</small></div>
         <div class="tl-pt c-pt r">${t.parts != null ? esc(U.fmtNum(t.parts)) : '–'}</div>`;
@@ -2086,7 +2092,7 @@
         <div class="tl-d-top">
           <div class="tl-d-kv"><div class="v">${esc(U.fmtNum(tv.wearPct, 0))}<small>%</small></div><div class="l">Verschleiß${tv.wearAfterPartPct != null && tv.wearAfterPartPct > tv.wearPct && running ? ` · nach dem Teil ${esc(pct(tv.wearAfterPartPct, 0))}` : ''}</div></div>
           <div class="tl-d-kv"><div class="v">${rp != null ? esc(U.fmtNum(rp)) + `<small>${rp === 1 ? 'Teil' : 'Teile'}</small>` : '–'}</div><div class="l">${rp != null ? 'Reststandzeit' + (tv.remainingMin != null ? ' · ' + esc(minTxt(tv.remainingMin)) : '') : 'Reststandzeit unbekannt'}</div></div>
-          <div class="tl-d-st">${chip(stLabel(tv.status), c, 'dot' + (tv.status === 'changing' ? ' pulse' : ''))}</div></div>
+          <div class="tl-d-st">${chip(stLabelT(tv), c, 'dot' + (tv.status === 'changing' ? ' pulse' : ''))}</div></div>
         <div class="tl-d-box" style="--c:${c}"><div class="tl-d-box-h">${icon('info', 14)}<span>Warum?</span></div><div>${esc(tv.explain || '–')}</div></div>
       </section>
       ${showLadder ? `<section><h4>Standzeit je Teil</h4><div class="tl-d-card">${ladder(tv, { running })}</div></section>` : ''}
@@ -2172,7 +2178,7 @@
           <div><div class="l">Neupreis</div><div class="v">${esc(U.fmtNum(tt.cost))}<small>€</small></div></div>
           <div><div class="l">Nachschliff</div><div class="v">${st.regrind || 0}</div></div>
           <div><div class="l">Verschrottet</div><div class="v">${st.scrapToday || 0}<small>heute</small></div></div></section>
-        <section><h4>Im Einsatz (${inst.length})</h4>${inst.length ? `<div class="tl-inst">${inst.map(t => `<button data-sel="tool|${esc(t.id)}"><span><b style="font-weight:600">${esc(t.machineId)}</b> ${esc(t.machineShort)}</span>${wearBar(t)}${chip(stLabel(t.status), ST_C[t.status] || 'var(--st-idle)', 'dot')}</button>`).join('')}</div>` : '<div class="muted" style="font-size:var(--fs-sm)">Derzeit in keiner Maschine montiert.</div>'}</section>
+        <section><h4>Im Einsatz (${inst.length})</h4>${inst.length ? `<div class="tl-inst">${inst.map(t => `<button data-sel="tool|${esc(t.id)}"><span><b style="font-weight:600">${esc(t.machineId)}</b> ${esc(t.machineShort)}</span>${wearBar(t)}${chip(stLabelT(t), ST_C[t.status] || 'var(--st-idle)', 'dot')}</button>`).join('')}</div>` : '<div class="muted" style="font-size:var(--fs-sm)">Derzeit in keiner Maschine montiert.</div>'}</section>
         <section><h4>Stammdaten</h4><dl class="dl"><dt>Typ</dt><dd><span class="mono">${esc(typeId)}</span> · ${esc(kindLabel(tt.kind))}</dd><dt>Wechsel heute</dt><dd>${changes}</dd><dt>Gebraucht zurück</dt><dd>${st.usedStock || 0} (beim Rüsten wenig verschlissen zurückgegeben)</dd><dt>Voreinstellzeit</dt><dd>${tt.presetMin ? tt.presetMin + ' min' : 'keine (direkt einsetzbar)'}</dd>${tt.dressEvery ? `<dt>Abrichten</dt><dd>alle ${tt.dressEvery} Teile</dd>` : ''}</dl></section>`;
     };
     return {

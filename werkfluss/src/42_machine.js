@@ -311,12 +311,9 @@
     while (arr.length && arr[0].t < sg.t - SPARK_WIN - 60) arr.shift();
     if (arr.length > 600) arr.splice(0, arr.length - 600);
   }
-  setInterval(() => {
-    try {
-      if (!WF.sim || !WF.sim.state || !WF.profile) return;
-      for (const id of WF.profile.machines) { const mv = WF.sim.machineView(id); if (mv && mv.conn.level >= 1) sampleOne(id, mv); }
-    } catch (e) { /* Aufzeichnung ist optional */ }
-  }, 500);
+  // Aufgezeichnet wird nur für den offenen Drawer (in render/update, mit der ohnehin gelesenen machineView) – kein
+  // Hintergrund-Timer, der 2×/s alle 13 Maschinensichten berechnet. Lücken (Drawer zu, hohes Tempo) füllt sampleOne.
+  function sampleSafe(id, mv) { try { if (mv && mv.conn && mv.conn.level >= 1) sampleOne(id, mv); } catch (e) { /* Aufzeichnung ist optional */ } }
   if (WF.bus) WF.bus.on('sim:reset', () => { for (const k in SAMPLES) delete SAMPLES[k]; });
 
   /** Zeitverlauf der letzten 30 min: feste Zeitachse (−30 min … jetzt), Lücken bleiben Lücken, Endpunkt betont */
@@ -828,6 +825,7 @@
       if (!el || !st.nodes.status) return;
       const mv = WF.sim.machineView(id); if (!mv) return;
       const now = WF.sim.t;
+      sampleSafe(id, mv);
       for (const sec of SECTIONS) {
         const n = st.nodes[sec.key];
         let sig;

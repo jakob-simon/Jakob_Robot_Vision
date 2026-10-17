@@ -313,7 +313,7 @@
   .qa-tbl tr.click:focus-visible td{background:color-mix(in srgb,var(--accent) 9%,transparent);box-shadow:inset 0 2px 0 var(--accent),inset 0 -2px 0 var(--accent)}
   .qa-tbl tr.click:focus-visible td:first-child{box-shadow:inset 2px 0 0 var(--accent),inset 0 2px 0 var(--accent),inset 0 -2px 0 var(--accent)}
   .qa-tbl tr.click:focus-visible td:last-child{box-shadow:inset -2px 0 0 var(--accent),inset 0 2px 0 var(--accent),inset 0 -2px 0 var(--accent)}
-  .qa-cr:focus-visible,.qa-up-r:focus-visible,.qa-sp:focus-visible{outline-offset:-2px}
+  .qa-cr:focus-visible,.qa-up-r:focus-visible,.qa-sp:focus-visible,.qa-ct:focus-visible{outline-offset:-2px}
   .qa-root section.card:focus{outline:none}
   .qa-root section.card:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 55%,transparent);outline-offset:2px}
   .qa-card-f{padding:9px 14px 11px;border-top:1px solid var(--line);font-size:var(--fs-xs);color:var(--faint);line-height:1.45}

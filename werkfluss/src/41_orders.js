@@ -214,7 +214,7 @@
       title: `${nf(fin)} von ${nf(v.qty)} Stk fertig bearbeitet (kräftiger Balken) · ${nf(v.shippedQty)} Stk versandt\nArbeitsinhalt ${U.fmtPct(work)} erledigt (heller Balken: Rüst- und Bearbeitungszeit aller Arbeitsgänge, auch Teile in Arbeit)` +
         (qr && qr.text ? `\n${qr.text}` : '') };
   }
-  function slackText(v) {
+  function slackText(v, compact) {
     if (v.status === 'fertig') {
       if (v.shippedQty < v.qty) return nf(v.qty - v.shippedQty) + ' Stk fehlen';
       if (v.slackSec != null && v.slackSec < 0) return durLong(-v.slackSec) + ' nach Termin';
@@ -223,6 +223,8 @@
     const qs = qtyShort(v), qTxt = qs ? nf(qs.missing) + ' Stk fehlen' : '';
     if (v.slackSec == null) return qTxt || 'keine Prognose';
     const tTxt = v.slackSec >= 0 ? 'Puffer ' + durLong(v.slackSec) : durLong(-v.slackSec) + ' zu spät';
+    // Karte: bei reinem Mengenrisiko zählt die fehlende Menge (der Termin selbst hält); ausführlich im Drawer
+    if (qTxt && compact && !timeRisk(v)) return qTxt;
     return qTxt ? qTxt + ' · ' + tTxt : tTxt;
   }
   function riskBadge(v) {
@@ -925,6 +927,7 @@
   }
   @container orpane (max-width:520px){
     .or-prog-s{white-space:normal;line-height:1.35}
+    .or-prog-s .nw.q{white-space:normal}
     .or-prog-s .nw{display:block}
     .or-prog-s .nw + .nw::before{content:none}
   }
@@ -1445,7 +1448,7 @@
     // Lage
     setVar(r.rb, '--c', rb.c);
     setText(r.rbT, rb.label);
-    setText(r.slack, slackText(v));
+    setText(r.slack, slackText(v, true));
     setAttr(r.rb.parentNode, 'title', v.status === 'fertig' ? null : (qtyShort(v) ? qtyShort(v).text + '\n' : '') + 'Im Plan: > 4 h Puffer · Knapp: < 4 h oder Menge gefährdet · Verspätet: Prognose nach Liefertermin');
     // Eil
     setHidden(r.prio, v.status === 'fertig');
@@ -2404,11 +2407,12 @@
   /** Empfehlung der Engine (eine Wahrheit mit Meldung, Leitstand, Copilot) – je Planstand, höchstens alle minGapMs neu */
   function adviceOf(id, v, minGapMs) {
     if (!v || !timeRisk(v) || typeof WF.sim.orderAdvice !== 'function') { delete ADV[id]; return null; }
-    const fc = WF.sim.forecast(), key = fc.t + '|' + v.risk, tn = performance.now(), c = ADV[id];
-    if (c && (c.key === key || tn - c.at < (minGapMs == null ? 3000 : minGapMs))) return c.adv;
+    // Planstand = Prognose-Objekt der Engine (neu bei jeder Neuberechnung, auch bei angehaltener Simulation nach einem Eingriff)
+    const fc = WF.sim.forecast(), key = v.risk, tn = performance.now(), c = ADV[id];
+    if (c && ((c.fc === fc && c.key === key) || tn - c.at < (minGapMs == null ? 3000 : minGapMs))) return c.adv;
     let adv = null;
     try { adv = WF.sim.orderAdvice(id); } catch (e) { console.warn('[orderAdvice]', e); adv = null; }
-    ADV[id] = { key, at: tn, adv };
+    ADV[id] = { fc, key, at: tn, adv };
     return adv;
   }
   const sameAct = (a, b) => !!(a && b) && JSON.stringify(a) === JSON.stringify(b);
@@ -2442,7 +2446,7 @@
       out.push(`<span class="or-lv-g ${after < before ? 'up' : 'dn'}">${esc(fmtDelta(after - before))}</span>`);
       out.push(after <= v.due ? `<span class="or-lv-ok">${icon('check', 12)}Termin hält</span>` : `<span class="or-lv-no">noch ${esc(durLong(after - v.due))} zu spät</span>`);
     } else if (num0(a.gainSec) != null && a.gainSec > 60) out.push(`<span class="or-lv-g up">−${esc(durLong(a.gainSec))}</span>`);
-    if (cost != null) out.push(`<span class="or-lv-c">${icon('euro', 12)}ca. ${esc(U.fmtEur(cost))}</span>`);
+    if (cost != null) out.push(`<span class="or-lv-c">${icon('euro', 12)}${cost > 0 ? 'ca. ' + esc(U.fmtEur(cost)) : 'ohne Mehrkosten'}</span>`);
     return out.join('');
   }
   /** Hebel-Liste im Abschnitt „Warum verspätet/knapp“ */
@@ -2483,7 +2487,7 @@
     let h = `<p class="or-pm-lead"><b>${esc(id)}</b> · ${esc(v.part.name)}: ${esc(a.text || a.label || meta.t || '')}</p>`;
     if (rows.length) h += `<div class="or-pm-h"><span>Liefertermin-Prognose</span><span>vorher → nachher</span></div><div class="or-pm-t">${rows.slice(0, 8).map(x => pmRow(x.id, x.before, x.after, x.id === id, x.risk)).join('')}</div>`;
     if (late.length) h += `<div class="or-pm-w">${icon('alert', 15)}<span>Dadurch ${late.length === 1 ? 'wird' : 'werden'} <b>${late.map(esc).join(', ')}</b> ${(wi.newlyLate || []).length ? 'zu spät' : 'noch später'}.</span></div>`;
-    if (cost != null || a.costText) h += `<div class="or-lv-cost">${icon('euro', 15)}<span>Mehrkosten ca. <b>${cost != null ? esc(U.fmtEur(cost)) : '–'}</b>${a.costText || a.costNote ? ' · ' + esc(a.costText || a.costNote) : ''}</span></div>`;
+    if (cost != null || a.costText) h += `<div class="or-lv-cost">${icon('euro', 15)}<span>${cost === 0 ? '<b>Keine Mehrkosten</b>' : `Mehrkosten ca. <b>${cost != null ? esc(U.fmtEur(cost)) : '–'}</b>`}${a.costText || a.costNote ? ' · ' + esc(a.costText || a.costNote) : ''}</span></div>`;
     if (a.note) h += `<p class="or-pm-n">${esc(a.note)}</p>`;
     if (draft) h += `<div class="or-pm-h"><span>Anfrage an den Partner</span><span>zum Kopieren</span></div><textarea class="input or-lv-draft" readonly spellcheck="false">${esc(draft)}</textarea>`;
     h += `<p class="or-pm-n">${wi ? 'Was-wäre-wenn-Rechnung derselben Planung wie die Plantafel; nach dem Umsetzen bestätigt die nächste Planrechnung die Werte.' : 'Wirkung laut Planung der Engine; nach dem Umsetzen rechnet die Planung neu – die Plantafel zeigt die Auswirkung auf alle Aufträge.'}</p>`;
@@ -2684,7 +2688,7 @@
       const alts = (adv.alternatives || []).filter(a => a && !lv.some(x => sameAct(x.action, a.action) && a.action) && !(a.kind === adv.primaryKind && !a.action && rec));
       if (alts.length) {
         h += `<ul class="or-why-opts">` + alts.slice(0, 4).map(a => a.ok
-          ? `<li>${icon('check', 14)}<span>${esc(a.text || a.label)}${a.gainSec > 60 ? ` <b>(−${esc(durLong(a.gainSec))})</b>` : ''}${leverCost(a) != null ? ` · ca. ${esc(U.fmtEur(leverCost(a)))}` : ''}</span></li>`
+          ? `<li>${icon('check', 14)}<span>${esc(a.text || a.label)}${a.gainSec > 60 && !/\(−/.test(a.text || '') ? ` <b>(−${esc(durLong(a.gainSec))})</b>` : ''}${leverCost(a) > 0 ? ` · ca. ${esc(U.fmtEur(leverCost(a)))}` : ''}</span></li>`
           : `<li class="no">${icon('x', 14)}<span>${esc(a.note || a.text || a.label)}</span></li>`).join('') + `</ul>`;
       }
     }
@@ -2702,7 +2706,7 @@
         <div class="or-lv prim"><span class="or-lv-ic">${icon('refresh', 16)}</span><div class="or-lv-b"><div class="or-lv-h"><b>Nachfertigung einplanen</b><span class="or-lv-tag">Empfohlen</span></div>
           <div class="or-lv-t">Neuer Eilauftrag über ${nf(qs.missing)} Stk mit gleichem Arbeitsplan ab ${esc(op1.stationName || op1.station || '')} (AG ${esc(op1.seq)}), Termin wie ${esc(v.id)}.</div>
           <div class="or-lv-m"><span class="or-lv-ok">${icon('check', 12)}dann ${nf(qs.qty)}/${nf(qs.qty)} Stk lieferbar</span><span>sonst nur ${nf(qs.expectedQty)}/${nf(qs.qty)} Stk</span></div></div>
-          <button type="button" class="btn sm primary" data-qact="remake">${esc(lbl)}</button></div></div></div>`;
+          <button type="button" class="btn sm primary" data-qact="remake" title="${esc(lbl)}">Einplanen</button></div></div></div>`;
   }
   function factsHtml(v, now) {
     const scrap = v.ops.reduce((a, o) => a + (o.scrap || 0), 0);

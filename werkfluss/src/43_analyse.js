@@ -251,7 +251,7 @@
   /** Zahl und Einheit nicht umbrechen */
   const nb = (str) => String(str).replace(/ (€|%|kWh|kW|h|min|Teile)(?![\wäöü])/g, '\u00a0$1');
 
-  let root = null, range = 'kd', tip = null, flowW = 0, slowKey = '', plan = null, planTimer = 0, bneckCache = null;
+  let root = null, range = 'kd', tip = null, flowW = 0, slowKey = '', plan = null, bneckCache = null;
   const SEC = {};
   const S = () => WF.sim && WF.sim.state;
   const machines = () => WF.profile.machines.filter(id => S().machines[id]);
@@ -296,26 +296,46 @@
   }
 
   // ------------------------------------------------------------ Daten
-  /** Stillstandskosten je Maschine und Ursache – exakt aus der Engine (lossEurBy, Σ = lossEur; Zeit = plannedStateSec). */
-  function lossModel() {
-    const rows = [], causes = {};
+  /** Nachtanteil (Geisterschicht) der Tageswerte einer Maschine – Engine-Feld kn (heute ohne Schicht), falls vorhanden */
+  const nightStats = (m) => (m && m.kn && typeof m.kn.lossEur === 'number' && m.kn.lossEurBy ? m.kn : null);
+  /** Nacht getrennt ausweisen? Nur „Heute“ und nur, wenn die Engine den Nachtanteil liefert (kpis().lossEurNightToday). */
+  const nightSplit = (k) => range === 'kd' && k && typeof k.lossEurNightToday === 'number';
+  /** Stillstandskosten je Maschine und Ursache – exakt aus der Engine (lossEurBy, Σ = lossEur; Zeit = plannedStateSec).
+      „Heute“ mit Nachtanteil: Ursachen = Schichtzeit (kd − kn), die Nacht (Geisterschicht) als eigener Posten je Maschine. */
+  function lossModel(k) {
+    const rows = [], causes = {}, nightBy = {};
+    const split = nightSplit(k);
     for (const id of machines()) {
       const m = S().machines[id], st = stats(m), by = st.lossEurBy, ps = st.plannedStateSec || {};
+      const nt = split ? nightStats(m) : null, perSec = (m.rate || 0) / 3600;
       const cells = {};
       if (by) {
-        for (const k in by) if (k !== 'running' && k !== 'idle' && by[k] > 0) cells[k] = { eur: by[k], sec: ps[k] || 0 };
+        for (const key in by) {
+          if (key === 'running' || key === 'idle') continue;
+          const nE = nt ? nt.lossEurBy[key] || 0 : 0, eur = by[key] - nE;
+          if (nE > 0.005) nightBy[key] = (nightBy[key] || 0) + nE;
+          if (eur > 0.005) cells[key] = { eur, sec: Math.max(0, (ps[key] || 0) - (perSec > 0 ? nE / perSec : 0)) };
+        }
       } else {   // ältere Engine: anteilig nach Zustandszeiten
-        const sec = st.stateSec || {}, tot = ORDER.reduce((a, k) => a + (sec[k] || 0), 0);
-        for (const k of ORDER) if (sec[k] > 0 && tot > 0) cells[k] = { eur: (st.lossEur || 0) * sec[k] / tot, sec: (st.lossSec || 0) * sec[k] / tot };
+        const sec = st.stateSec || {}, tot = ORDER.reduce((a, x) => a + (sec[x] || 0), 0);
+        for (const x of ORDER) if (sec[x] > 0 && tot > 0) cells[x] = { eur: (st.lossEur || 0) * sec[x] / tot, sec: (st.lossSec || 0) * sec[x] / tot };
       }
-      for (const k in cells) { const c = causes[k] || (causes[k] = { key: k, label: stLabel(k), color: stColor(k), eur: 0, sec: 0 }); c.eur += cells[k].eur; c.sec += cells[k].sec; }
-      rows.push({ id, short: m.short, eur: st.lossEur || 0, sec: st.lossSec || 0, cells });
+      for (const key in cells) { const c = causes[key] || (causes[key] = { key, label: stLabel(key), color: stColor(key), eur: 0, sec: 0 }); c.eur += cells[key].eur; c.sec += cells[key].sec; }
+      const night = nt ? nt.lossEur || 0 : 0, nightSec = nt ? nt.lossSec || 0 : 0;
+      let nightKey = null; if (nt) for (const key in nt.lossEurBy) if (nt.lossEurBy[key] > 0.005 && (!nightKey || nt.lossEurBy[key] > nt.lossEurBy[nightKey])) nightKey = key;
+      rows.push({ id, short: m.short, eur: Math.max(0, (st.lossEur || 0) - night), sec: Math.max(0, (st.lossSec || 0) - nightSec), night, nightSec, nightKey, cells });
     }
     const total = rows.reduce((a, r) => a + r.eur, 0);
     const all = Object.values(causes).sort((a, b) => b.eur - a.eur || ORDER.indexOf(a.key) - ORDER.indexOf(b.key));
     let cum = 0;
     for (const c of all) { cum += c.eur; c.share = total > 0 ? c.eur / total : 0; c.cum = total > 0 ? Math.min(1, cum / total) : 0; }
-    return { rows, items: all.filter(c => c.eur >= 0.5), total, totalSec: rows.reduce((a, r) => a + r.sec, 0) };
+    // eine Zahl mit dem Leitstand: Schichtzeit = kpis().lossEurStaffedToday, Nacht = kpis().lossEurNightToday
+    const nightTotal = split ? Math.max(0, k.lossEurNightToday || 0) : 0;
+    const staffed = range === 'kd'
+      ? (split && typeof k.lossEurStaffedToday === 'number' ? k.lossEurStaffedToday : Math.max(0, (k.lossEur != null ? k.lossEur : Math.round(total)) - nightTotal))
+      : Math.round(total);
+    return { rows, items: all.filter(c => c.eur >= 0.5), total, totalSec: rows.reduce((a, r) => a + r.sec, 0), staffed,
+      night: nightTotal >= 0.5 ? nightTotal : 0, nightSec: rows.reduce((a, r) => a + r.nightSec, 0), nightBy };
   }
   /** Werks-Engpass – nur aus WF.sim.bottleneck() (UI_GUIDE Regel 18) */
   function bneck() {
@@ -328,124 +348,283 @@
     else if (b.orders && b.orders.length) parts.push(b.orders.length === 1 ? 'begrenzt ' + b.orders[0] : 'begrenzt ' + b.orders.length + ' Aufträge');
     return { id: b.stationId, short: b.short || st.short || b.stationId, why: parts.join(' · ') || b.why || '', full: b.why || '' };
   }
-  function energyModel() {
+  /** Energie: Werk heute = kpis().energyKwh (wie im Leitstand), davon Maschinen = Σ machineView.energyKwhToday-Quelle (kd),
+      Rest = Hallen-Grundlast und AGVs */
+  function energyModel(k) {
     const rows = [];
     for (const id of machines()) {
       const m = S().machines[id], e = m.kd ? m.kd.energyKwh || 0 : 0, g = m.kd ? m.kd.good || 0 : 0;
       rows.push({ id, short: m.short, kwh: e, good: g, pp: g > 0 ? e / g : null });
     }
-    const total = rows.reduce((a, r) => a + r.kwh, 0);
-    return { rows: rows.filter(r => r.kwh >= 0.05).sort((a, b) => b.kwh - a.kwh), total };
+    const machinesKwh = rows.reduce((a, r) => a + r.kwh, 0);
+    const plant = k && k.energyKwh != null ? k.energyKwh : machinesKwh;
+    return { rows: rows.filter(r => r.kwh >= 0.05).sort((a, b) => b.kwh - a.kwh), machines: machinesKwh, plant, base: Math.max(0, plant - machinesKwh) };
+  }
+  /** OEE-Kachel wie im Leitstand: liefert die Engine die OEE der besetzten Schichten (kpis().oeeStaffedToday) und weicht
+      sie vom Tageswert ab (Geisterschicht), zeigt die Kachel die Schichten und weist die Nacht getrennt aus. */
+  function oeeModel(k) {
+    const has = Object.prototype.hasOwnProperty.call(k, 'oeeStaffedToday');
+    const st = has ? k.oeeStaffedToday : undefined;
+    const sameV = (a, b) => a != null && b != null && Math.abs(a - b) < 0.0005;
+    if (!has || k.oee == null || sameV(k.oee, st)) return { value: k.oee, staffed: false, label: 'OEE heute', apq: k };
+    if (st == null) return { value: k.oee, staffed: false, label: 'OEE heute · Nacht', apq: k };
+    return { value: st, staffed: true, label: 'OEE heute · Schichten', apq: k.staffedToday || k };
   }
 
-  // ------------------------------------------------------------ Prognose je Stunde (aus der Plantafel)
+  // ------------------------------------------------------------ Ausstoß-Prognose: Materialfluss-Modell
+  /* Die Plantafel (forecast()) plant Termine konservativ (Puffer, autonome Maschinen mit Nachtanteil, Messraum nur für
+     vorhandene Behälter) – für eine Stundenprognose der Teile ist sie zu pessimistisch. Darum ein kleines Flussmodell
+     direkt aus dem Zustand (nur lesend, ohne Engine-Caches → darf auch beim Schichtbeginn-Ereignis laufen):
+     je Maschine eine Warteschlange (laufender Arbeitsgang zuerst, dann Eil → Termin → Auftrag, nur mit Material),
+     Rüsten/Erstteil in der Schichtzeit, Bearbeitung mit Plan-Taktzeit (+ Einlegen, + Werkzeugwechsel-Anteil wie die
+     Engine), personalgebundene Maschinen nur in der Schichtzeit ohne Pausen, autonome durchgehend. Weitergabe in
+     Behältern (transferBatch) mit 10 min Transport, Fremdbearbeitung über Rückkehrzeit bzw. Lieferfenster + Durchlaufzeit,
+     Säge mit Zuschnitt-Vorrat ≤ 8 h am Ziel. Neuaufträge (Auftragseingang) sind nicht enthalten. */
   let SHC = null;
   const shifts = () => SHC || (SHC = (WF.profile.shifts || []).map(s => ({ id: s.id, name: s.name, a: U.hm(s.start), b: U.hm(s.end),
     br: (s.breaks || []).map(x => [U.hm(x[0]), U.hm(x[1])]) })));
-  /** Arbeitszeit in [a,b): Schichtzeit ohne Pausen, Mo–Fr; autonome Maschinen laufen durch (wie die Prognose der Engine) */
-  function workIn(a, b, auto) {
+  /** Arbeitszeit in [a,b): Schichtzeit ohne Pausen, Mo–Fr */
+  function workIn(a, b) {
     if (!(b > a)) return 0;
-    if (auto) return b - a;
     let sum = 0;
     for (let d = Math.floor(a / 86400); d * 86400 < b; d++) {
       if ((((d % 7) + 7) % 7) >= 5) continue;
       for (const s of shifts()) {
         let x = s.a;
-        const segs = [];
-        for (const br of s.br) { segs.push([x, br[0]]); x = br[1]; }
-        segs.push([x, s.b]);
-        for (const [p, r] of segs) { const lo = Math.max(a, d * 86400 + p), hi = Math.min(b, d * 86400 + r); if (hi > lo) sum += hi - lo; }
+        for (let j = 0; j <= s.br.length; j++) {
+          const p = x, r = j < s.br.length ? s.br[j][0] : s.b;
+          if (j < s.br.length) x = s.br[j][1];
+          const lo = Math.max(a, d * 86400 + p), hi = Math.min(b, d * 86400 + r);
+          if (hi > lo) sum += hi - lo;
+        }
       }
     }
     return sum;
   }
-  /** erwartete Teile je Stunde (Index 0–23 des Tages d0) ab `from` – aus der Plantafel (forecast().machines) und dem
-      Materialfluss: je Arbeitsgang die offenen Teile gleichmäßig über die Arbeitszeit zwischen Rüstende und Belegungsende,
-      aber nie mehr, als der Vorgänger bis dahin geliefert hat (Messraum, Waschen, Montage sind sonst nur für die schon
-      vorhandenen Behälter eingeplant). Fremdbearbeitung/Versand liefern innerhalb des Tages nichts nach. */
-  function forecastHours(fc, from, d0) {
-    const out = new Array(24).fill(0), Sx = S();
-    if (!fc || !fc.machines) return out;
-    const ent = {};
-    for (const mid in fc.machines) for (const e of fc.machines[mid]) ent[e.orderId + '/' + e.seq] = { e, mid };
-    const B = []; for (let h = 0; h <= 24; h++) B.push(d0 + h * 3600);
-    const zero = B.map(() => 0);
+  const inDayWin = (t) => { const d = ((Math.floor(t / 86400) % 7) + 7) % 7, s = t - Math.floor(t / 86400) * 86400; return d < 5 && s >= 6 * 3600 && s < 20 * 3600; };
+  const nextDayWin = (t) => { if (inDayWin(t)) return t; let d = Math.floor(t / 86400); const s = t - d * 86400; if (((d % 7) + 7) % 7 < 5 && s < 6 * 3600) return d * 86400 + 23400; d++; while (((d % 7) + 7) % 7 >= 5) d++; return d * 86400 + 23400; };
+  const FLOW_DT = 300, FLOW_TR = 600;
+  /** Teile je Stunde (Index 0–23 des Tages d0), die in [from, until) an Bearbeitungs-, Wasch-, Prüf- und Montageplätzen
+      fertig werden (wie kpis().good: Fremdbearbeitung und Versand zählen nicht) – vor Ausschuss */
+  function flowHours(Sx, from, until, d0) {
+    const out = new Array(24).fill(0);
+    if (!Sx || !Sx.orders || !(until > from)) return out;
+    const TT = WF.profile.toolTypeById || {};
+    const idx = {}, ops = [], byStation = {};
     for (const oid in Sx.orders) {
-      const o = Sx.orders[oid]; if (!o || o.status === 'fertig') continue;
+      const o = Sx.orders[oid]; if (!o || o.status === 'fertig' || !o.routing) continue;
       let prev = null;
       for (let i = 0; i < o.routing.length; i++) {
-        const r = o.routing[i], op = o.ops[i], x = ent[oid + '/' + r.seq];
-        if (!op || op.complete || !x) { prev = zero; continue; }
-        const m = Sx.machines[x.mid], auto = !!m && m.loading === 'auto', e = x.e;
-        const n = (WF.sim.partsLeft ? WF.sim.partsLeft(oid, r.seq) || 0 : 0) + (e.active ? op.inProc || 0 : 0);
-        const a = Math.max(from, e.setupEnd != null ? e.setupEnd : e.start), b = e.end, tot = workIn(a, b, auto);
-        let cum = B.map(t => (tot > 0 && n > 0 && t > a) ? n * workIn(a, Math.min(b, t), auto) / tot : 0);
-        if (i > 0 && prev) {
-          const p = o.ops[i - 1], avail0 = Math.max(0, (p.good || 0) - (op.good || 0) - (op.scrap || 0));
-          cum = cum.map((c, h) => Math.min(c, avail0 + prev[h]));
+        const r = o.routing[i], op = o.ops[i] || {}, m = Sx.machines[r.station], ext = r.station === 'EXT';
+        const pl = WF.sim.partsLeft ? WF.sim.partsLeft(oid, r.seq) : 0;
+        const left = Math.max(0, pl || 0) + (ext ? 0 : (op.inProc || 0));
+        const n = { o, i, r, m, sid: r.station, ext, prev, next: null, left, inQ: i === 0 ? Infinity : 0, pipe: [], pq: 0, fill: 0,
+          done: !!op.complete || left <= 1e-9, setupRem: 0, cyc: 60, auto: false, tb: Math.max(1, r.transferBatch || 10), held: -1,
+          rel: i > 0 && !(r.setupMin > 10) && !r.firstPiece, k0: o.priority === 'eil' ? 0 : 1 };
+        if (m) {
+          let allow = 0;
+          for (const tl of r.tools || []) { const tt = TT[tl.type]; if (tt && tt.lifeMin) allow += (tl.cutMinPerPart / tt.lifeMin) * 300; }
+          n.cyc = Math.max(1, (r.cycleMin || 1) * 60 + (m.loading === 'perPart' ? ((r.loadMin != null ? r.loadMin : m.loadMin) || 1) * 60 : 0) + allow);
+          n.auto = m.loading === 'auto';
+          n.setupRem = (r.setupMin || 0) * 60 + (r.firstPiece ? 1800 : 0);
         }
-        for (let h = 0; h < 24; h++) out[h] += Math.max(0, cum[h + 1] - cum[h]);
-        prev = cum;
+        if (prev) prev.next = n;
+        idx[oid + '/' + i] = n;
+        if (!n.done) { ops.push(n); if (m) (byStation[n.sid] || (byStation[n.sid] = [])).push(n); }
+        prev = n;
+      }
+    }
+    const pushQ = (n, t, q) => { if (n && q > 1e-9) { n.pipe.push([t, q]); n.pq += q; } };
+    // Bestände: Eingang (jetzt), abholbereit/unterwegs (+ Transport), Ausgangsbehälter in Füllung, beim Fremdbearbeiter
+    for (const cid in Sx.containers) {
+      const c = Sx.containers[cid]; if (!c || c.kind === 'scrap') continue;
+      const tgt = idx[c.orderId + '/' + c.idx]; if (!tgt) continue;
+      if (c.state === 'external') { const rt = c.location && c.location.returnT != null ? c.location.returnT : from; pushQ(tgt.next, Math.max(from, rt) + FLOW_TR, c.qty); continue; }
+      if (tgt.done) continue;
+      if (c.state === 'input') { if (tgt.inQ !== Infinity) tgt.inQ += c.qty; }
+      else if (c.state === 'ready' || c.state === 'transit') pushQ(tgt, from + FLOW_TR, c.qty);
+      else if (c.state === 'filling') { const src = idx[c.orderId + '/' + (c.idx - 1)]; if (src && !src.done) src.fill += c.qty; else pushQ(tgt, from + FLOW_TR, c.qty); }
+    }
+    const mach = {};
+    for (const sid in byStation) {
+      const m = Sx.machines[sid], list = byStation[sid];
+      list.sort((a, b) => a.k0 - b.k0 || a.o.due - b.o.due || (a.o.id < b.o.id ? -1 : a.o.id > b.o.id ? 1 : a.i - b.i));
+      const M = mach[sid] = { m, cur: null, down: from };
+      if (m.op) {
+        const n = idx[m.op.oid + '/' + m.op.idx];
+        if (n && !n.done) {
+          M.cur = n;
+          n.setupRem = m.setupDone ? 0 : (m.setupRun ? Math.max(0, m.setupRun.dur - (from - m.setupRun.t0)) : (n.r.setupMin || 0) * 60);
+          if (n.r.firstPiece && !m.released) n.setupRem += m.fpi ? 900 : 1800;
+          if (n.inQ !== Infinity) n.inQ += n.o.ops[n.i].inProc || 0;     // eingelegte Teile sind schon am Platz
+          if (m.fault) M.down = Math.max(M.down, from + (m.fault.repairSec || 0) + 300);
+        }
+      }
+    }
+    // „Rüsten vorab“: Material ist unterwegs oder der Vorgänger arbeitet gerade daran
+    const coming = (n) => n.inQ > 1e-6 || n.pq > 1e-6 || (n.prev && !n.prev.done && (n.prev.ext || (mach[n.prev.sid] && mach[n.prev.sid].cur === n.prev)));
+    for (let t = from; t < until; t += FLOW_DT) {
+      const t1 = Math.min(until, t + FLOW_DT), span = t1 - t, wFull = workIn(t, t1);
+      const hOut = Math.floor((t1 - 1 - d0) / 3600);
+      for (const n of ops) if (n.pq > 1e-9) {
+        let keep = null;
+        for (const p of n.pipe) { if (p[0] <= t1) { if (n.inQ !== Infinity) n.inQ += p[1]; n.pq -= p[1]; } else (keep || (keep = [])).push(p); }
+        n.pipe = keep || []; if (!n.pipe.length) n.pq = 0;
+      }
+      // Fremdbearbeitung: Los versenden (Lieferfenster), Rückkehr nach Durchlaufzeit
+      for (const n of ops) if (n.ext && !n.done && n.inQ > 1e-6) {
+        if (n.inQ >= Math.min(n.tb, n.left) - 1e-6 || (n.prev && n.prev.done)) {
+          const ship = nextDayWin(t1 + 1200), lead = ((n.r.ext && n.r.ext.leadMin) || 480) * 60;
+          pushQ(n.next, nextDayWin(ship + lead) + FLOW_TR, n.inQ);
+          n.left -= n.inQ; n.inQ = 0; if (n.left <= 1e-6) n.done = true;
+        }
+      }
+      for (const sid in mach) {
+        const M = mach[sid], list = byStation[sid];
+        let frac = M.down >= t1 ? 0 : M.down > t ? (t1 - M.down) / span : 1;
+        for (let guard = 0; frac > 1e-6 && guard < 12; guard++) {
+          let n = M.cur;
+          // Vorgänger fertig und nichts mehr unterwegs → Arbeitsgang abgeschlossen (Ausschuss unterwegs fehlt am Ende)
+          if (n && !n.done && n.prev && n.prev.done && n.inQ <= 1e-6 && n.pq <= 1e-9 && n.prev.fill <= 1e-6) n.done = true;
+          if (!n || n.done) {
+            n = null;
+            for (const x of list) if (!x.done && x.inQ > 1e-6 && x.held !== t1) { n = x; break; }
+            if (!n) for (const x of list) if (!x.done && !x.rel && x.held !== t1 && coming(x)) { n = x; break; }
+            M.cur = n;
+            if (!n) break;
+          }
+          if (n.setupRem > 0) {   // Rüsten / Erstteil nur mit Personal (Schichtzeit ohne Pausen)
+            const w = wFull * frac;
+            if (w <= 0) break;
+            const use = Math.min(w, n.setupRem);
+            n.setupRem -= use; frac -= frac * use / w;
+            continue;
+          }
+          const cap = (n.auto ? span : wFull) * frac / n.cyc;
+          if (cap <= 1e-9) break;
+          let room = Infinity;
+          if (n.i === 0 && M.m.type === 'saw' && n.next && n.next.m) {   // Zuschnitt-Vorrat am Ziel ≤ 8 h Arbeit
+            let wc = 0;
+            for (const x of byStation[n.next.sid] || []) if (!x.done) wc += ((x.inQ === Infinity ? 0 : x.inQ) + x.pq + (x.prev ? x.prev.fill : 0)) * (x.r.cycleMin || 1) * 60;
+            room = Math.max(0, (8 * 3600 - wc) / ((n.next.r.cycleMin || 1) * 60)) + 1e-6;
+          }
+          const q = Math.max(0, Math.min(cap, n.left, n.inQ, room));
+          if (q > 1e-9) {
+            n.left -= q; if (n.inQ !== Infinity) n.inQ -= q;
+            if (hOut >= 0 && hOut < 24) out[hOut] += q;
+            if (n.next) {
+              n.fill += q;
+              while (n.fill >= n.tb - 1e-6) { pushQ(n.next, t1 + FLOW_TR, n.tb); n.fill -= n.tb; }
+              if (n.left <= 1e-6 && n.fill > 1e-6) { pushQ(n.next, t1 + FLOW_TR, n.fill); n.fill = 0; }
+            }
+          }
+          frac -= frac * q / cap;
+          if (n.left <= 1e-6) { n.done = true; M.cur = null; continue; }
+          if (frac <= 1e-6) break;
+          // kein Material (Waschen, Messraum, Montage geben den Platz frei) bzw. Zuschnitt-Vorrat voll → anderen Auftrag vorziehen
+          if (n.rel || q >= room - 1e-6) {
+            M.cur = null; n.held = t1;
+            const other = list.find(x => x !== n && !x.done && x.inQ > 1e-6 && x.held !== t1 && (n.rel || !((x.r.setupMin || 0) > 15)));
+            if (!other) break;
+            M.cur = other;
+          } else break;
+        }
       }
     }
     return out;
   }
-  /** Tagesplan einfrieren (Prognose zu Tagesbeginn bzw. nach Start/Reset) – Bezug für „Ist gegen Plan“ */
-  function takePlan() {
-    planTimer = 0;
-    const Sx = S(); if (!Sx || !WF.sim.forecast) return;
-    let fc, k; try { fc = WF.sim.forecast(); k = WF.sim.kpis(); } catch (e) { return; }
-    const d0 = U.dayStart(Sx.t);
-    plan = { day: d0, t: Sx.t, base: k.good || 0, hours: forecastHours(fc, Sx.t, d0).map(v => v * (k.fpy || 1)) };
-    slowKey = '';   // Diagramm beim nächsten Takt mit Plan zeichnen
+  /** Ausbeute für Gutteile: FPY von heute (ab 50 Teilen), sonst 99 % */
+  const fpyOf = (today) => { const g = (today && today.good) || 0, s = (today && today.scrap) || 0; return g + s >= 50 ? g / (g + s) : 0.99; };
+
+  /** Tagesplan: einmal je Tag zum Schichtbeginn eingefroren (06:00; beim Start/Neustart aus dem Zustand um 06:00, also vor
+      dem Vorrechnen bis 08:40) – Bezug für „Ist gegen Plan“. Gleiches Modell wie die Prognose → Abweichungen sind echte Verluste. */
+  function capturePlan(label) {
+    const Sx = S(); if (!Sx || !Sx.orders || !Sx.today) return;
+    const t = Sx.t, d0 = U.dayStart(t), q = fpyOf(Sx.today);
+    plan = { day: d0, t, base: Sx.today.good || 0, hours: flowHours(Sx, t, d0 + 22 * 3600, d0).map(v => v * q), how: label || 'Schichtbeginn' };
+    slowKey = '';
   }
-  const schedulePlan = () => { if (!planTimer) planTimer = setTimeout(takePlan, 0); };
-  WF.bus.on('sim:reset', () => { plan = null; schedulePlan(); });
-  WF.bus.on('sim:event', (e) => { if (e && e.type === 'shift' && (!plan || plan.day !== U.dayStart(e.t))) schedulePlan(); });
+  let fcCache = null;
+  WF.bus.on('sim:event', (e) => {
+    if (!e) return;
+    try {
+      if (e.type === 'reset') { plan = null; fcCache = null; capturePlan('Start'); }
+      else if (e.type === 'shift' && e.data && e.data.to && !e.data.from && (!plan || plan.day !== U.dayStart(e.t))) capturePlan('Schichtbeginn');
+      // Aufträge, die zum Schichtbeginn freigegeben werden, gehören noch zum Tagesplan „Stand 06:00“
+      else if (e.type === 'orderIntake' && plan && plan.day === U.dayStart(e.t) && e.t - plan.t <= 60) capturePlan(plan.how);
+    } catch (err) { plan = null; }
+  });
+  /** Prognose ab jetzt (zwischengespeichert, höchstens alle 5 Sim-Minuten neu – der Rest der laufenden Stunde wird anteilig gekürzt) */
+  function outputForecast(now, d0, fpy) {
+    const Sx = S();
+    if (!fcCache || fcCache.day !== d0 || now < fcCache.t || now - fcCache.t >= 300 || fcCache.n !== Object.keys(Sx.orders).length) {
+      fcCache = { t: now, day: d0, n: Object.keys(Sx.orders).length, hours: flowHours(Sx, now, d0 + 22 * 3600, d0) };
+    }
+    const h = fcCache.hours.map(v => v * fpy), hNow = Math.floor((now - d0) / 3600), hEnd = d0 + (hNow + 1) * 3600;
+    if (now > fcCache.t && hNow >= 0 && hNow < 24) h[hNow] *= Math.max(0, (hEnd - now) / Math.max(1, hEnd - fcCache.t));
+    return h;
+  }
+  /** für Copilot/Tests: Tagesplan und Ausstoß-Prognose (Arbeitsgänge gut je Stunde) */
+  WF.analyse = {
+    dayPlan: () => (plan ? { day: plan.day, t: plan.t, base: plan.base, hours: plan.hours.slice() } : null),
+    outputForecast: () => { const Sx = S(); if (!Sx) return null; const d0 = U.dayStart(Sx.t), k = WF.sim.kpis(); const h = outputForecast(Sx.t, d0, k.fpy || 1); let c = k.good || 0; for (let x = Math.floor((Sx.t - d0) / 3600); x < 22; x++) c += Math.max(0, h[x] || 0); return { t: Sx.t, good: k.good, hours: h, endOfDay: Math.round(c) }; },
+  };
 
   // ------------------------------------------------------------ Kennzahlen
-  function renderKpis(k, L, totalEur) {
+  function renderKpis(k, L) {
     const b = bneckCache, top = L.items[0];
-    const oee = range === 'ks' ? k.oeeShift : k.oee;
-    const warn = oee != null && oee < TARGET_OEE;
-    const E = energyModel(), pr = price();
-    const perPart = k.goodFinished > 0 ? E.total / k.goodFinished : null;
     const ghost = range === 'ks' && WF.sim.shift && !WF.sim.shift().id;
-    const struct = [range, b ? b.id : '', warn ? 'w' : '', ghost ? 'g' : ''].join('|');
+    const M = range === 'ks' ? { value: k.oeeShift, staffed: false, label: 'OEE ' + (ghost ? 'Geisterschicht' : 'laufende Schicht'), apq: null } : oeeModel(k);
+    const oee = M.value, warn = oee != null && oee < TARGET_OEE;
+    const E = energyModel(k), pr = price();
+    // Energie je Fertigteil: Werk-Energie (= Leitstand „Energie heute“) ÷ fertige Teile (= Leitstand „Fertige Teile heute“)
+    const perPart = k.goodFinished > 0 && E.plant > 0 ? E.plant / k.goodFinished : null;
+    const gn = k.ghostLastNight;
+    let oeeS;
+    if (range === 'ks') oeeS = `Ziel ${pct0(TARGET_OEE)} · ${ghost ? 'nur autonome Maschinen' : 'seit Schichtbeginn'}`;
+    else {
+      const a = M.apq || k;
+      oeeS = `Ziel ${pct0(TARGET_OEE)} · V ${pct1(a.availability)} × L ${pct1(a.performance)} × Q ${pct1(a.quality)}`;
+      if (M.staffed) oeeS += `<br>${gn && gn.oee != null ? `Nacht (Geisterschicht) ${pct1(gn.oee)}` : `inkl. Geisterschicht ${pct1(k.oee)}`}`;
+    }
+    const lossTop = top ? `größte Ursache <b style="color:var(--text2)">${esc(top.label)}</b> · ${U.fmtEur(top.eur)} (${pct0(top.share)})` : 'kein Stillstand mit eingeplantem Auftrag';
+    const lossS = L.night > 0 ? `${lossTop}<br>zzgl. Nacht (Geisterschicht) <b style="color:var(--text2)">${U.fmtEur(L.night)}</b>` : lossTop;
+    const struct = [range, b ? b.id : '', warn ? 'w' : '', M.label].join('|');
     paint('kpis', q('[data-s="kpis"]'), struct, (T) => `
-      <div class="kpi" title="Maschinenstundensatz × Zeit, in der ein Auftrag eingeplant ist, die Maschine aber nicht produziert (Rüsten, Warten, Störung) – gleiche Zahl wie im Leitstand">
-        <div class="l">Stillstandskosten ${range === 'ks' ? 'Schicht' : 'heute'}</div>
-        ${T('lv', `${U.fmtNum(totalEur)}<small>€</small>`, 'div', 'class="v"')}
-        ${T('ls', top ? `größte Ursache <b style="color:var(--text2)">${esc(top.label)}</b> · ${U.fmtEur(top.eur)} (${pct0(top.share)})` : 'kein Stillstand mit eingeplantem Auftrag', 'div', 'class="s"')}
+      <div class="kpi" title="Maschinenstundensatz × Zeit, in der ein Auftrag eingeplant ist, die Maschine aber nicht produziert (Rüsten, Warten, Störung) – ${range === 'ks' ? 'laufende Schicht' : 'Schichtzeit heute, gleiche Zahl wie im Leitstand; die Nacht (Geisterschicht) ist getrennt ausgewiesen'}">
+        <div class="l">Stillstandskosten ${range === 'ks' ? (ghost ? 'Geisterschicht' : 'Schicht') : 'heute'}</div>
+        ${T('lv', `${U.fmtNum(L.staffed)}<small>€</small>`, 'div', 'class="v"')}
+        ${T('ls', lossS, 'div', 'class="s"')}
       </div>
-      <div class="kpi${warn ? ' warn' : ''}" title="OEE = Verfügbarkeit × Leistung × Qualität, Bearbeitungsmaschinen">
-        <div class="l">Werk-OEE ${range === 'ks' ? (ghost ? 'Geisterschicht' : 'Schicht') : 'heute'}</div>
+      <div class="kpi${warn ? ' warn' : ''}" title="OEE = Verfügbarkeit × Leistung × Qualität der Bearbeitungsmaschinen – gleiche Zahl wie im Leitstand${M.staffed ? '; besetzte Schichten, die Geisterschicht zählt getrennt' : ''}">
+        <div class="l">${esc(M.label)}</div>
         ${T('ov', oee == null ? '–' : `${U.fmtNum(oee * 100, 1)}<small>%</small>`, 'div', 'class="v"')}
-        ${T('os', range === 'ks'
-          ? `Ziel ${pct0(TARGET_OEE)} · ${ghost ? 'nur autonome Maschinen' : 'laufende Schicht'}`
-          : `Ziel ${pct0(TARGET_OEE)} · V ${pct1(k.availability)} × L ${pct1(k.performance)} × Q ${pct1(k.quality)}`, 'div', 'class="s"')}
+        ${T('os', oeeS, 'div', 'class="s"')}
       </div>
       <div class="kpi${b ? ' an-click' : ''}"${b ? ` data-id="${esc(b.id)}" title="${esc(b.full || 'Werks-Engpass')} – Klick öffnet die Maschine"` : ''}>
         <div class="l">Werks-Engpass</div>
         <div class="v">${b ? `${esc(b.id)}<small>${esc(b.short)}</small>` : '–'}</div>
         ${T('bs', b ? esc(b.why) : 'kein Werks-Engpass erkennbar', 'div', 'class="s"')}
       </div>
-      <div class="kpi" title="Energie der Maschinen heute (ohne Hallen-Grundlast) je Fertigteil (letzter Bearbeitungsschritt je Auftrag)">
+      <div class="kpi" title="Energie des Werks heute (Maschinen, Grundlast, AGVs – wie im Leitstand) je fertigem Teil (Gutteile des letzten Bearbeitungsschritts je Auftrag)">
         <div class="l">Energie je Fertigteil</div>
         ${T('ev', perPart != null ? `${kwh(perPart)}<small>kWh</small>` : '–', 'div', 'class="v"')}
-        ${T('es', nb(`${pr && perPart != null ? `≈ ${U.fmtEur(perPart * pr, 2)} je Teil · ` : ''}${U.fmtNum(E.total)} kWh · ${U.fmtNum(k.goodFinished)} Fertigteile heute`), 'div', 'class="s"')}
+        ${T('es', nb(`${pr && perPart != null ? `≈ ${U.fmtEur(perPart * pr, 2)} je Teil · ` : ''}Werk ${U.fmtNum(E.plant)} kWh<br>${U.fmtNum(k.goodFinished)} fertige Teile heute`), 'div', 'class="s"')}
       </div>`);
   }
 
   // ------------------------------------------------------------ Held: Wo verlieren wir Geld?
-  function renderHero(L, totalEur) {
-    const items = L.items, N = items.length;
-    const recos = items.slice(0, 3).map(it => {
+  const NIGHT_RECO = 'Autonome Maschinen standen ohne Personal. Im Geisterschicht-Check vor Schichtende Werkzeuge vorbeugend wechseln und Stangen nachladen – dann laufen sie bis zum Morgen durch.';
+  function renderHero(L) {
+    const items = L.items, N = items.length, night = L.night > 0;
+    const recos = items.slice(0, night ? 2 : 3).map(it => {
       const worst = L.rows.filter(r => r.cells[it.key]).sort((a, b) => b.cells[it.key].eur - a.cells[it.key].eur)[0] || null;
       return { it, worst };
     });
-    const struct = [range, items.map(i => i.key).join(','), recos.map(r => r.worst ? r.worst.id : '').join(',')].join('|');
-    const when = range === 'ks' ? 'in dieser Schicht' : 'heute';
+    const nRows = night ? L.rows.filter(r => r.night >= 0.5).sort((a, b) => b.night - a.night) : [];
+    const struct = [range, items.map(i => i.key).join(','), recos.map(r => r.worst ? r.worst.id : '').join(','), nRows.map(r => r.id + (r.nightKey || '')).join(',')].join('|');
+    const ghost = range === 'ks' && WF.sim.shift && !WF.sim.shift().id;
+    const when = range === 'ks' ? (ghost ? 'in dieser Geisterschicht' : 'in dieser Schicht') : night ? 'heute in der Schichtzeit' : 'heute';
     // Aussage: größte Ursache + wie viele Ursachen 80 % erklären
     let ins = '';
     if (N) {
@@ -457,8 +636,9 @@
     }
     const ax = [0, 0.25, 0.5, 0.75, 1];
     ins = nb(ins);
-    paint('hero', q('[data-s="hero"]'), struct, (T, W, C, A) => `
-      <div class="card-h an-ch"><h3>Wo verlieren wir Geld?</h3>${T('hs', `Stillstandskosten nach Ursache · ${when} · <b style="color:var(--text2)">${U.fmtEur(totalEur)}</b> in ${U.fmtDur(L.totalSec)}`, 'span', 'class="muted"')}</div>
+    const head = range === 'kd' && night ? 'Schichtzeit heute' : range === 'ks' ? (ghost ? 'Geisterschicht' : 'laufende Schicht') : 'heute';
+    paint('hero', q('[data-s="hero"]'), struct, (T, W, C, A) => { const nb2 = night ? nightHtml(T, L, nRows) : ''; return `
+      <div class="card-h an-ch"><h3>Wo verlieren wir Geld?</h3>${T('hs', `Stillstandskosten nach Ursache · ${head} · <b style="color:var(--text2)">${U.fmtEur(L.staffed)}</b> in ${U.fmtDur(L.totalSec)}`, 'span', 'class="muted"')}</div>
       <div class="an-hb">
         <div class="an-hl">
           ${N ? `${T('ins', ins, 'p', 'class="an-ins"')}
@@ -468,7 +648,7 @@
             <span class="axh c3" style="grid-column:3">€</span><span class="axh c4" style="grid-column:4">Zeit · kumuliert</span>
             <div class="gr" style="grid-row:2 / span ${N}">${ax.slice(1).map(v => `<b style="left:${v * 100}%"></b>`).join('')}</div>
             ${items.map((it, i) => {
-              const tipTxt = `${it.label}: ${U.fmtEur(it.eur)} in ${U.fmtDur(it.sec)} geplanter Maschinenzeit – ${pct0(it.share)} der Stillstandskosten, kumuliert ${pct0(it.cum)}`;
+              const tipTxt = `${it.label}: ${U.fmtEur(it.eur)} in ${U.fmtDur(it.sec)} geplanter Maschinenzeit${night ? ' (Schichtzeit)' : ''} – ${pct0(it.share)} der Stillstandskosten, kumuliert ${pct0(it.cum)}`;
               return `<span class="pl" style="grid-row:${i + 2}" ${A('pl' + it.key, tipTxt)}><i style="background:${it.color}"></i><span>${hy(esc(it.label))}</span></span>
               <span class="pb" style="grid-row:${i + 2};--c:${it.color}" ${A('pb' + it.key, tipTxt)}><i ${W('b' + it.key, it.share)}></i></span>
               ${T('v' + it.key, U.fmtEur(it.eur), 'span', `class="pv" style="grid-row:${i + 2}"`)}
@@ -478,6 +658,7 @@
           </div>
           <div class="an-plg"><span><i class="b"></i>Anteil je Ursache</span><span><i class="c"></i>kumulierter Anteil</span><span>€ = Stundensatz × geplante Zeit ohne Produktion</span></div>`
           : `<div class="empty">Noch keine Stillstandskosten ${when} – alle Maschinen mit Auftrag produzieren.</div>`}
+          ${nb2}
         </div>
         <div class="an-hr">
           <div class="an-rh"><h4>Was jetzt hilft</h4><span>aus den größten Posten</span></div>
@@ -486,9 +667,24 @@
               <div class="h"><span class="an-rk">${n + 1}</span><b>${esc(it.label)}</b>${T('re' + it.key, U.fmtEur(it.eur), 'span', 'class="e"')}</div>
               <p>${esc(RECO[it.key] || 'Ursache im Copilot analysieren.')}</p>
               <div class="acts">${worst ? `<span class="muted">größter Posten <button class="link" data-id="${esc(worst.id)}">${esc(worst.short)}</button> · ${T('rw' + it.key, recoWorst(it, worst), 'span')}</span>` : '<span></span>'}${WF.ai && worst ? `<button class="btn sm ghost" data-ask="${esc(it.label)}|${esc(worst.id)}">${icon('sparkles', 14)} Analysieren</button>` : ''}</div>
-            </div>`).join('') : '<div class="empty">Keine nennenswerten Verluste – die Schicht läuft rund.</div>'}
+            </div>`).join('') : night ? '' : '<div class="empty">Keine nennenswerten Verluste – die Schicht läuft rund.</div>'}
+          ${night ? `
+            <div class="an-rc night">
+              <div class="h"><span class="an-rk">${recos.length + 1}</span><b>Nacht (Geisterschicht)</b>${T('reN', U.fmtEur(L.night), 'span', 'class="e"')}</div>
+              <p>${esc(NIGHT_RECO)}</p>
+              <div class="acts">${nRows[0] ? `<span class="muted">größter Posten <button class="link" data-id="${esc(nRows[0].id)}">${esc(nRows[0].short)}</button> · ${T('rwN', `<b>${U.fmtEur(nRows[0].night)}</b> · ${U.fmtDur(nRows[0].nightSec)}`, 'span')}</span>` : '<span></span>'}${WF.ai && nRows[0] ? `<button class="btn sm ghost" data-ask="Nacht (Geisterschicht)|${esc(nRows[0].id)}">${icon('sparkles', 14)} Analysieren</button>` : ''}</div>
+            </div>` : ''}
         </div>
-      </div>`);
+      </div>`; });
+  }
+  /** Nacht (Geisterschicht): eigener, schraffierter Posten unter dem Pareto – Summe = kpis().lossEurNightToday */
+  function nightHtml(T, L, nRows) {
+    return `
+          <div class="an-nt" title="Geisterschicht: ohne Personal sollen nur autonome Maschinen laufen – ihr Stillstand ist ungenutzte Kapazität und wird getrennt von der Schichtzeit ausgewiesen (gleiche Zahl wie im Leitstand)">
+            <div class="h"><i class="an-hatch"></i><span class="t">Nacht (Geisterschicht)${T('nt', `getrennt ausgewiesen · ${U.fmtDur(L.nightSec)} Stillstand`, 'span')}</span>${T('nv', U.fmtEur(L.night), 'b')}</div>
+            <div class="ms">${nRows.map(r => `<button data-id="${esc(r.id)}" title="${esc(r.short)} öffnen">${esc(r.short)}${r.nightKey ? ' · ' + esc(stLabel(r.nightKey)) : ''}${T('nm' + r.id, U.fmtEur(r.night), 'b')}</button>`).join('')}</div>
+            <p>Autonome Maschinen mit eingeplantem Auftrag, die ohne Personal standen – nicht in den Ursachen oben enthalten.</p>
+          </div>`;
   }
   const recoWorst = (it, w) => `<b>${U.fmtEur(w.cells[it.key].eur)}</b> · ${U.fmtDur(w.cells[it.key].sec)}`;
   /** kumulierte Linie über den Balken (gleiche Skala 0–100 %), je Zeile ein Punkt */
@@ -501,38 +697,46 @@
 
   // ------------------------------------------------------------ Verlustmatrix
   function renderMatrix(L) {
-    const cols = L.items;   // Spalten = Ursachen in Pareto-Reihenfolge (größte zuerst)
-    const rows = L.rows.filter(r => r.eur >= 0.5).sort((a, b) => b.eur - a.eur);
-    const none = L.rows.filter(r => r.eur < 0.5).map(r => r.short);
+    const cols = L.items;   // Spalten = Ursachen in Pareto-Reihenfolge (größte zuerst), Schichtzeit
+    const night = L.night > 0;
+    const tot = (r) => r.eur + (night ? r.night : 0);
+    const rows = L.rows.filter(r => tot(r) >= 0.5).sort((a, b) => tot(b) - tot(a));
+    const none = L.rows.filter(r => tot(r) < 0.5).map(r => r.short);
     const max = Math.max(1, ...rows.flatMap(r => cols.map(c => r.cells[c.key] ? r.cells[c.key].eur : 0)));
     const step = niceStep(max / 5);           // 5 Stufen, lineare €-Klassen
     const lvl = (v) => Math.min(4, Math.floor(v / step));
-    const maxRow = Math.max(1, ...rows.map(r => r.eur));
-    const nz = rows.map(r => cols.filter(c => r.cells[c.key] && r.cells[c.key].eur >= 0.5).map(c => c.key).join('+')).join(',');
-    const struct = [range, cols.map(c => c.key).join(','), rows.map(r => r.id).join(','), nz, step].join('|');
+    const maxRow = Math.max(1, ...rows.map(tot));
+    const nz = rows.map(r => cols.filter(c => r.cells[c.key] && r.cells[c.key].eur >= 0.5).map(c => c.key).join('+') + (night && r.night >= 0.5 ? '+N' : '')).join(',');
+    const struct = [range, cols.map(c => c.key).join(','), rows.map(r => r.id).join(','), nz, step, night ? 'N' : ''].join('|');
     const when = range === 'ks' ? 'laufende Schicht' : 'heute';
-    const legend = [0, 1, 2, 3, 4].map(i => `<span class="k"><i class="an-h${i}"></i>${i < 4 ? (i === 0 ? '< ' + U.fmtNum(step) : U.fmtNum(i * step) + '–' + U.fmtNum((i + 1) * step)) : '≥ ' + U.fmtNum(4 * step)}</span>`).join('');
+    const legend = [0, 1, 2, 3, 4].map(i => `<span class="k"><i class="an-h${i}"></i>${i < 4 ? (i === 0 ? '< ' + U.fmtNum(step) : U.fmtNum(i * step) + '–' + U.fmtNum((i + 1) * step)) : '≥ ' + U.fmtNum(4 * step)}</span>`).join('') +
+      (night ? '<span class="k"><i class="an-hn" style="background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--text2) 30%,var(--card2)) 0 3px,var(--card2) 3px 7px)"></i>Nacht</span>' : '');
     paint('matrix', q('[data-s="matrix"]'), struct, (T, W, C, A) => {
       const cell = (r, c) => {
         const x = r.cells[c.key], v = x ? x.eur : 0, key = r.id + c.key;
-        const tipTxt = x ? `${r.short} · ${c.label}: ${U.fmtEur(v)} (${U.fmtDur(x.sec)})` : `${r.short} · ${c.label}: kein Stillstand`;
+        const tipTxt = x ? `${r.short} · ${c.label}${night ? ' (Schichtzeit)' : ''}: ${U.fmtEur(v)} (${U.fmtDur(x.sec)})` : `${r.short} · ${c.label}: kein Stillstand`;
         return `<td ${C('mc' + key, v >= 0.5 ? 'an-h' + lvl(v) : 'z')} ${A('mt' + key, tipTxt)}>${T('mv' + key, v >= 0.5 ? U.fmtNum(v) : '·')}</td>`;
       };
-      const minW = 140 + cols.length * 92 + 160;
+      const nCell = (r) => {
+        const v = r.night, tipTxt = v >= 0.5 ? `${r.short} · Nacht (Geisterschicht): ${U.fmtEur(v)} (${U.fmtDur(r.nightSec)})${r.nightKey ? ' – meist ' + stLabel(r.nightKey) : ''}` : `${r.short} · Nacht: kein Stillstand`;
+        return `<td ${C('mn' + r.id, v >= 0.5 ? 'an-hn' : 'z')} ${A('mtn' + r.id, tipTxt)}>${T('mnv' + r.id, v >= 0.5 ? U.fmtNum(v) : '·')}</td>`;
+      };
+      const nc = cols.length + (night ? 1 : 0);
+      const minW = 140 + nc * 92 + 160;
       return `
       <div class="card-h an-ch"><h3>Verlustmatrix Maschine × Ursache</h3><div class="an-lg"><span class="t">€ je Zelle</span>${legend}</div></div>
-      <div class="card-b">${rows.length && cols.length ? `
+      <div class="card-b">${rows.length && (cols.length || night) ? `
         <div class="an-mx-wrap"><table class="an-mx" style="min-width:${minW}px">
-          <colgroup><col style="width:140px">${cols.map(() => '<col>').join('')}<col style="width:160px"></colgroup>
-          <thead><tr><th class="m">Maschine</th>${cols.map(c => `<th title="${esc(c.label)}">${hy(esc(c.label))}</th>`).join('')}<th class="s">Summe</th></tr></thead>
-          <tbody>${rows.map(r => `<tr><td class="m" data-id="${esc(r.id)}" title="${esc(r.short)} öffnen">${esc(r.short)}</td>${cols.map(c => cell(r, c)).join('')}
-            <td class="s"><span class="an-sb"><span class="tr"><i ${W('ms' + r.id, r.eur / maxRow)}></i></span>${T('mS' + r.id, U.fmtEur(r.eur), 'b')}</span></td></tr>`).join('')}</tbody>
+          <colgroup><col style="width:140px">${cols.map(() => '<col>').join('')}${night ? '<col>' : ''}<col style="width:160px"></colgroup>
+          <thead><tr><th class="m">Maschine</th>${cols.map(c => `<th title="${esc(c.label)}${night ? ' – Schichtzeit' : ''}">${hy(esc(c.label))}</th>`).join('')}${night ? '<th class="n" title="Nacht (Geisterschicht) – getrennt von der Schichtzeit">Nacht (Geister­schicht)</th>' : ''}<th class="s">Summe</th></tr></thead>
+          <tbody>${rows.map(r => `<tr><td class="m" data-id="${esc(r.id)}" title="${esc(r.short)} öffnen">${esc(r.short)}</td>${cols.map(c => cell(r, c)).join('')}${night ? nCell(r) : ''}
+            <td class="s"><span class="an-sb"><span class="tr"><i ${W('ms' + r.id, tot(r) / maxRow)}></i></span>${T('mS' + r.id, U.fmtEur(tot(r)), 'b')}</span></td></tr>`).join('')}</tbody>
         </table></div>
         <div class="an-ml">${rows.map(r => `<div class="r" data-id="${esc(r.id)}">
-            <div class="t"><span>${esc(r.short)}</span><span class="an-sb"><span class="tr"><i ${W('ls' + r.id, r.eur / maxRow)}></i></span>${T('lS' + r.id, U.fmtEur(r.eur), 'b')}</span></div>
-            <div class="cs">${cols.filter(c => r.cells[c.key] && r.cells[c.key].eur >= 0.5).map(c => { const v = r.cells[c.key].eur; return `<span ${C('lc' + r.id + c.key, 'an-h' + lvl(v))}>${esc(c.label)} ${T('lv' + r.id + c.key, U.fmtEur(v), 'b')}</span>`; }).join('')}</div>
+            <div class="t"><span>${esc(r.short)}</span><span class="an-sb"><span class="tr"><i ${W('ls' + r.id, tot(r) / maxRow)}></i></span>${T('lS' + r.id, U.fmtEur(tot(r)), 'b')}</span></div>
+            <div class="cs">${cols.filter(c => r.cells[c.key] && r.cells[c.key].eur >= 0.5).map(c => { const v = r.cells[c.key].eur; return `<span ${C('lc' + r.id + c.key, 'an-h' + lvl(v))}>${esc(c.label)} ${T('lv' + r.id + c.key, U.fmtEur(v), 'b')}</span>`; }).join('')}${night && r.night >= 0.5 ? `<span class="an-hn">Nacht ${T('lvN' + r.id, U.fmtEur(r.night), 'b')}</span>` : ''}</div>
           </div>`).join('')}</div>
-        ${none.length ? `<div class="an-mfoot">Ohne Stillstandskosten ${when}: ${esc(none.join(', '))}</div>` : ''}`
+        <div class="an-mfoot">${night ? `Ursachen = Schichtzeit · Nacht (Geisterschicht) getrennt · Summe = ganzer Tag (${U.fmtEur(L.staffed + L.night)})` : ''}${none.length ? `${night ? ' · ' : ''}Ohne Stillstandskosten ${when}: ${esc(none.join(', '))}` : ''}</div>`
         : `<div class="empty">Noch keine Stillstandskosten ${when}.</div>`}</div>`;
     });
   }
@@ -552,9 +756,8 @@
     const good = k.good || 0;
     if (good > cum) act[Math.min(23, hNow)] += good - cum;
     cumPts.push([now, good]);
-    // Prognose ab jetzt (Plantafel), Gutteile = Teile × FPY
-    let fc = null; try { fc = WF.sim.forecast(); } catch (e) { fc = null; }
-    const fpy = k.fpy || 1, fcH = forecastHours(fc, now, d0).map(v => v * fpy);
+    // Prognose ab jetzt (Materialfluss-Modell der bekannten Aufträge), Gutteile = Teile × FPY
+    const fpy = k.fpy || 1, fcH = now < w1 ? outputForecast(now, d0, fpy) : new Array(24).fill(0);
     const fcPts = [[now, good]]; let c = good;
     for (let h = hNow; h < 22; h++) { const hb = d0 + (h + 1) * 3600; c += fcH[h] || 0; if (hb > now) fcPts.push([hb, c]); }
     const fcEnd = now < w1 ? c : null;
@@ -579,7 +782,9 @@
     const X = (t) => padL + (t - w0) / (w1 - w0) * plotW;
     const ax1 = niceAxis(Math.max(10, good, fcEnd || 0, planEnd || 0), narrow ? 4 : 5), s1 = ax1.step, m1 = ax1.max;
     const barVal = (h) => h < hNow ? act[h] : h === hNow ? act[h] + (fcH[h] || 0) : (fcH[h] || 0);
-    let m2v = 10; for (let h = 6; h < 22; h++) m2v = Math.max(m2v, barVal(h));
+    // Plan je Stunde (nur volle Stunden ab dem Einfrieren)
+    const planH = (h) => (P && d0 + h * 3600 >= P.t - 1 ? P.hours[h] || 0 : null);
+    let m2v = 10; for (let h = 6; h < 22; h++) m2v = Math.max(m2v, barVal(h), planH(h) || 0);
     const ax2 = niceAxis(m2v, 2), s2 = ax2.step, m2 = ax2.max;
     const Y1 = (v) => top + h1 * (1 - v / m1), b2 = top + h1 + gap + h2, Y2 = (v) => b2 - h2 * v / m2;
     const f = (n) => n.toFixed(1);
@@ -609,19 +814,21 @@
     for (let h = 6; h < 22; h++) {
       const ha = d0 + h * 3600, cx = X(ha + 1800), bx = cx - bw / 2, lab = `${U.fmtClock(ha)}–${U.fmtClock(ha + 3600)}`;
       let tipTxt;
+      const pv = planH(h), pTxt = pv != null ? ` · Plan ${U.fmtNum(pv)}` : '';
       if (h < hNow) {
         if (act[h] > 0) g += `<rect x="${f(bx)}" y="${f(Y2(act[h]))}" width="${f(bw)}" height="${f(b2 - Y2(act[h]))}" rx="2.5" style="fill:var(--text2)" opacity=".5"/>`;
-        tipTxt = `${lab}: ${U.fmtNum(act[h])} Gutteile`;
+        tipTxt = `${lab}: ${U.fmtNum(act[h])} Arbeitsgänge gut${pTxt}`;
       } else if (h === hNow) {
         const a = act[h], r = fcH[h] || 0;
         if (r > 0.5) g += `<rect x="${f(bx)}" y="${f(Y2(a + r))}" width="${f(bw)}" height="${f(Y2(a) - Y2(a + r))}" rx="2.5" style="fill:var(--text2)" opacity=".22"/>`;
         if (a > 0) g += `<rect x="${f(bx)}" y="${f(Y2(a))}" width="${f(bw)}" height="${f(b2 - Y2(a))}" rx="2.5" style="fill:var(--text2)" opacity=".5"/>`;
-        tipTxt = `${lab}: bisher ${U.fmtNum(a)} Gutteile · bis ${U.fmtClock(ha + 3600)} ca. ${U.fmtNum(r)} weitere laut Prognose`;
+        tipTxt = `${lab}: bisher ${U.fmtNum(a)} Arbeitsgänge gut · bis ${U.fmtClock(ha + 3600)} ca. ${U.fmtNum(r)} weitere laut Prognose${pTxt}`;
       } else {
         const v = fcH[h] || 0;
         if (v >= 0.5) g += `<rect x="${f(bx + 0.5)}" y="${f(Y2(v) + 0.5)}" width="${f(bw - 1)}" height="${f(Math.max(1, b2 - Y2(v) - 0.5))}" rx="2.5" style="fill:var(--text2);stroke:var(--text2)" fill-opacity=".05" stroke-opacity=".42" stroke-dasharray="3 2"/>`;
-        tipTxt = `${lab}: ca. ${U.fmtNum(v)} Gutteile laut Prognose (Plantafel)`;
+        tipTxt = `${lab}: ca. ${U.fmtNum(v)} Arbeitsgänge gut laut Prognose${pTxt}`;
       }
+      if (pv != null && pv >= 0.5) g += `<line class="plt" x1="${f(bx - 3)}" x2="${f(bx + bw + 3)}" y1="${f(Y2(pv))}" y2="${f(Y2(pv))}"/>`;
       const every = sw < 26 ? 4 : 2;
       if ((h - 6) % every === 0) g += `<text x="${f(X(ha))}" y="${Ht - 5}" text-anchor="${h === 6 ? 'start' : 'middle'}">${U.fmtClock(ha)}</text>`;
       hits += `<rect class="hit" data-tip="${esc(tipTxt)}" x="${f(X(ha))}" y="${top}" width="${f(sw)}" height="${f(b2 - top)}"/>`;
@@ -653,27 +860,29 @@
     if (ends.length === 2 && ends[1].y - ends[0].y < 14) { const mid = (ends[0].y + ends[1].y) / 2; ends[0].y = mid - 7; ends[1].y = mid + 7; }
     for (const e of ends) g += `<text class="${e.c}" x="${Wd - padR + 6}" y="${f(e.y + 4)}">${esc(e.t)}</text>`;
     g += hits;
-    const svg = `<svg class="an-chart" viewBox="0 0 ${Wd} ${Ht}" width="${Wd}" height="${Ht}" role="img" aria-label="Gutteile heute: je Stunde und kumuliert, Ist gegen Plan und Prognose">${g}</svg>`;
+    const svg = `<svg class="an-chart" viewBox="0 0 ${Wd} ${Ht}" width="${Wd}" height="${Ht}" role="img" aria-label="Arbeitsgänge gut heute: je Stunde und kumuliert, Ist gegen Plan und Prognose">${g}</svg>`;
     // Kopfzahlen – nach 22:00 wird am Ende des Tagesfensters verglichen (Geisterschicht separat)
     const after = now >= w1, cumAt = (t) => { let v = 0; for (let i = 0; i < cumPts.length; i++) { const p = cumPts[i]; if (p[0] <= t) v = p[1]; else { const p0 = cumPts[i - 1]; if (p0) v = p0[1] + (p[1] - p0[1]) * (t - p0[0]) / Math.max(1, p[0] - p0[0]); break; } } return v; };
     const istRef = after ? Math.round(cumAt(w1)) : good;
     const delta = planNow != null && P && now > P.t ? istRef - planNow : null;
     const tol = planNow != null ? Math.max(5, planNow * 0.02) : 5;
-    const dTxt = delta == null ? '<small>eben eingefroren</small>' : Math.abs(delta) < tol ? '<small class="up">im Plan</small>'
+    const dTxt = delta == null ? '<small>Tagesbeginn</small>' : Math.abs(delta) < tol ? '<small class="up">im Plan</small>'
       : `<small class="${delta < 0 ? 'down' : 'up'}">${delta >= 0 ? '+' : '−'}${U.fmtNum(Math.abs(delta))} ${delta >= 0 ? 'über' : 'unter'} Plan</small>`;
+    const pLab = P ? `Plan (Stand ${U.fmtClock(P.t)})` : '';
     const os = `
-      <div><span class="l">Ist bis ${after ? '22:00' : 'jetzt'}</span><span class="v">${U.fmtNum(istRef)}<small>Gutteile</small></span></div>
-      ${P ? `<div><span class="l">Plan bis ${after ? '22:00' : 'jetzt'} · Stand ${U.fmtClock(P.t)}</span><span class="v">${U.fmtNum(planNow)}${dTxt}</span></div>` : ''}
-      ${after && good > istRef ? `<div><span class="l">Seit 22:00 (Geisterschicht)</span><span class="v">+${U.fmtNum(good - istRef)}<small>Gutteile</small></span></div>` : ''}
-      ${fcEnd != null ? `<div><span class="l">Prognose bis 22:00</span><span class="v acc">≈ ${U.fmtNum(fcEnd)}<small>Gutteile</small></span></div>` : ''}`;
+      <div title="Gutteile je Arbeitsgang (Bearbeiten, Waschen, Prüfen, Montage) – wie im Leitstand „Arbeitsgänge … gut“"><span class="l">Arbeitsgänge gut bis ${after ? '22:00' : 'jetzt'}</span><span class="v">${U.fmtNum(istRef)}</span></div>
+      ${P ? `<div title="${esc(`Tagesplan, eingefroren um ${U.fmtClock(P.t)} (${P.how === 'Start' ? 'Stand beim Start der Simulation' : 'Schichtbeginn'}) – gleiches Flussmodell wie die Prognose; Abweichungen sind Verluste bzw. Gewinne seither`)}"><span class="l">Plan bis ${after ? '22:00' : 'jetzt'} · Stand ${U.fmtClock(P.t)}</span><span class="v">${U.fmtNum(planNow)}${dTxt}</span></div>` : ''}
+      ${after && good > istRef ? `<div><span class="l">Seit 22:00 (Geisterschicht)</span><span class="v">+${U.fmtNum(good - istRef)}</span></div>` : ''}
+      ${fcEnd != null ? `<div title="Bekannte Aufträge mit Plan-Taktzeiten, Rüsten, Schichtplan und Materialfluss – Neuaufträge kommen hinzu"><span class="l">Prognose bis 22:00</span><span class="v acc">≈ ${U.fmtNum(fcEnd)}</span></div>` : ''}
+      <div title="Gutteile, die heute den letzten Bearbeitungsschritt ihres Auftrags abgeschlossen haben – wie im Leitstand"><span class="l">Fertige Teile heute</span><span class="v">${U.fmtNum(k.goodFinished)}<small class="fin">Stk</small></span></div>`;
     host.innerHTML = `
-      <div class="card-h an-ch"><h3>Ausstoß heute</h3><span class="muted">Gutteile aller Arbeitsgänge · Prognose aus der Plantafel</span></div>
+      <div class="card-h an-ch"><h3>Ausstoß heute</h3><span class="muted">Arbeitsgänge gut je Stunde · Bearbeiten, Waschen, Prüfen, Montage</span></div>
       <div class="card-b an-flowbox"><div class="an-os">${os}</div>${svg}
-        <div class="an-legend"><span><i class="act"></i>Ist je Stunde</span><span><i class="gh"></i>Prognose je Stunde</span><span><i class="ln"></i>Ist kumuliert</span><span><i class="fc"></i>Prognose kumuliert</span>${P ? `<span><i class="pl"></i>Plan (Stand ${U.fmtClock(P.t)})</span>` : ''}</div></div>`;
+        <div class="an-legend"><span><i class="act"></i>Ist je Stunde</span>${P ? '<span><i class="pt"></i>Plan je Stunde</span>' : ''}<span><i class="gh"></i>Prognose je Stunde</span><span><i class="ln"></i>Ist kumuliert</span><span><i class="fc"></i>Prognose kumuliert</span>${P ? `<span><i class="pl"></i>${esc(pLab)}</span>` : ''}<span class="nt">Prognose: bekannte Aufträge, ohne Neuaufträge</span></div></div>`;
   }
 
   // ------------------------------------------------------------ OEE je Maschine
-  function renderOee() {
+  function renderOee(k) {
     const rows = machines().filter(id => S().machines[id].kind === 'machine').map(id => {
       const mv = WF.sim.machineView(id), o = (range === 'ks' ? mv.oeeShift : mv.oeeToday) || {};
       return { id, short: mv.short, oee: o.oee, a: o.availability, p: o.performance, q: o.quality };
@@ -681,8 +890,10 @@
     const cls = (v) => v == null ? 'n' : v >= TARGET_OEE ? 'g' : v >= 0.55 ? 'y' : 'r';
     const below = rows.filter(r => r.oee != null && r.oee < TARGET_OEE).length;
     const struct = range + '|' + rows.map(r => r.id).join(',');
+    // je Maschine liefert die Engine den Tageswert – mit Nachtanteil ehrlich als „inkl. Geisterschicht“ bezeichnen
+    const incl = range === 'kd' && oeeModel(k).staffed;
     paint('oee', q('[data-s="oee"]'), struct, (T, W, C, A) => `
-      <div class="card-h an-ch"><h3>OEE je Maschine</h3>${T('osub', `${range === 'ks' ? 'laufende Schicht' : 'heute'} · ${below ? below + ' unter Ziel' : 'alle im Ziel'}`, 'span', 'class="muted"')}</div>
+      <div class="card-h an-ch"><h3>OEE je Maschine</h3>${T('osub', `${range === 'ks' ? 'laufende Schicht' : incl ? 'heute inkl. Geisterschicht' : 'heute'} · ${below ? below + ' unter Ziel' : 'alle im Ziel'}`, 'span', 'class="muted"')}</div>
       <div class="card-b">
         <div class="an-bars">
           ${rows.map(r => `<div class="an-row click" data-id="${esc(r.id)}" ${A('or' + r.id, `${r.short}: OEE ${r.oee == null ? '–' : pct1(r.oee)} = Verfügbarkeit ${pct0(r.a)} × Leistung ${pct0(r.p)} × Qualität ${pct0(r.q)}`)}>
@@ -696,25 +907,27 @@
       </div>`);
   }
 
-  // ------------------------------------------------------------ Energie je Teil
+  // ------------------------------------------------------------ Energie je Maschine (Werk = Leitstand, davon Maschinen)
   function renderEnergy(k) {
-    const E = energyModel(), pr = price(), rows = E.rows, max = Math.max(0.1, ...rows.map(r => r.kwh));
+    const E = energyModel(k), pr = price(), rows = E.rows, max = Math.max(0.1, ...rows.map(r => r.kwh));
     const topR = rows[0];
     const struct = rows.map(r => r.id).join(',') + '|' + (pr ? 'p' : '');
-    const ins = topR && E.total > 0
-      ? `<b>${esc(topR.short)}</b> braucht ${pct0(topR.kwh / E.total)} der Maschinenenergie heute${topR.pp != null ? ` – <strong style="color:var(--text)">${kwh(topR.pp)} kWh</strong> je Teil` : ''}.` +
-        ` Maschinen gesamt ${U.fmtNum(E.total)} kWh${pr ? ` ≈ ${U.fmtEur(E.total * pr)} (${U.fmtNum(pr, 2)} €/kWh)` : ''}.`
+    const mShare = E.plant > 0 ? Math.min(1, E.machines / E.plant) : 0;
+    const ins = E.plant > 0
+      ? `Werk heute <strong style="color:var(--text)">${U.fmtNum(E.plant)} kWh</strong>${pr ? ` ≈ ${U.fmtEur(E.plant * pr)}` : ''} – wie im Leitstand.` +
+        (topR ? ` Am meisten braucht <b>${esc(topR.short)}</b>: ${U.fmtNum(topR.kwh)} kWh${topR.pp != null ? `, ${kwh(topR.pp)} kWh je Teil` : ''}.` : '')
       : 'Noch kein Energieverbrauch erfasst.';
-    const insN = nb(ins);
     const hist = (S().history.powerKw || []).slice(-96);
     paint('energy', q('[data-s="energy"]'), struct, (T, W, C, A) => `
       <div class="card-h an-ch"><h3>Energie je Maschine heute</h3>${T('pw', `${WF.ui.spark(hist, { w: 96, h: 22, color: 'var(--text2)' })}<b>${U.fmtNum(k.powerKw)} kW</b><span>jetzt</span>`, 'span', 'class="an-pw" title="Leistungsaufnahme des Werks (letzte 8 h)"')}</div>
       <div class="card-b">
-        ${T('ins', insN, 'p', 'class="an-eins"')}
+        ${T('ins', nb(ins), 'p', 'class="an-eins"')}
+        <div class="an-es" role="img" aria-label="Werksenergie heute: Maschinen und Grundlast/AGVs"><i class="m" ${W('esm', mShare)}></i><i class="b an-hatch" ${W('esb', 1 - mShare)}></i></div>
+        ${T('esl', `<span><i class="m"></i>Maschinen <b>${U.fmtNum(E.machines)} kWh</b> (${pct0(mShare)})</span><span><i class="an-hatch"></i>Hallen-Grundlast und AGVs <b>${U.fmtNum(E.base)} kWh</b></span>`, 'div', 'class="an-esl"')}
         ${rows.length ? `<div class="an-bars en">
-          <div class="an-bh"><span></span><span style="text-align:left">Energie heute</span><span>kWh</span><span class="hm">je Teil</span></div>
+          <div class="an-bh"><span></span><span style="text-align:left">Maschine heute</span><span>kWh</span><span class="hm">je Teil</span></div>
           ${rows.map(r => {
-            const tipTxt = `${r.short}: ${U.fmtNum(r.kwh, 1)} kWh heute, ${U.fmtNum(r.good)} Gutteile${r.pp != null ? ' → ' + kwh(r.pp) + ' kWh je Teil' + (pr ? ' ≈ ' + U.fmtEur(r.pp * pr, 2) : '') : ' – noch kein Gutteil'}`;
+            const tipTxt = `${r.short}: ${U.fmtNum(r.kwh, 1)} kWh heute, ${U.fmtNum(r.good)} Gutteile an dieser Maschine${r.pp != null ? ' → ' + kwh(r.pp) + ' kWh je Teil' + (pr ? ' ≈ ' + U.fmtEur(r.pp * pr, 2) : '') : ' – noch kein Gutteil'}`;
             return `<div class="an-row click" data-id="${esc(r.id)}" ${A('er' + r.id, tipTxt)}>
               <span class="an-l">${esc(r.short)}</span>
               <span class="an-track"><i class="q" ${W('ew' + r.id, r.kwh / max)}></i></span>
@@ -730,20 +943,19 @@
   function update(force) {
     if (!root || !S() || !WF.sim.kpis) return;
     const Sx = S(), k = WF.sim.kpis();
-    // Tagesplan: einmal je Tag (Schichtbeginn bzw. nach Start); Rückfall, falls kein Ereignis kam
+    // Tagesplan kommt aus dem Schichtbeginn-Ereignis (06:00); Rückfall nur, falls keins kam – dann ehrlich „Stand hh:mm“
     const d0 = U.dayStart(Sx.t);
-    if ((!plan || plan.day !== d0) && !planTimer && Sx.t >= d0 + 6 * 3600 && WF.sim.shift && WF.sim.shift().id) takePlan();
+    if ((!plan || plan.day !== d0) && Sx.t >= d0 + 6 * 3600 && Sx.t < d0 + 22 * 3600 && WF.sim.shift && WF.sim.shift().id) { try { capturePlan('nachgeholt'); } catch (e) { plan = null; } }
     const fb = q('[data-s="flow"] .an-flowbox') || q('[data-s="flow"]');
     if (fb && fb.clientWidth) { const w = fb.clientWidth - 28; if (Math.abs(w - flowW) > 4) { flowW = w; force = true; } }
     const key = range + '|' + Math.floor(Sx.t / 60) + '|' + flowW;
     const slow = force || key !== slowKey;
     if (slow) { slowKey = key; bneckCache = bneck(); }
-    const L = lossModel();
-    const totalEur = range === 'kd' && k.lossEur != null ? k.lossEur : Math.round(L.total);   // eine Zahl mit dem Leitstand
-    renderKpis(k, L, totalEur);
-    renderHero(L, totalEur);
+    const L = lossModel(k);   // Schichtzeit = kpis().lossEurStaffedToday, Nacht = lossEurNightToday (eine Zahl mit dem Leitstand)
+    renderKpis(k, L);
+    renderHero(L);
     renderMatrix(L);
-    if (slow) { renderFlow(k); renderOee(); renderEnergy(k); }
+    if (slow) { renderFlow(k); renderOee(k); renderEnergy(k); }
   }
 
   WF.registerView({
@@ -769,7 +981,10 @@
         const ask = e.target.closest('[data-ask]');
         if (ask) {
           const [label, id] = ask.dataset.ask.split('|'), st = WF.profile.stationById[id];
-          WF.bus.emit('ai:ask', { text: `Analysiere die Stillstandskosten „${label}“ ${range === 'ks' ? 'in dieser Schicht' : 'heute'}, besonders an ${st ? st.short : id}: Ursachen, Kosten und konkrete Maßnahmen für die nächste Schicht.`, context: { kind: 'machine', id } });
+          const txt = /^Nacht/.test(label)
+            ? `Analysiere die Stillstandskosten der letzten Nacht (Geisterschicht), besonders an ${st ? st.short : id}: warum standen die autonomen Maschinen, was hat es gekostet und was sollte die Spätschicht vor Schichtende vorbereiten?`
+            : `Analysiere die Stillstandskosten „${label}“ ${range === 'ks' ? 'in dieser Schicht' : 'heute'}, besonders an ${st ? st.short : id}: Ursachen, Kosten und konkrete Maßnahmen für die nächste Schicht.`;
+          WF.bus.emit('ai:ask', { text: txt, context: { kind: 'machine', id } });
           return;
         }
         const t = e.target.closest('[data-id]');
