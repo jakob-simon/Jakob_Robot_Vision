@@ -663,8 +663,11 @@
     if (hasOpen('qty:' + o.id)) resolveKey('qty:' + o.id, `Auftrag fertig – ${o.shippedQty} von ${o.qty} Stk geliefert`);
     const short = o.qty - o.shippedQty;
     notify({ key: 'done:' + o.id, sev: late || short > 0 ? 'warn' : 'ok', role: 'Schichtleitung', entity: { kind: 'order', id: o.id }, autoResolveT: S.t + 4 * 3600,
-      title: `Auftrag ${o.id} fertig${short > 0 ? ' – Teillieferung' : ''}`, body: `${o.shippedQty} von ${o.qty} Stk „${o.part.name}“ (${o.customer}) liegen im Versand. ${late ? 'Termin um ' + d + ' überschritten.' : short > 0 ? 'Termin gehalten, aber Menge unvollständig (' + d + ' vor Termin).' : 'Termin eingehalten (' + d + ' Puffer).'}${short > 0 ? ' ' + short + (short === 1 ? ' Stk fehlt' : ' Stk fehlen') + ' (Ausschuss in Folgearbeitsgängen) – ' + (o.remakes && o.remakes.length ? 'Nachfertigung ' + o.remakes.join(', ') + ' läuft.' : 'Nachfertigung oder Teillieferung mit Kunden klären.') : ''}`,
-      suggestion: late ? 'Kunde über Lieferverzug informieren; Ursache im Auftragsverlauf prüfen.' : 'Lieferschein erstellen und Versand avisieren.', actions: [{ label: 'Auftrag öffnen', action: { type: 'select', kind: 'order', id: o.id } }] });
+      title: `Auftrag ${o.id} fertig${short > 0 ? ' – Teillieferung' : ''}`,
+      body: `${o.shippedQty}/${o.qty} Stk ${o.part.name} im Versand · ${shortName(o.customer)} · ${late ? d + ' nach Termin' : d + ' vor Termin'}${short > 0 ? ' · ' + short + (short === 1 ? ' Stk fehlt' : ' Stk fehlen') + (o.remakes && o.remakes.length ? ' (Nachfertigung ' + o.remakes.join(', ') + ')' : '') : ''}`,
+      suggestion: late ? brief(`Termin um ${d} überschritten`, `${shortName(o.customer)} über den Lieferverzug informieren; Verlauf im Auftrag prüfen`)
+        : short > 0 ? brief(`${short} Stk Ausschuss in Folgearbeitsgängen`, o.remakes && o.remakes.length ? 'Teillieferung avisieren, Rest kommt mit der Nachfertigung' : 'Nachfertigung oder Teillieferung mit dem Kunden klären')
+        : brief('Auftrag termingerecht fertig', 'Lieferschein erstellen und Versand avisieren'), actions: [{ label: 'Auftrag öffnen', action: { type: 'select', kind: 'order', id: o.id } }] });
   }
 
   // ------------------------------------------------------------------ Transportaufträge
@@ -789,10 +792,11 @@
     const key = 'stock:' + mt.id;
     if (mt.onHand + mt.onOrder >= mt.min) { if (hasOpen(key)) resolveKey(key, mt.onOrder > 0 ? 'Bestellung ausgelöst' : 'Bestand wieder über Mindestbestand'); return; }
     const dec = mt.unit === 'm' ? 1 : 0;
-    notify({ key, sev: 'warn', role: 'Einkauf', entity: { kind: 'material', id: mt.id },
+    // Kanban-Material: Abruf folgt automatisch dem Bedarf (kanbanCheck) – Hinweis, keine Warnung
+    notify({ key, sev: mt.kanban ? 'info' : 'warn', role: 'Einkauf', entity: { kind: 'material', id: mt.id },
       title: `Mindestbestand unterschritten: ${mt.name}`,
       body: `Bestand ${nm(mt.onHand, dec)} ${mt.unit} < Mindestbestand ${nm(mt.min, dec)} ${mt.unit}${mt.onOrder ? ' · bestellt ' + nm(mt.onOrder, dec) + ' ' + mt.unit : ''}${mt.kanban ? ' · Kanban ruft bei Bedarf ab' : ''}`,
-      suggestion: brief('Verbrauch der freigegebenen Aufträge', `${nm(mt.reorderQty, dec)} ${mt.unit} bei ${shortName(mt.supplier)} bestellen (ca. ${U.fmtDur(mt.leadMin * 60)}, ${U.fmtEur(mt.reorderQty * mt.pricePerUnit)})`),
+      suggestion: brief('Verbrauch der freigegebenen Aufträge', `${mt.kanban ? 'Kanban ruft ab, sobald der Bedarf es erfordert; vorziehen: ' : ''}${nm(mt.reorderQty, dec)} ${mt.unit} bei ${shortName(mt.supplier)} bestellen (ca. ${U.fmtDur(mt.leadMin * 60)}, ${U.fmtEur(mt.reorderQty * mt.pricePerUnit)})`),
       actions: [{ label: 'Nachbestellen', action: { type: 'reorder', materialId: mt.id, qty: mt.reorderQty } }] });
   }
   function materialIssue(mt, amount, why) {
@@ -924,15 +928,15 @@
     let matTxt = '';
     if (mt) {
       const dec = mt.unit === 'm' ? 1 : 0, need = qty * r0.material.perPart, b = b2[mt.id];
-      matTxt = ` Material ${mt.name}: ${nm(need, dec)} ${mt.unit} – ${mt.onHand + 1e-9 >= b.need ? 'am Lager' : mt.onOrder > 0 ? 'Lieferung bestellt (' + (mt.kanban ? 'Kanban-Abruf' : 'Bestellung') + ')' : 'reicht nicht – nachbestellen'}.`;
+      matTxt = ` · ${mt.name} ${mt.onHand + 1e-9 >= b.need ? 'am Lager' : mt.onOrder > 0 ? (mt.kanban ? 'per Kanban abgerufen' : 'bestellt') : 'fehlt – nachbestellen'}`;
     }
     const plan = o.routing.filter(r => r.station !== 'VERSAND').map(r => r.station === 'EXT' ? ((r.ext && r.ext.process) || r.op) + ' (extern)' : stShort(r.station)).join(' → ');
     ev('orderIntake', 'ok', { kind: 'order', id }, `Auftragseingang: ${id} · ${qty} Stk ${o.part.name} für ${o.customer}, Termin ${U.fmtDayClock(due)}${eil ? ' (Eilauftrag)' : ''}`,
       { orderId: id, template: tp.id, qty, due, priority: o.priority, why, source: 'ERP' });
     notify({ key: 'intake:' + id, sev: 'info', role: 'Schichtleitung', entity: { kind: 'order', id }, autoResolveT: S.t + (cfg.notifyMin || 30) * 60,
       title: `Auftragseingang ${id}: ${qty} Stk ${o.part.name}`,
-      body: `${o.customer} – Termin ${U.fmtDayClock(due)}${eil ? ' (Eilauftrag)' : ''}. Arbeitsplan: ${plan}.${matTxt}`,
-      suggestion: `Freigegeben aus dem Auftragsvorrat (${why}). Die Maschinen planen den Auftrag nach Termin ein – Prognose und begrenzender Arbeitsgang in der Auftragsliste.`,
+      body: `${shortName(o.customer)} · Termin ${U.fmtDayClock(due)}${eil ? ' (Eilauftrag)' : ''} · ${plan}${matTxt}`,
+      suggestion: brief(`ERP-Auftragseingang (${trimStr(String(why), 70)})`, 'nichts zu tun – Einplanung nach Termin, Prognose in der Auftragsliste'),
       actions: [{ label: 'Auftrag öffnen', action: { type: 'select', kind: 'order', id } }] });
     return id;
   }
@@ -1864,6 +1868,7 @@
     if (!f) { const pool = cutting ? list : list.filter(x => !x.toolBreak); f = R.pick(pool.length ? pool : list); }
     const rm = f.repairMin || [10, 20];
     const brk = !!f.toolBreak && cutting;
+    GDIRTY = true;
     m.fault = { code: f.code, text: f.text, cause: f.cause, t0: S.t, repairSec: Math.round(R.range(rm[0], rm[1]) * 60), repairMin: rm, toolBreak: brk, repairBy: null, manual: !!manual, partScrapped: false, toolId: null, toolName: null };
     S.today.faults++;
     if (brk) {
@@ -1902,6 +1907,7 @@
     decide(m, 0);
   }
   function endFault(m, by) {
+    GDIRTY = true;
     const f = m.fault; if (!f) return;
     m.fault = null;
     const rt = S.tasks[m.tasks.repair]; if (rt && !by) finishTask(rt, 'cancelled');
@@ -1933,16 +1939,16 @@
   function availability(tk) {
     if (!tk) return { code: 'none', text: 'keine Aufgabe' };
     if (tk.lateWhy && S.t - (tk.lateT || 0) <= 2) return { code: 'tooLate', text: tk.lateWhy };
-    let onDuty = 0, inBreak = 0; const busy = [];
+    let onDuty = 0, inBreak = 0, breakTo = Infinity; const busy = [];
     for (let j = 0; j < PA.length; j++) {
       const p = PA[j];
       if (!p.onDuty || p.endShift || eligible(p, tk) < 0) continue;
       onDuty++;
-      if (p.state === 'break' || (p.breakPending && !p.task)) { inBreak++; continue; }
+      if (p.state === 'break' || (p.breakPending && !p.task)) { inBreak++; if (p.breakUntil) breakTo = Math.min(breakTo, p.breakUntil); continue; }
       if (p.task) busy.push(sn(p.name) + ': ' + p.task.label);
     }
     if (!onDuty) return { code: 'offShift', text: `keine qualifizierte Person verfügbar (nächste Schicht ${tclock(nextWorkStart(S.t + 1))})` };
-    if (inBreak && !busy.length) return { code: 'break', text: `Pause bis ${cur && cur.breakEnd ? U.fmtClock(cur.breakEnd) : '–'}` };
+    if (inBreak && !busy.length) { const be = cur && cur.breakEnd ? cur.breakEnd : isFinite(breakTo) ? breakTo : null; return { code: 'break', text: be ? `Pause bis ${U.fmtClock(be)}` : 'Pause' }; }
     if (busy.length) return { code: 'busy', text: 'qualifizierte Personen beschäftigt (' + busy.slice(0, 2).join('; ') + ')' };
     return { code: 'assigning', text: 'Person wird zugeteilt' };
   }
@@ -2278,7 +2284,6 @@
     while (k < w.kStop && w.bt(k) < S.t + lead && guard++ < 20000) k++;
     return w.bt(Math.min(k, w.kStop));
   }
-  function toolLine(x) { return `${TT[x.spec.type].name}: ${x.tl && x.tl.broken ? 'gebrochen' : 'Verschleiß ' + (x.tl ? nm(wearOf(x.tl), 0) : 100) + ' %, noch ' + teile(x.rem)}`; }
   function changeWhen(nc) {
     if (!nc) return '';
     if (nc.etaT == null) return `nach Teil ${nc.afterPart} · Zeitpunkt ${nc.baseNote || 'offen'}`;
@@ -2322,7 +2327,9 @@
     if (m.toolSig === sig && hasOpen('tool:' + m.id)) return;
     m.toolSig = sig;
     const types = [...new Set(nc.group.map(x => x.spec.type).concat(nc.later.map(x => x.spec.type)))];
-    const stockTxt = types.map(t => `${toolShort(t)}: ${S.toolStock[t] ? S.toolStock[t].ready : 0} Stk`).join(', ');
+    // Bestand kompakt: nur nennen, was fehlt bzw. knapp ist
+    const lowT = types.filter(t => !(S.toolStock[t] && S.toolStock[t].ready > 0));
+    const stockTxt = lowT.length ? `${lowT.map(toolShort).join(', ')} nicht vorrätig` : types.length === 1 ? `${S.toolStock[types[0]].ready} Stk vorrätig` : 'vorrätig';
     const idxAll = nc.action === 'index';
     // kompakt: Body eine Zeile (Werkzeuge · wann · Auftrag), Empfehlung „Ursache: … Empfehlung: …“;
     // nachts nur 'info' – die Warnung trägt der Geisterschicht-Check bzw. die Warte-Meldung beim Stopp
@@ -2331,8 +2338,10 @@
     const whenTxt = nc.etaT == null ? `nach Teil ${nc.afterPart}` : `nach Teil ${nc.afterPart} ca. ${tclock(Math.max(nc.etaT, S.t))}`;
     const stopTxt = nc.waitFromT != null ? ` · steht ${nc.waiting ? 'seit' : 'ab ca.'} ${tclock(nc.waitFromT)}` : '';
     const laterTxt = nc.later.length ? ` · danach ${toolShort(nc.later[0].spec.type)} nach Teil ${nc.later[0].afterPart}` : '';
-    const cause0 = nc.group.some(x => x.tl && x.tl.broken) ? `${gNames}` : `${gNames}: noch ${teile(minRem)} Reststandzeit`;
-    notify({ key: 'tool:' + m.id, sev: nc.waitFromT != null && cur ? 'warn' : 'info', role: idxAll ? 'Schichtleitung' : 'Einrichter', entity: { kind: 'machine', id: m.id },
+    const cNames = nc.group.length > 1 ? nc.group.map(x => toolShort(x.spec.type)).join(', ') : gNames;
+    const cause0 = nc.group.some(x => x.tl && x.tl.broken) ? `${gNames}` : minRem < 1 ? `${cNames} verschlissen` : `${cNames}: noch ${teile(minRem)} Reststandzeit`;
+    const gE = S.ghostCheck && S.ghostCheck.machines[m.id], ghostCov = !!(gE && ghostStop(gE) && nc.staffReason === 'night' && hasOpen('ghost:check'));
+    notify({ key: 'tool:' + m.id, sev: nc.waitFromT != null && cur && !ghostCov ? 'warn' : 'info', role: idxAll ? 'Schichtleitung' : 'Einrichter', entity: { kind: 'machine', id: m.id },
       title: `${idxAll ? 'Schneide wenden' : 'Werkzeugwechsel'} geplant – ${m.id} ${m.short}`,
       body: `${gNames} → ${verb} ${whenTxt}${stopTxt} · ${o.id} AG ${r.seq}${laterTxt}`,
       suggestion: nc.waitFromT != null && nc.staffNote ? staffAdvice(m, nc, stockTxt)
@@ -2340,8 +2349,6 @@
         : brief(cause0, `vermessenes Werkzeug holen (Bestand ${stockTxt}) und an der Teilegrenze ${nc.etaT != null ? 'ca. ' + tclock(Math.max(nc.etaT, S.t)) + ' ' : ''}wechseln`),
       actions: [{ label: 'Maschine öffnen', action: { type: 'select', kind: 'machine', id: m.id } }] });
   }
-  /** jüngste Benachrichtigung mit diesem Schlüssel (auch erledigte) – Zeitpunkt oder null */
-  function lastNotifT(key) { for (const n of S.notifications) if (n.key === key) return n.t; return null; }
   /** Empfehlung, wenn bis zum Stopp niemand wechseln kann – nach Grund: Pause, Schichtwechsel, Nacht/Geisterschicht.
       Kompakt „Ursache: … Empfehlung: …“ (≤ ca. 180 Zeichen). */
   function staffAdvice(m, nc, stockTxt) {
@@ -2359,8 +2366,8 @@
     }
     if (nc.staffReason === 'handover' && cur) return brief(`Schichtwechsel ${hh(cur.end)}, nächste Schicht ab ca. ${tclock(next)} – ${m.id} stünde ab ca. ${tclock(stopT)}`, `vor Schichtende vorbeugend ${verb} oder bei der Übergabe als Erstes ansagen${stock}`);
     const standSec = Math.max(0, next - stopT);   // gesamter Stillstand (stabil, solange sich der Plan nicht ändert)
-    if (cur && S.t < cur.end) return brief(`nach Schichtende ${hh(cur.end)} niemand bis ${tclock(next)} – ${m.id} stünde ab ca. ${tclock(stopT)} rund ${U.fmtDur(standSec)}`, `vor Schichtende vorbeugend ${verb} (${names}, siehe Geisterschicht-Check)${stock}`);
-    return brief(`${names} verschlissen, niemand im Haus – ${m.id} steht ${nc.waiting ? 'seit' : 'ab ca.'} ${tclock(stopT)} bis ${tclock(next)}`, `${tclock(next)} als Erstes ${verb}${idx ? ' (1–2 min)' : ''}; künftig vor Schichtende vorbeugend ${verb}`);
+    if (cur && S.t < cur.end) return brief(`nach ${hh(cur.end)} niemand bis ${tclock(next)} – ${m.id} stünde ab ca. ${tclock(stopT)} rund ${U.fmtDur(standSec)}`, `vor Schichtende vorbeugend ${verb} (siehe Geisterschicht-Check)`);
+    return brief(`${names} verschlissen, niemand im Haus bis ${tclock(next)}`, `${tclock(next)} als Erstes ${verb}${idx ? ' (1–2 min)' : ''}; künftig vor Schichtende vorbeugend ${verb}`);
   }
   function ensureToolTask(m, urgent) {
     let tk = S.tasks[m.tasks.tc];
@@ -2430,7 +2437,7 @@
       list: list.map(x => ({ type: x.spec.type, toolId: x.tl.id, rem: x.rem, why: x.why, at: x.at, reason: changeReason(x), action: x.action, edge: x.tl.edge || 1, edges: x.tl.edges || 1 })),
       cause: `${sn(p.name)} ${verb} ${list.map(x => TT[x.spec.type].name + (x.action === 'index' ? ' (' + edgeTxt(x.tl) + ' → ' + ((x.tl.edge || 1) + 1) + '/' + x.tl.edges + ')' : '')).join(', ')} (${brk ? 'Werkzeugbruch' : ex ? changeReason(list.find(x => x.rem < 1)) : list.every(x => x.why === 'manual') ? 'vorbeugend, manuell beauftragt' : changeReason(list.find(x => x.why === 'rule') || list[0])}${list.some(x => x.why === 'bundle') ? '; mitgewechselt: ' + list.filter(x => x.why === 'bundle').map(x => TT[x.spec.type].name).join(', ') : ''}, ca. ${U.fmtDur(sec)})` };
     tk.steps[tk.si + 1].sec = sec;
-    if (hasOpen('tool:' + m.id)) { const n = NIDX['tool:' + m.id]; n.body = `${allIdx ? 'Schneide wenden' : 'Werkzeugwechsel'} läuft seit ${U.fmtClock(S.t)}: ${list.map(x => TT[x.spec.type].name).join(', ')} (${sn(p.name)}, ca. ${U.fmtDur(sec)}) – ${o.id} AG ${o.routing[i].seq}.`; n.sev = 'info'; n.suggestion = 'Nach dem Wechsel läuft die Serie an der Teilegrenze weiter.'; n.updatedT = S.t; WF.bus.emit('sim:notify', n); }
+    if (hasOpen('tool:' + m.id)) { const n = NIDX['tool:' + m.id]; n.body = `${allIdx ? 'Schneide wenden' : 'Werkzeugwechsel'} läuft seit ${U.fmtClock(S.t)}: ${list.map(x => toolShort(x.spec.type)).join(', ')} · ${o.id} AG ${o.routing[i].seq}`; n.sev = 'info'; n.suggestion = brief(`${allIdx ? 'Wenden' : 'Wechsel'} läuft (${sn(p.name)}, ca. ${U.fmtDur(sec)})`, 'nichts zu tun – die Serie läuft an der Teilegrenze weiter'); n.updatedT = S.t; WF.bus.emit('sim:notify', n); }
     advanceTask(p);
   }
   function onToolChanged(m) {
@@ -2956,6 +2963,9 @@
     }
     shiftReport(old, nw);
     if (nw) restockCrib();
+    // Geisterschicht-Check: zu Schichtbeginn erledigt; bei Schichtende auf den Nachttext umstellen
+    if (nw) { if (hasOpen('ghost:check')) resolveKey('ghost:check', 'Schichtbeginn'); S.ghostCheck = null; }
+    else if (hasOpen('ghost:check')) ghostCompose();
     if (!nw) for (let j = 0; j < MA.length; j++) if (hasOpen('fpi:' + MA[j].id)) resolveKey('fpi:' + MA[j].id, 'Schichtende – Erstteilprüfung zu Schichtbeginn');
     if (nw && S.intake) intakeAtShiftStart(nw);
     for (const mid in S.machines) S.machines[mid].ks = freshStats(S.machines[mid]);
@@ -3077,8 +3087,8 @@
       if (a.battery < CFG.batteryLow) {
         a.mustCharge = true;
         notify({ key: 'agvbat:' + a.id, sev: 'info', role: 'Logistik', entity: { kind: 'agv', id: a.id }, title: `${a.name}: Akku niedrig (${Math.round(a.battery)} %)`,
-          body: `${a.name} fährt zur Ladestation und steht ca. ${U.fmtDur((CFG.batteryFull - a.battery) / CFG.agvCharge)} nicht für Transporte zur Verfügung.`,
-          suggestion: 'Transporte übernimmt in der Zwischenzeit das andere AGV; schwere Behälter weiterhin per Stapler.' });
+          body: `${a.name} lädt ca. ${U.fmtDur((CFG.batteryFull - a.battery) / CFG.agvCharge)} · in der Zeit keine Transporte`,
+          suggestion: brief(`Akku ${Math.round(a.battery)} %`, 'Transporte übernimmt das andere AGV; schwere Behälter per Stapler') });
         goCharge(a);
       } else a.state = 'idle';
     }
@@ -3316,12 +3326,19 @@
   // ------------------------------------------------------------------ Regeln & Benachrichtigungen (§3.9)
   function rulesTick() {
     for (const id in S.machines) {
-      const m = S.machines[id], dur = S.t - m.since;
+      // Wartezeit für die Warnung ab Beginn der Episode bzw. ab Schichtbeginn (eine über Nacht stehende Maschine,
+      // die zu Schichtbeginn sofort versorgt wird, löst keine Warnung aus)
+      const m = S.machines[id], dur = S.t - Math.max(m.since, S.shiftStats.startT);
       if (WAIT_STATES[m.state]) {
         const planned = m.state === 'waitOperator' && (m.waitCode === 'break' || m.waitCode === 'offShift' || m.waitCode === 'walking' || m.waitCode === 'assigning' || m.waitCode === 'tooLate');
         const thr = m.state === 'waitTool' ? CFG.toolWarnSec : CFG.waitWarnSec;
         if (!planned && dur >= thr) notifyWait(m);
-        else if (planned && hasOpen('wait:' + m.id)) resolveKey('wait:' + m.id, m.waitCode === 'walking' ? 'Person ist unterwegs' : 'geplante Abwesenheit (Pause/Schicht)');
+        else if (planned && hasOpen('wait:' + m.id)) {
+          // Episode abgeschlossen (jetzt geplante Abwesenheit bzw. Person unterwegs) – Titel mit Zeitraum statt „seit“
+          const n0 = NIDX['wait:' + m.id], since0 = n0.since != null ? n0.since : m.since;
+          n0.title = `${m.id} ${m.short}: ${WF.STATE[m.state].label} ${tclock(since0)}–${U.fmtClock(S.t)} (${U.fmtDur(S.t - since0)})`;
+          resolveKey('wait:' + m.id, m.waitCode === 'walking' ? 'Person ist unterwegs' : 'geplante Abwesenheit (Pause/Schicht)');
+        }
       }
       // Erstteil wartet: nur in der Schichtzeit eine Warnung (nachts ist niemand da – geplant „Bereit“)
       if (m.fpi && m.fpi.stage === 'wait' && cur && !cur.inBreak && S.t - Math.max(m.fpi.t0, S.shiftStats.startT) >= CFG.fpiWarnSec && !hasOpen('fpi:' + m.id)) {
@@ -3527,12 +3544,14 @@
         e.action = { type: 'planToolChange', machineId: m.id, types: L, notBefore: tLast, reason: 'vor der Geisterschicht' };
         e.actionLabel = `${m.id}: vor Schichtende ${v}`;
         e.rec = `ca. ${hh(tLast)} vorbeugend ${v}: ${names(L)} – dann läuft ${m.id} ${opt.stopT == null ? (opt.done ? 'bis Auftragsende' : 'bis ' + nx) : 'bis ca. ' + hh(opt.stopT)} (+${U.fmtDur(gain)})`;
-        e.recShort = `${m.id} ca. ${hh(tLast)} ${v} (${names(L)})`;
+        e.recShort = `${m.id} ca. ${hh(tLast)} ${v}`; e.recShortN = `${e.recShort} (${names(L)})`;
       } else {
         const bott = opt && opt.reason === 'tool' && opt.tool ? opt.tool : base.tool, lim = tc.items.find(x => x.spec.type === bott);
         const full = lim && lim.tl ? Math.floor(lim.tl.life / lim.spec.cutMinPerPart + 1e-9) : 0;
-        if (pend) { e.rec = `Vorbeugender Wechsel ist beauftragt – Standzeit reicht trotzdem nur bis ca. ${hh(base.stopT)}: Schwesterwerkzeug oder Nachtbemannung prüfen`; e.recShort = `${m.id} Wechsel beauftragt`; }
-        else { e.rec = `${toolShort(bott)} reicht auch frisch nur ca. ${U.fmtDur(full * cyc)}${kL < 0 ? ', vor Schichtende keine Teilegrenze mehr erreichbar' : ''} – Schwesterwerkzeug, Nachtbemannung/Rufbereitschaft oder Arbeitsgang mit längerer Standzeit`; e.recShort = `${m.id} Schwesterwerkzeug/Nachtbemannung`; }
+        const v0 = verbOf([base.tool]);
+        if (pend) { e.rec = `Vorbeugender Wechsel ist beauftragt – Standzeit reicht trotzdem nur bis ca. ${hh(base.stopT)}: Schwesterwerkzeug oder Nachtbemannung prüfen`; e.recShort = e.recShortN = `${m.id} Wechsel beauftragt`; }
+        else if (kL < 0) { e.rec = `Vor Schichtende ist keine Teilegrenze mehr für einen Wechsel erreichbar – ${nx} als Erstes ${v0}; künftig vor Schichtende vorbeugend ${v0} (oder Schwesterwerkzeug/Nachtbemannung)`; e.atStart = true; e.recShort = `${m.id} ${v0}`; }
+        else { e.rec = `${toolShort(bott)} reicht auch frisch nur ca. ${U.fmtDur(full * cyc)} – Schwesterwerkzeug, Nachtbemannung/Rufbereitschaft oder Arbeitsgang mit längerer Standzeit`; e.recShort = `${m.id} Schwesterwerkzeug prüfen`; e.recShortN = `${m.id} Schwesterwerkzeug oder Nachtbemannung`; }
       }
     } else if (base.reason === 'bars') {
       const tr = barsTransportOf(m);
@@ -3618,27 +3637,46 @@
     const stops = list.filter(ghostStop), nx = tclock(G.nextStart);
     for (const e of stops) {
       const m = S.machines[e.machineId];
-      if (night && S.t >= e.stopT - 600 && m.state !== 'running' && m.state !== 'toolchange') e.waitingSince = e.waitingSince != null ? e.waitingSince : m.since;
+      if (night && m.state !== 'running' && m.state !== 'toolchange' && (WAIT_STATES[m.state] || m.state === 'fault' || S.t >= e.stopT - 600)) e.waitingSince = e.waitingSince != null ? e.waitingSince : m.since;
       else if (night && m.state === 'running') e.waitingSince = null;
     }
     const what = (e) => e.reason === 'tool' ? toolShort(e.tool) : GHOST_WHAT[e.reason] || e.reason;
-    const seg = stops.map(e => `${e.machineId} ${e.waitingSince != null ? 'steht seit ' + tclock(e.waitingSince) : 'ca. ' + tclock(e.stopT)} (${what(e)})`)
-      .concat(list.filter(e => e.reason === 'done').map(e => `${e.machineId} fertig ca. ${tclock(e.stopT)}`));
-    const thr = list.filter(e => e.reason === 'through' || e.reason === 'ahead').map(e => e.machineId);
+    // tatsächlicher Grund, wenn eine Maschine nachts aus einem anderen Grund steht als angekündigt
+    const liveWhat = (e) => {
+      const st = S.machines[e.machineId].state;
+      if (st === 'fault') return 'Störung';
+      if (st === 'waitTool') return e.reason === 'tool' ? what(e) : 'Werkzeug';
+      if (st === 'starved') return e.reason === 'bars' || e.reason === 'input' || e.reason === 'material' ? what(e) : 'Material';
+      if (st === 'blocked') return 'Ausgang voll';
+      return what(e);
+    };
+    const seg = stops.map(e => e.waitingSince != null ? `${e.machineId} steht seit ${tclock(e.waitingSince)} (${liveWhat(e)})` : `${e.machineId} ca. ${tclock(e.stopT)} (${what(e)})`)
+      .concat(list.filter(e => e.reason === 'done').map(e => `${e.machineId} fertig ca. ${tclock(e.stopT)}`))
+      .concat(list.filter(e => e.reason === 'ahead').map(e => `${e.machineId} Zuschnitt-Vorrat voll`));
+    const thr = list.filter(e => e.reason === 'through').map(e => e.machineId);
     if (thr.length) seg.push(`läuft durch: ${thr.join(', ')}`);
     const n = list.length, k = stops.length;
     const title = k ? `Geisterschicht-Check: ${k} von ${n} autonomen Maschinen ${k === 1 ? 'stoppt' : 'stoppen'} in der Nacht` : `Geisterschicht-Check: kein vorzeitiger Stopp (${n} autonome Maschine${n === 1 ? '' : 'n'})`;
     let sugg, actions = [];
     if (!k) sugg = brief(`Standzeit, Stangen und Puffer reichen bis ${nx} bzw. Auftragsende`, 'nichts zu tun');
     else if (!night) {
-      const recs = stops.map(e => e.recShort).filter(Boolean).concat(list.filter(e => e.reason === 'done' && e.recShort).map(e => e.recShort));
-      sugg = brief(`nach ${U.fmtClock(G.staffEnd)} niemand im Haus – ${stops.map(e => e.machineId).join(', ')} ${k === 1 ? 'stoppt' : 'stoppen'} vor ${nx}`, recs.join('; ') || 'Schwesterwerkzeug oder Nachtbemannung prüfen');
+      // jetzt noch erreichbare Handgriffe einzeln, „zu spät für heute“ gesammelt als erste Aufgabe der nächsten Schicht
+      const recOf = (long) => {
+        const pre = stops.concat(list.filter(e => e.reason === 'done')).filter(e => !e.atStart).map(e => (long && e.recShortN) || e.recShort).filter(Boolean);
+        const late = stops.filter(e => e.atStart).map(e => e.recShort);
+        if (late.length) pre.push(`${nx} als Erstes ${late.join(', ')}`);
+        return pre.join('; ') || 'Schwesterwerkzeug oder Nachtbemannung prüfen';
+      };
+      const cause = `nach ${U.fmtClock(G.staffEnd)} niemand im Haus bis ${nx}`;
+      const fits = (r) => `Ursache: ${cause}. Empfehlung: ${r}.`.length <= 190;
+      sugg = brief(cause, fits(recOf(true)) ? recOf(true) : recOf(false));
       for (const e of stops) if (e.action && actions.length < 3) actions.push({ label: e.actionLabel || `${e.machineId} vorbereiten`, action: e.action });
     } else {
-      const standing = stops.filter(e => e.waitingSince != null).length;
       const anyTool = stops.some(e => e.reason === 'tool');
-      sugg = brief(`${standing ? standing + ' von ' + n + ' autonomen Maschinen ' + (standing === 1 ? 'steht' : 'stehen') : k + ' autonome Maschine' + (k === 1 ? ' stoppt' : 'n stoppen')}, niemand im Haus bis ${nx}`,
-        `${nx} als Erstes: ${stops.map(e => e.recNight || e.machineId).join(', ')}${anyTool ? '; künftig vor Schichtende vorbeugend wenden/wechseln' : ''}`);
+      const RW = { tool: 'Standzeit', bars: 'Stangen', material: 'Material', input: 'Teile im Eingang', output: 'Platz im Ausgang', fpi: 'Freigabe', fault: 'Störung' };
+      const rs = [...new Set(stops.map(e => RW[e.reason] || e.reason))];
+      sugg = brief(`${rs.slice(0, 2).join('/')} reicht nicht bis ${nx}, niemand im Haus`,
+        `${nx} als Erstes ${stops.map(e => (e.recNight || e.machineId).replace(/\s*\([^)]*\)/g, '')).join(', ')}${anyTool ? '; künftig vor Schichtende vorbeugend wenden/wechseln' : ''}`);
     }
     const first = stops[0] || list[0];
     actions.push({ label: 'Maschine öffnen', action: { type: 'select', kind: 'machine', id: first.machineId } });
@@ -3666,8 +3704,9 @@
       : `${title} – unbemannte Geisterschicht: ${st.good} Gutteile, ${st.scrap} Ausschuss${o.oee != null ? ', OEE ' + U.fmtPct(o.oee) : ''}${waiting.length ? '; wartend: ' + waiting.slice(0, 4).join(', ') : ''}`, S.lastShiftReport);
     if (!old) return;
     notify({ key: 'shift:' + S.t, sev: 'info', role: 'Schichtleitung', entity: { kind: 'plant', id: 'werk' }, autoResolveT: S.t + 1800, title,
-      body: `${shName(old)}: ${st.good} Gutteile, ${st.scrap} Ausschuss, OEE ${U.fmtPct(o.oee)}. ${faults.length ? 'Offene Störungen: ' + faults.join(', ') + '. ' : ''}${waiting.length ? 'Wartend: ' + waiting.slice(0, 4).join(', ') + '.' : ''}`,
-      suggestion: nw ? 'Übergabe: offene Störungen, geplante Werkzeugwechsel und wartende Erstteile zuerst besprechen.' : `Unbemannt weiter laufen: ${ghosts.join(', ') || 'keine Maschine'}. Werkzeug- und Materialreichweite für die Nacht prüfen.` });
+      body: `${shName(old)}: ${st.good} Gutteile · ${st.scrap} Ausschuss · OEE ${U.fmtPct(o.oee)}${faults.length ? ' · Störung: ' + faults.join(', ') : ''}${waiting.length ? ' · wartend: ' + waiting.slice(0, 3).join(', ') : ''}`,
+      suggestion: nw ? brief('Schichtwechsel', 'offene Störungen, geplante Werkzeugwechsel und wartende Erstteile zuerst besprechen')
+        : brief(`unbemannt weiter: ${ghosts.join(', ') || 'keine Maschine'}`, hasOpen('ghost:check') ? 'Stopps und erste Handgriffe siehe Geisterschicht-Check' : 'nichts zu tun') });
   }
 
   // ------------------------------------------------------------------ Prognose (Plantafel)
@@ -4638,6 +4677,22 @@
     if (hasOpen('qty:' + o.id)) resolveKey('qty:' + o.id, `Nachfertigung ${id} eingeplant`);
     return { ok: true, id, msg: `Nachfertigung ${id} (${n} Stk) für ${o.id} eingeplant` };
   }
+  /** Stangenlader vorbeugend auffüllen (z. B. vor der Geisterschicht): Staplerauftrag „Stangen nachladen“, auch wenn das
+      Magazin noch über der Nachlademarke liegt */
+  function refillBars(machineId) {
+    const m = S.machines[machineId]; if (!m) return fail('Unbekannte Maschine ' + machineId);
+    if (!m.barMagazineM) return fail(`${m.id} ${m.short} hat keinen Stangenlader`);
+    const c = curOf(m);
+    if (!c || !isBarFed(m, c.r) || m.barMat !== c.r.material.id) return fail(`${m.id}: der aktuelle Arbeitsgang läuft nicht von der Stange`);
+    if (barsTransportOf(m)) return { ok: true, msg: `Stangen-Nachschub für ${m.id} ist bereits beauftragt` };
+    const mt = S.materials[c.r.material.id];
+    if (m.barMagazineM - m.barStockM < Math.min(CFG.barLenM, c.r.material.perPart * 10)) return fail(`Stangenmagazin ${m.id} ist voll (${nm(m.barStockM, 1)} von ${nm(m.barMagazineM, 0)} m)`);
+    if (mt.onHand + 1e-9 < c.r.material.perPart) return fail(`Keine Stangen ${mt.name} mehr im Lager`);
+    const tr = createBarsTransport(m, mt.id);
+    ev('barsOrder', 'info', { kind: 'machine', id: m.id }, `${m.id}: Stangen nachladen beauftragt (vorbeugend) – Magazin ${nm(m.barStockM, 2)} von ${nm(m.barMagazineM, 0)} m`, { transportId: tr.id, manual: true });
+    GDIRTY = true;
+    return { ok: true, transportId: tr.id, msg: `Stangen nachladen für ${m.id} beauftragt (Stapler)` };
+  }
   /** Notification-Aktion ausführen ({type, ...}) */
   function runAction(a) {
     if (!a || !a.type) return fail('Aktion fehlt');
@@ -4651,6 +4706,7 @@
       case 'releaseIntake': { const id = releaseIntake('manuell freigegeben'); return id ? { ok: true, id, msg: `Auftrag ${id} aus dem Auftragsvorrat freigegeben` } : fail('Keine passende Vorlage frei (Stationen ausgelastet bzw. Material fehlt)'); }
       case 'applyOffset': return applyOffset(a.orderId, a.seq, a.value, 'Leitstand');
       case 'planToolChange': return planToolChange(a.machineId, a.types, { notBefore: a.notBefore, reason: a.reason });
+      case 'refillBars': return refillBars(a.machineId);
       case 'ack': return ack(a.id, a.by);
       case 'resolve': return resolveN(a.id);
       case 'select': WF.bus.emit('select', { kind: a.kind, id: a.id }); return { ok: true, msg: 'geöffnet' };
@@ -4690,7 +4746,7 @@
   const actions = {
     triggerFault, repair, ack, resolve: resolveN, reorder: (id, qty) => reorder(id, qty), setPriority, addOrder, moveOp, connectMachine, planRemake,
     releaseIntake: () => runAction({ type: 'releaseIntake' }),
-    applyOffset: (orderId, seq, value) => applyOffset(orderId, Number(seq), value, 'Leitstand'), planToolChange, run: runAction,
+    applyOffset: (orderId, seq, value) => applyOffset(orderId, Number(seq), value, 'Leitstand'), planToolChange, refillBars, run: runAction,
     reset: () => { acc = 0; init(P || WF.profile); return { ok: true, msg: 'Simulation neu gestartet' }; },
   };
   WF.sim = {

@@ -58,6 +58,7 @@ defTest('realism', 11, 'Realism smoke over 24 h (warnings only)', { warnOnly: tr
 defTest('regress', 12, 'Regression: ghost-shift advice, announced/manual tool changes, tool break only while cutting, no task outlives its op, rework on last part, chronological op chain');
 defTest('week', 13, '7-day continuous run: order intake keeps every shift busy, open orders/WIP/state bounded, no deadlock, Kanban prevents permanent material blocks');
 defTest('review', 14, 'Review fixes: ghost-shift OEE, in-progress performance, waitFromT, bottleneck(), what-if, quantity risk/remake, insert indexing, texts');
+defTest('night', 15, "Night realism: planned idle off shift, ≤ 4 machine warnings at 22:30, one Geisterschicht-Check, compact 'Ursache/Empfehlung' texts, fresh 'seit', loss split = lossEur, kpis().ghost, saw rarely blocked");
 
 function fail(key, msg, dedup) {
   const t = TB[key];
@@ -1720,16 +1721,34 @@ function regressionPhase() {
     // ---- H1 Geisterschicht: Prognose stimmt, Aktion wechselt die begrenzenden Werkzeuge und verlängert die Laufzeit
     fresh();
     stepUntil(() => tod(st().t) === 21 * H + 5 && Math.floor(st().t / DAY) === 0, 20 * H);
-    const ghosts = vals(st().notifications).filter((n) => n.status !== 'resolved' && String(n.key).startsWith('ghost:'));
-    if (!ghosts.length) note('regress', 'no ghost-shift notice on Monday 21:00 – scenario not checked');
-    const g0 = ghosts.map((n) => ({ mid: n.key.split(':')[1], stopT: n.ghost && n.ghost.stopT, act: (n.actions || []).map((a) => a.action).find((a) => a.type === 'planToolChange'), sugg: n.suggestion }));
+    // eine Sammelmeldung 'ghost:check' (keine 'ghost:<Maschine>'-Meldungen mehr), Einträge je autonomer Maschine in n.ghost.machines
+    const gAll = vals(st().notifications).filter((n) => n.status !== 'resolved' && String(n.key).startsWith('ghost:'));
+    ok('regress');
+    if (gAll.some((n) => n.key !== 'ghost:check')) fail('regress', `per-machine ghost notifications still open: ${gAll.map((n) => n.key).join(', ')} (expected one 'ghost:check')`, 'ghostkeys');
+    const gn = gAll.find((n) => n.key === 'ghost:check');
+    if (!gn) note('regress', 'no Geisterschicht-Check on Monday 21:00 – scenario not checked');
+    else {
+      ok('regress');
+      if (!/^Geisterschicht-Check: /.test(gn.title)) fail('regress', `ghost check title „${gn.title}“`, 'ghosttitle');
+      if (/\n/.test(gn.body) || gn.body.length > 200) fail('regress', `ghost check body not one short line (${gn.body.length} chars): „${short(gn.body)}“`, 'ghostbody');
+      if (gn.suggestion.length > 190 || !/^Ursache: .+ Empfehlung: /.test(gn.suggestion) || /…/.test(gn.suggestion)) fail('regress', `ghost check suggestion not compact 'Ursache: … Empfehlung: …' ≤ 190 (${gn.suggestion.length}): „${gn.suggestion}“`, 'ghostsugg');
+      if (!gn.ghost || !Array.isArray(gn.ghost.machines) || !num(gn.ghost.until)) fail('regress', `ghost check without n.ghost {until, machines[]}: ${short(gn.ghost)}`, 'ghostshape');
+    }
+    const STOPR = new Set(['tool', 'bars', 'input', 'output', 'material', 'fpi', 'fault']);
+    const gE = gn && gn.ghost ? gn.ghost.machines.filter((e) => e && STOPR.has(e.reason) && num(e.stopT)) : [];
+    const g0 = gE.map((e) => ({ mid: e.machineId, stopT: e.stopT, reason: e.reason, act: e.action && e.action.type === 'planToolChange' ? e.action : null, sugg: e.rec }));
+    for (const e of gE) {
+      ok('regress');
+      if (!/wenden|wechseln|Stangen|rüsten|leeren|freigeben|Schwesterwerkzeug|Nachtbemannung|beheben|bereitstellen/.test(String(e.rec))) fail('regress', `ghost entry ${e.machineId} (${e.reason}) without a concrete recommendation: „${short(e.rec)}“`, 'ghostrec:' + e.machineId);
+      if (String(e.rec).length > 200) fail('regress', `ghost entry ${e.machineId} recommendation too long (${String(e.rec).length})`, 'ghostreclen:' + e.machineId);
+    }
     const stopOf = (mids, until) => { const r = {}; while (st().t < until) { step1(); for (const mid of mids) { const m = st().machines[mid]; if (r[mid] == null && (m.state === 'waitTool' || (m.state !== 'running' && m.state !== 'toolchange' && m.state !== 'firstPiece' && tod(st().t) >= 22 * H))) r[mid] = st().t; } } return r; };
     const untilT = Math.floor(st().t / DAY) * DAY + DAY + 6 * H;
     const stopsA = stopOf(g0.map((g) => g.mid), untilT);
     for (const g of g0) {
       ok('regress');
-      if (num(g.stopT) && num(stopsA[g.mid]) && Math.abs(stopsA[g.mid] - g.stopT) > 20 * MIN) fail('regress', `ghost notice ${g.mid} predicted stop ${clk(g.stopT)} but the machine stopped at ${clk(stopsA[g.mid])}`, 'ghostpred:' + g.mid);
-      if (!g.act && !/Schwesterwerkzeug|Nachtbemannung|Rufbereitschaft/.test(String(g.sugg))) fail('regress', `ghost notice ${g.mid} offers no action but does not explain why (suggestion: ${short(g.sugg)})`, 'ghostwhy:' + g.mid);
+      if (g.reason !== 'fpi' && g.reason !== 'fault' && num(g.stopT) && num(stopsA[g.mid]) && Math.abs(stopsA[g.mid] - g.stopT) > 20 * MIN) fail('regress', `ghost notice ${g.mid} (${g.reason}) predicted stop ${clk(g.stopT)} but the machine stopped at ${clk(stopsA[g.mid])}`, 'ghostpred:' + g.mid);
+      if (g.reason === 'tool' && !g.act && !/Schwesterwerkzeug|Nachtbemannung|Rufbereitschaft|als Erstes/.test(String(g.sugg))) fail('regress', `ghost notice ${g.mid} offers no action but does not explain why (suggestion: ${short(g.sugg)})`, 'ghostwhy:' + g.mid);
     }
     if (g0.some((g) => g.act)) {
       fresh();
@@ -2039,7 +2058,7 @@ function reviewPhase() {
           if (n.status === 'resolved' || !String(n.key).startsWith('tool:')) continue;
           const mm = /ca\. (?:(Mo|Di|Mi|Do|Fr|Sa|So) )?(\d\d):(\d\d)/.exec(n.body || '');
           if (mm && !mm[1]) { const tt = Math.floor(t / DAY) * DAY + Number(mm[2]) * H + Number(mm[3]) * MIN; if (tt < t - 120 && t - tt < 12 * H) staleTxt.push(`${clk(t)} ${n.key}: „${n.body.slice(0, 90)}“`); }
-          if (ghost && /vor Schichtende vorbeugend wechseln/.test(n.suggestion || '')) badTxt.push(`${clk(t)} ${n.key} after shift end: „${n.suggestion.slice(0, 90)}“`);
+          if (ghost && /(?<!künftig )vor Schichtende vorbeugend (wechseln|wenden)/.test(n.suggestion || '')) badTxt.push(`${clk(t)} ${n.key} after shift end: „${n.suggestion.slice(0, 90)}“`);
           if (/im Dienst/.test((n.suggestion || '') + (n.body || ''))) badTxt.push(`${clk(t)} ${n.key}: says 'im Dienst' („${n.suggestion.slice(0, 60)}“)`);
         }
         if (ghost) ghostSamples++;
@@ -2212,6 +2231,109 @@ function reviewPhase() {
 }
 const U3 = (x) => (num(x) ? (x * 100).toFixed(0) + ' %' : String(x));
 
+// ------------------------------------------------------------------ Test 15: Nacht & Geisterschicht (geplanter Stillstand, Meldungen, Texte)
+function nightPhase() {
+  const st = () => S();
+  const R = (k) => ok('night', k || 1);
+  const notes = [];
+  const offN = WF.bus.on('sim:notify', (n) => notes.push({ t: st().t, id: n.id, key: String(n.key), sev: n.sev, status: n.status, title: n.title, body: n.body, sugg: n.suggestion, entity: n.entity }));
+  const COMPACT = /^(tool|wait|fault|spc|stock|missing|ghost|qty|late|fpi|done|agvbat|intake|shift):/;
+  try {
+    SIM.init(PROFILE);
+    const day0 = Math.floor(st().t / DAY) * DAY, t2230 = day0 + 22 * H + 30 * MIN, t2100 = day0 + 21 * H, tEnd = day0 + DAY + 6 * H + 30 * MIN;
+    const seitBad = [], lossNight = {}, blocked = { saw: 0, sawStaffed: 0 };
+    let checked2230 = false, checked2100 = false;
+    while (st().t < tEnd) {
+      SIM.advance(60);
+      const S0 = st(), t = S0.t, x = tod(t), off = !expectedShift(t);
+      if (!checked2100 && t >= t2100) {
+        checked2100 = true; R();
+        const k = SIM.kpis();
+        if (k.ghost != null) fail('night', `kpis().ghost should be null while a shift is active (21:00), got ${short(k.ghost)}`, 'kghost0');
+      }
+      // offene Warte-Meldungen: „seit hh:mm“ = Beginn der aktuellen Episode
+      for (const n of S0.notifications) {
+        if (n.status === 'resolved' || !String(n.key).startsWith('wait:')) continue;
+        const m = S0.machines[n.key.slice(5)], mm = / seit (\d\d:\d\d)/.exec(n.title);
+        R();
+        if (m && WAIT_GROUP.has(m.state) && mm && mm[1] !== WF.util.fmtClock(m.since) && seitBad.length < 5) seitBad.push(`${clk(t)} ${n.title} – machine ${m.state} since ${clk(m.since)}`);
+      }
+      // Säge: Ausgang voll nur kurz (Zuschnitt auf Vorrat ist „Bereit“)
+      if (!off && !inBreak(expectedShift(t), t)) { blocked.sawStaffed++; if (S0.machines.M01 && S0.machines.M01.state === 'blocked') blocked.saw++; }
+      // ohne Schicht: nicht autonome Maschinen stehen geplant (kein Verlust)
+      if (off && x >= 22 * H + 5 * MIN) {
+        for (const mid of MACHINE_IDS_LIST) {
+          const m = S0.machines[mid]; if (m.loading === 'auto' && m.setupDone && m.released) continue;
+          const key = mid + '|' + Math.floor(t / DAY);
+          if (lossNight[key] == null) lossNight[key] = { mid, from: m.kd.lossEur, to: m.kd.lossEur, state: new Set() };
+          lossNight[key].to = m.kd.lossEur; if (m.state !== 'idle' && m.state !== 'fault') lossNight[key].state.add(m.state + ': ' + m.cause.slice(0, 60));
+        }
+      }
+      if (!checked2230 && t >= t2230) {
+        checked2230 = true;
+        const k = SIM.kpis();
+        R();
+        if (!k.ghost || !num(k.ghost.autonomous) || !num(k.ghost.running) || !Array.isArray(k.ghost.stoppedIds) || k.ghost.running + k.ghost.stoppedIds.length !== k.ghost.autonomous) fail('night', `kpis().ghost at 22:30 malformed: ${short(k.ghost)}`, 'kghost');
+        const notIdle = [];
+        for (const mid of MACHINE_IDS_LIST) {
+          const m = S0.machines[mid]; R();
+          if (m.loading === 'auto' && m.setupDone && m.released) continue;
+          if (m.op && !(m.state === 'idle' && /^Keine Schicht – weiter /.test(m.cause)) && m.state !== 'fault') notIdle.push(`${mid} ${m.state} „${m.cause.slice(0, 70)}“`);
+        }
+        if (notIdle.length) fail('night', `at 22:30 machines without unattended run are not planned idle ('Keine Schicht – weiter …'): ${notIdle.slice(0, 3).join('; ')}`, 'noshift');
+        const open = S0.notifications.filter((n) => n.status !== 'resolved' && (n.sev === 'warn' || n.sev === 'crit'));
+        const mach = open.filter((n) => (n.entity && n.entity.kind === 'machine') || String(n.key).startsWith('ghost:'));
+        R();
+        if (mach.length > 4) fail('night', `${mach.length} machine-related warnings open at 22:30 (expected ≤ 4): ${mach.map((n) => n.key).join(', ')}`, 'warn2230');
+        note('night', `Mo 22:30: ${mach.length} machine-related warning(s) (${mach.map((n) => n.key).join(', ') || '–'}), ${open.length} warnings in total; kpis().ghost ${k.ghost ? k.ghost.running + '/' + k.ghost.autonomous + ' running, stopped ' + (k.ghost.stoppedIds.join(', ') || '–') : '–'}; oeeShift ${U3(k.oeeShift)}`);
+      }
+    }
+    // Verlust ohne Schicht nur für autonome Maschinen
+    for (const v of Object.values(lossNight)) { R(); if (v.to - v.from > 0.01) fail('night', `${v.mid} accrued ${(v.to - v.from).toFixed(2)} € loss off shift without an unattended run (states: ${[...v.state].slice(0, 2).join('; ')})`, 'nloss:' + v.mid); }
+    // geplante Zeit: Ursachen-Aufteilung = lossEur, plannedStateSec = planned
+    const S0 = st();
+    for (const mid of MACHINE_IDS_LIST) {
+      const m = S0.machines[mid], v = SIM.machineView(mid);
+      for (const kk of ['kd', 'ks']) {
+        const sx = m[kk]; R();
+        if (!sx.lossEurBy || !sx.plannedStateSec) { fail('night', `${mid}.${kk} without lossEurBy/plannedStateSec`, 'nshape'); continue; }
+        const sl = Object.values(sx.lossEurBy).reduce((a, b) => a + b, 0), sp = Object.values(sx.plannedStateSec).reduce((a, b) => a + b, 0);
+        if (Math.abs(sl - sx.lossEur) > 0.01) fail('night', `${mid}.${kk}: Σ lossEurBy ${sl.toFixed(2)} ≠ lossEur ${sx.lossEur.toFixed(2)}`, 'nsum:' + mid);
+        if (Math.abs(sp - sx.planned) > 0.5) fail('night', `${mid}.${kk}: Σ plannedStateSec ${sp} ≠ planned ${sx.planned}`, 'nplan:' + mid);
+        if (sx.plannedStateSec.running !== sx.run) fail('night', `${mid}.${kk}: plannedStateSec.running ${sx.plannedStateSec.running} ≠ run ${sx.run}`, 'nrun:' + mid);
+      }
+      R();
+      if (!v.plannedStateTimes || !v.lossByState) fail('night', `machineView(${mid}) without plannedStateTimes / lossByState`, 'nview');
+      if (m.loading !== 'auto' && m.ks.planned > 60 && tod(S0.t) < 6 * H) fail('night', `${mid} (not autonomous) shows ${m.ks.planned} s planned time in the ghost shift`, 'nks:' + mid);
+    }
+    if (seitBad.length) fail('night', `wait notification 'seit' is not the start of the current episode: ${seitBad[0]}`, 'seit');
+    // Meldungstexte kompakt; erledigte Warte-Meldungen tragen die abgeschlossene Episode im Titel
+    const longS = [], badB = [], badClosed = [];
+    for (const n of notes) {
+      if (!COMPACT.test(n.key)) continue;
+      R();
+      if (n.status === 'resolved') { if (n.key.startsWith('wait:') && !/\d\d:\d\d–\d\d:\d\d/.test(n.title)) badClosed.push(`${clk(n.t)} ${n.key} „${n.title}“`); continue; }
+      if (String(n.sugg || '').length > 190 || !/^Ursache: .+ Empfehlung: .+/.test(String(n.sugg || ''))) longS.push(`${n.key} (${String(n.sugg || '').length}): „${short(n.sugg)}“`);
+      if (/\n/.test(n.body || '') || String(n.body || '').length > 220) badB.push(`${n.key} (${String(n.body || '').length}): „${short(n.body)}“`);
+    }
+    if (longS.length) fail('night', `${longS.length} notification suggestion(s) not compact 'Ursache: … Empfehlung: …' ≤ 190: ${longS[0]}`, 'ncompact');
+    if (badB.length) fail('night', `${badB.length} notification body(ies) not one short line: ${badB[0]}`, 'nbody');
+    if (badClosed.length) fail('night', `resolved wait notification keeps the open-episode title: ${badClosed[0]}`, 'nclosed');
+    // genau ein Geisterschicht-Check je Abend, keine Einzelmeldungen 'ghost:<Maschine>'
+    const gIds = new Set(notes.filter((n) => n.key === 'ghost:check').map((n) => n.id));
+    R();
+    if (gIds.size !== 1) fail('night', `${gIds.size} Geisterschicht-Check notifications Mo→Di (expected exactly 1)`, 'gcount');
+    if (notes.some((n) => /^ghost:(?!check$)/.test(n.key))) fail('night', 'per-machine ghost:<id> notifications still raised', 'gper');
+    const gLast = [...notes].reverse().find((n) => n.key === 'ghost:check' && n.status !== 'resolved');
+    if (gLast) note('night', `Geisterschicht-Check (last text): „${gLast.title}“ · ${gLast.body} · ${gLast.sugg}`);
+    R();
+    const sawShare = blocked.sawStaffed ? blocked.saw / blocked.sawStaffed : 0;
+    if (sawShare > 0.05) fail('night', `saw M01 'blocked' ${U3(sawShare)} of staffed time (expected rare – cut ahead / switch orders instead)`, 'sawblk');
+    note('night', `saw M01 blocked ${(sawShare * 100).toFixed(1)} % of staffed minutes Mo–Di; ${notes.filter((n) => COMPACT.test(n.key) && n.status !== 'resolved').length} notification texts checked`);
+  } catch (e) { warn('load', `test suite error in night phase: ${errStr(e)}`); }
+  finally { offN(); }
+}
+
 // ------------------------------------------------------------------ Bericht
 function report(wallMs, simInfo) {
   const lines = [];
@@ -2308,6 +2430,7 @@ function main() {
   CUR = null;
   regressionPhase();
   reviewPhase();
+  nightPhase();
   if (!ARGS['no-week']) weekPhase(); else note('week', 'skipped (--no-week)');
   if (nonDet.random) warn('determinism', `engine called Math.random() ${nonDet.random}× during simulation/views (SPEC: seeded RNG only)`);
   if (nonDet.dateNow) note('determinism', `engine called Date.now() ${nonDet.dateNow}×`);

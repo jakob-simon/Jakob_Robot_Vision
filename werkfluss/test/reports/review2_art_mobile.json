@@ -1,0 +1,313 @@
+[
+ {
+  "summary": "I reviewed every view at 1440×900 and 1920×1080, scrolled to the bottom of each, plus all 7 detail drawers, the notification panel, Copilot, settings, the full 11-step tour and TV mode. Screenshots are in /tmp/rv-art-desktop/ and the build is /tmp/rv-art-desktop.html. Several modules (60_ai, 70_tour, 10_sim) were being edited during the review. I rebuilt and re-checked before reporting, and dropped issues that had already been fixed: the Copilot orderAdvice crash, the tour step 8 card squeezed to 300px, and truncated Copilot stat tiles.\n\nOverall the product already has a coherent dark style: ink-blue surfaces, Barlow Condensed headings and a strict set of state colours. The STRONGEST screens are the Aufträge list (order cards with the routing chain, clear Terminlage), Anbindung (gateway data-flow diagram plus level matrix), the Werkzeuge Wechselplan, the Material flow map and Halle 3D at 1920. They set the bar.\n\nThe WEAKEST 3 screens:\n1. **Analyse.** Generic, unfinished-looking charts. The hourly output chart is about 80% empty, energy bars use the accent cyan, and the loss heatmap legend is wrong.\n- Lift: make the loss chart the hero, add a shift forecast, and give the heatmap and charts a proper colour scale.\n2. **Personal.** The floor map looks like a wireframe, with unreadable person dots. 7 of 10 people read as idle, and several KPIs show 0.\n- Lift: reuse the Material map renderer, use readable avatars, and add a \"Betreut Maschine\" (tending a machine) state.\n3. **Plantafel (Aufträge → Gantt).** A 12-colour rainbow, a highlight-chip row clipped at the right edge, unlabeled blocks and cramped row headers.\n- Lift: neutral bars with colour only for the highlighted or at-risk order, and a scrollable chip row.\n\nAcross the product, it still feels like nine modules rather than one:\n- about 40 font sizes, including text under 10px in 9 modules\n- five card-title styles\n- KPI tiles 88–122px tall, with ad-hoc alert borders\n- five different routing-chain components\n- machine state colours reused for container states\n\nTwo issues are embarrassing in a demo:\n- In tour step 7 the fault toast covers the tour card's Zurück/Weiter buttons.\n- The same notification shows different times in the bell panel (08:20) and on the Leitstand and order detail panel (06:20).",
+  "findings": [
+   {
+    "severity": "high",
+    "file": "src/70_tour.js (+ src/20_app.js toast rule line ~299)",
+    "title": "Tour step 7 (Störung): fault toast lands on the tour card's Zurück/Weiter buttons; key payoff sentence truncated",
+    "evidence": "/tmp/rv-art-desktop/t7b-1.png: the critical toast 'Störung M04 WFL M80' (x 564–944, y≈805–880) overlaps the tour card (x 317–857), sitting on the button row. In the first frame (/tmp/rv-art-desktop/tour7-0.png) the toast is at x 1044–1424 over the drawer, and document.elementFromPoint at the centre of the 'Weiter' button returns the toast, not the button. The card body is clamped to 3 lines ('compact'), so the step's message ends 'Prognose für FA-24118: morgen 15:35 → morgen…', which cuts off the actual result.",
+    "fix": "While WF.tour.active, suppress ALL toasts (20_app.js:299 currently lets sev 'crit' through). The tour card already narrates the fault, and the bell badge still updates. Otherwise, render the crit message as an inline alert inside the tour card. In 70_tour.js, never line-clamp steps whose text carries the result: drop .compact for step 7, or put the result first ('FA-24118 bleibt morgen 15:35 – Puffer 25 min') in a bold first line. Also reserve a 96px bottom safe zone for the card so toasts and card never share a corner."
+   },
+   {
+    "severity": "high",
+    "file": "src/20_app.js",
+    "title": "Same notification shows different timestamps in the bell panel vs Leitstand / order drawer",
+    "evidence": "DOM check at sim 08:4x: bell panel 'WARNUNG 08:20 · Schichtleitung | Termin gefährdet: FA-24119'. Leitstand 'Jetzt wichtig' shows 'WARNUNG 06:20 · Schichtleitung' for the same notification, and the FA-24119 drawer also shows '06:20'. SPC trend M03: panel 08:39 vs Leitstand 08:37. Screenshot /tmp/rv-art-desktop/notif.png shows both side by side (panel over the Leitstand). Cause: 20_app.js:247 renders fmtClock(n.updatedT || n.t), while 40_leitstand.js and 41_orders.js render n.t. This breaks UI_GUIDE rule 2, 'Eine Wahrheit'.",
+    "fix": "Use one formatter everywhere, e.g. WF.ui.notifTime(n) → '06:20' plus, if updatedT − t > 60 s, a muted 'aktualisiert 08:20'. Use it in the 20_app.js panel, the 40_leitstand rail and the 41_orders drawer. Sort by updatedT but display the creation time first."
+   },
+   {
+    "severity": "high",
+    "file": "src/47_people.js",
+    "title": "Personal shows 7 of 10 people as 'Verfügbar · Wartet auf die nächste Aufgabe' while they tend running machines, so the plant looks idle or overstaffed",
+    "evidence": "/tmp/rv-art-desktop/s-personal-1.png at 08:54: Stefan Huber, Martina Gruber, Lukas Wagner, Mehmet Kaya and Florian Moser are all grey 'Verfügbar … Wartet auf die nächste Aufgabe' with 'keine Aufgabe'. KPI row (/tmp/rv-art-desktop/v-personal.png): 'Arbeiten gerade 2 / 10 · 7 verfügbar', 'Pause 0', 'Aufgaben ohne Person 0', 'Ø Auslastung 34 %'. Meanwhile the Leitstand tiles say 'Läuft autonom · M. Gruber' for M05/M06. The person drawer (/tmp/rv-art-desktop/d-person-P01.png) already has a 'Bereitschaft an der Maschine' state. A production manager will read this screen as 70% idle staff.",
+    "fix": "In the card/state mapping (labels at lines 23/35, activity text at 983/1368): if a person is idle, has no task and stands at one of p.machines that is running, show pill 'Betreut M05 · M06' (outline in --st-run, not grey). Activity line: 'Überwacht 2 Maschinen – nächster Eingriff ca. 09:21 (Werkzeugwechsel)'. Reserve grey 'Verfügbar' for people without a running machine. KPI row: replace 'Arbeiten gerade 2/10' with 'Im Einsatz 9 / 10 · 2 mit Aufgabe', drop the 'Pause 0' tile in favour of 'nächste Pause 09:00' in the shift strip, and rename 'Ø Auslastung' to 'Aufgabenzeit-Anteil'."
+   },
+   {
+    "severity": "medium",
+    "file": "src/43_analyse.js",
+    "title": "Weakest screen #1 – Analyse looks generic and unfinished next to Aufträge/Anbindung",
+    "evidence": "/tmp/rv-art-desktop/v-analyse.png, s-analyse-1.png, s-analyse-2.png:\n- (a) 'Ausstoß im Tagesverlauf' plots 06:00–22:00 but only 3 bars exist; about 80% of the 560×280 chart is an empty dotted grid, and the current hour is a heavy hatched bar taller than finished hours.\n- (b) 'Energie je Maschine heute' uses the accent/info cyan (--accent) for all 11 data bars; cyan means information flow and interaction elsewhere.\n- (c) The loss Pareto shows 'Erstteilprüfung' in cyan, which is not a state token.\n- (d) KPI 'Verlust heute 303 €' is the same number the Leitstand calls 'Stillstandskosten 300 € heute'.\n- (e) Nothing on this page has the visual 'hero' quality of the Material map or the Anbindung diagram.",
+    "fix": "Make the 'Wo verlieren wir Geld?' Pareto the full-width hero: 40px rows, € value 18px Barlow Condensed, cumulative % as a thin line, and recommendations beside it in the right column. Ausstoß: plot only elapsed shift hours plus planned output for the remaining hours as outline 'ghost' bars from the forecast, plus a cumulative line vs. target. The current hour is a solid bar with a 50% opacity top segment, not hatched. Energy: bars in neutral var(--text2) at 35% with the kWh/Teil value emphasised (that is the insight); use --st-wait only for machines above the plant median kWh/Teil. Use one name for the metric: 'Stillstandskosten' on both screens."
+   },
+   {
+    "severity": "medium",
+    "file": "src/43_analyse.js",
+    "title": "Verlustmatrix: legend says 'dunkler = mehr' but bigger values are brighter; uneven columns and stray underline bars",
+    "evidence": "/tmp/rv-art-desktop/s-analyse-1.png: Tiefbohren × Rüsten 80 € is bright cyan-blue, INDEX × Werkzeugwechsel 3 € is dark navy. matrixHtml() mixes color-mix(var(--accent) a*85%) with a = 0.12 + 0.7·sqrt(v/max), so more = brighter on the dark UI, yet the card header says 'dunkler = mehr' (line 254). Column widths range from about 90px (Rüsten, Störung) to about 190px (Werkzeugwechsel), so equal values look unequal. The 'Summe' column has 2px accent underlines floating under the numbers (td.sum i), which look like rendering glitches. The sqrt + 0.12 floor makes 3 € and 25 € look almost the same.",
+    "fix": "Change the copy to 'heller = mehr' (or remove it and add a 5-step legend swatch with € breaks). Use table-layout:fixed with equal cause columns (e.g. 1fr each, machine column 140px). Use a 5-step quantised ramp from --card2 to color-mix(--st-fault 70%) (losses are bad), with no sqrt. Replace the floating underline with a proper 6px bar column (track var(--track)) left of a right-aligned sum, like the OEE-je-Maschine card."
+   },
+   {
+    "severity": "medium",
+    "file": "src/47_people.js",
+    "title": "Weakest screen #2 – Personal 'Lageplan' looks like a wireframe compared with the Material flow map; person dots unreadable",
+    "evidence": "/tmp/rv-art-desktop/v-personal.png: flat green rectangles, large empty grey areas, person dots about 17px with initials rendered at fs(8.5) and an 'AB' legend dot at 7.5px (line 467). Initials are illegible at 1440, and Mehmet Kaya's dot 'MK' floats between stations. There are three different 2D hall maps in the product: Material (zones, dashed area labels, station chips), Personal (plain boxes) and Halle minimap (mono labels). Below the map, person cards have about 50px of dead space between the activity line and the location row (s-personal-1.png).",
+    "fix": "Extract the Material map renderer (45_material.js: zones, station chips with name and state dot) into WF.ui.hallMap and reuse it here and in the Halle minimap. Draw people as 22px avatars (10.5px initials, 2px state ring) with a name label on hover/focus, and the walking path as a 1.5px dashed --info line with an arrowhead. Show a count badge on stations with more than one person. Person cards: use a 3-row grid (header / activity / meta + utilisation strip) and align the meta row to the bottom so cards don't show a hole."
+   },
+   {
+    "severity": "medium",
+    "file": "src/41_orders.js",
+    "title": "Weakest screen #3 – Plantafel: rainbow noise, clipped highlight chips, unlabeled blocks, cramped row headers",
+    "evidence": "/tmp/rv-art-desktop/gantt.png and z-gantt.png (2×). Each bar is a translucent fill from 12 order hues (ORDER_HEX: olive, rust, maroon, teal…) with white text, so the board reads as muddy brown/olive. The 'Hervorheben' chip row has no overflow handling: scrollWidth equals clientWidth, so the 13th chip is cut mid-glyph at the right card edge. On the Säge row 4 of the 10 blocks are unlabeled hatched slivers. Row headers put 'Säge' about 6px below the row top and 'M01 Produktion' on the divider, so they are not vertically centred in the 35px row. Bar labels mix '24119' and 'FA-24138 · AG 10'. The permanent 44px hint banner 'Block antippen oder Auftrag oben wählen…' eats vertical space.",
+    "fix": "Default state: bars filled var(--card2) with a 1px var(--line2) stroke and a 3px left edge in the machine-state colour, with text in var(--text). Apply the order hue only to the hovered/pinned order (and to that order's material-flow connectors). Late and tight orders always get a 1.5px --st-fault / --st-wait outline. Make the chip row overflow-x:auto with a 32px right fade mask, or collapse it to '+N' after 10 chips. Vertically centre row headers (grid-template-rows: auto auto; align-content:center) with name 13px/600 and ID 10.5px mono. Use one label format: 'FA-24119 · AG 20' when it fits, '24119' otherwise, nothing under 28px wide. Move the hint into the legend line as muted 11.5px text."
+   },
+   {
+    "severity": "medium",
+    "file": "src/styles.css (+ all view modules)",
+    "title": "Typographic scale sprawl: about 40 font sizes, sub-10px text in 9 modules, five card-title styles",
+    "evidence": "grep of src/*.js and styles.css: sizes include 7.5, 8.5, 9, 9.5, 10, 10.5, 10.8, 11, 11.3, 11.5, 11.8, 12, 12.2, 12.3, 12.5, 12.8, 13, 13.5, 14, 14.5, 15, 15.5, 16, 17, 18 … 40px. Sub-10px text appears in 30_hall3d, 40_leitstand, 41_orders ('Kritisch' badge 8.5px), 42_machine, 45_material (9px gauge labels), 46_tools, 47_people (7.5px), 48_quality, 50_connect, 60_ai and 61_ki_auftrag. Measured card titles: Leitstand/Analyse/Qualität 13px Barlow 600; Werkzeuge 14px; Material 'Materialfluss heute'/'Transportaufträge' 15px; Material 'Rohmaterial' and Qualität 'Sperrlager' 13px Barlow Condensed; Anbindung 'Was jede Stufe…' 14px weight 400; and 'Werkzeugkosten heute', 'Ausschuss heute', 'Behälter im Umlauf' rendered as 10.5px uppercase eyebrows.",
+    "fix": "Add type tokens to :root and use them only: --fs-2xs 10.5 (eyebrow, uppercase .1em), --fs-xs 11.5 (meta), --fs-sm 12.5 (body-small/table), --fs-md 13.5 (body), --fs-lg 15 (card title), --fs-xl 19 (drawer/section display, condensed), --fs-2xl 26 (view title), --fs-kpi 28. Set the minimum to 10.5px (SVG labels included). Define .card-h h3 once (15px/600 Barlow, subtitle 12px muted inline) and replace all module-specific title styles; eyebrows are never card titles."
+   },
+   {
+    "severity": "medium",
+    "file": "src/styles.css (+ 41_orders, 43_analyse, 45_material, 46_tools, 48_quality)",
+    "title": "KPI tiles differ per view (height, value/unit treatment, alert borders): the main 'one product, not nine' break",
+    "evidence": "Compare /tmp/rv-art-desktop/v-analyse.png (tiles about 88px, single line), v-auftraege.png (about 122px; 'Terminlage' crams three numbers and IDs into one tile), z-qa-kpis.png (values with bullets '4 Stk • ≈ 44 €', '1 i.O. • 0 n.i.O.'), v-werkzeuge.png (micro bar charts beside values) and v-material.png ('Offene Transporte' with a full amber border; Qualität 'SPC-Warnungen' with a red-tinted fill and border). The alert rule is undefined: Material uses an amber border for 4 waiting transports, Qualität tints red while showing '0 offen'.",
+    "fix": "One .kpi anatomy in styles.css: label (eyebrow) / value 28px plus unit 15px muted / sub max 2 lines / optional viz slot 24px high, bottom-aligned, with a fixed min-height of 104px. Alert state only via .kpi.warn / .kpi.crit, which adds a 2px top stripe in the state colour and colours the value. No full borders, no tinted backgrounds, never on a 0 value. Allow at most 2 values per tile (Terminlage → split into 'Im Plan 22' plus a 'Gefährdet 3' tile listing the order IDs)."
+   },
+   {
+    "severity": "medium",
+    "file": "src/45_material.js (+ 46_tools.js, 43_analyse.js, styles.css)",
+    "title": "State colours reused with different meanings (containers, Fremdbearbeitung, energy), which weakens the semantic palette",
+    "evidence": "/tmp/rv-art-desktop/s-material-3.png 'Behälter im Umlauf' legend: 'Wird befüllt' = cyan (--info/accent), 'Abholbereit' = amber (--st-wait), 'Unterwegs' = orange (--mat), 'Im Eingang' = green (--st-run), 'In Fremdbearbeitung' = purple (--st-tool). Purple means 'Werkzeugwechsel' on every machine pill and green means 'Produktion', so a green square next to a container reads as 'producing'. The Material flow map draws 'Härterei Wolf' in purple too. Analyse uses cyan for energy data bars and the Erstteilprüfung loss bar.",
+    "fix": "Add --ext (e.g. #c084fc → choose a distinct magenta/rose such as #f472b6) for Fremdbearbeitung/Härterei across 41/45/48. Encode container lifecycle in the material family: Wird befüllt = --mat outline, Abholbereit = --mat solid, Unterwegs = --mat with a moving dot, Im Eingang = neutral --text2. Keep --st-* for machine/person state only and --accent/--info for interaction and data flow. Document this in UI_GUIDE rule 4."
+   },
+   {
+    "severity": "medium",
+    "file": "src/41_orders.js (+ 42_machine.js, 45_material.js container drawer, 60_ai.js)",
+    "title": "Five different routing-chain components; order-drawer chain wraps with orphan arrows",
+    "evidence": "Arbeitsplan/routing appears as:\n- (1) order list cards with dashed future steps and arrows (v-auftraege.png)\n- (2) order drawer pills with '→' that wrap into 3 rows, the last row starting with an orphan arrow '→ 80 Versand' (d-order-FA-24119.png)\n- (3) machine drawer mono chips '✓ M01 › M04 › M07 › Extern › M09 › QS › Versand' (h-select.png)\n- (4) container drawer boxes with chevrons 'AG 10 Citizen L20 › AG 20 …' (d-container-BH-0002.png)\n- (5) Copilot vertical stepper (cp-order.png)\nThe material and information flow, the core story, looks different everywhere.",
+    "fix": "Create WF.ui.route(ops, {mode:'row'|'stack', current}) in 41_orders (owner) and reuse it. Row mode (≥ 640px): equal-width step cells (AG no. 10.5px mono, station 12.5px/600, status line 11.5px), a 16px connector drawn as ::before of the next cell (so no orphan arrows on wrap), and the current step in solid --st-run tint. Stack mode for drawers ≤ 480px: the vertical stepper already used in the order drawer body and Copilot. Replace variants 2–4 with it."
+   },
+   {
+    "severity": "medium",
+    "file": "src/30_hall3d.js",
+    "title": "Halle 3D at 1440: default camera crops the flow endpoints; flow arcs faint; labels collide",
+    "evidence": "/tmp/rv-art-desktop/tour-03.png and h-legend.png (1440×900): the 'Übersicht' camera cuts off the front of the hall. Versand, Wareneingang/Fremdbearbeitung gates and the van are partly off-screen at the bottom/right, so the material flow has no visible start or end. HUD (290×210) and Hallenplan (290×215) cover the left 20% of the scene. At 1920 (w-halle.png) everything fits. Material (orange) and data (cyan) arcs are about 1px and low-contrast on the light grey floor (h-crop1.png), so the 'felt connection' is weak. M10/M11 'Bereit' label chips overlap each other and the M09 label (h-crop1.png), and collision culling leaves some machines with a bare 'M01'/'M03' chip while neighbours show name plus count.",
+    "fix": "Fit the overview camera to the hall bounding box inside the free viewport (canvas rect minus HUD/minimap insets, e.g. left 300px, bottom 16px), recomputed on resize; at 1440 that needs about 8–10% more distance or a 3° steeper pitch. Render flows as screen-space 2.5–3px lines (Line2/LineMaterial) with moving 6px particles in --mat/--info, darken the floor slab about 15% so they read, and fade non-selected flows to 30% when an order is followed. Label collisions: use one compact label format 'M10 · Bereit', and on overlap stack offset vertically with a leader line instead of dropping content."
+   },
+   {
+    "severity": "medium",
+    "file": "src/20_app.js (+ src/40_leitstand.js)",
+    "title": "TV mode keeps desktop chrome and desk-size type: not legible from the hall floor",
+    "evidence": "/tmp/rv-art-desktop/w-tv.png (1920×1080): the top bar still shows the speed control (Pause/10×/30×/120×/600×), Tour, Copilot and Settings. Tile body text is 13px, meta rows ('Eingang ▮▮▮ 3/3 › Ausgang') 11px, and the 'Gerade passiert' rail 12px with ellipses. Machine names are 22px. From 3–5 m only the KPI numbers are readable. The 'TV-Modus beenden' button floats over the status strip at the bottom left.",
+    "fix": "In .app.tv hide .speed, #t-tour, .btn-ai, #t-settings, .shift-chip and keep brand + clock (clock 32px). In .ls-root.ls-tv scale tile type to name 28px, part line 18px, 'Teil n von m' 20px, meta 14px, KPI values 44px. Drop the 'Gerade passiert' rail in TV and give 'Jetzt wichtig' the full right column at 16px. Put 'TV-Modus beenden' in the top bar (auto-hide after 3 s without mouse movement)."
+   },
+   {
+    "severity": "medium",
+    "file": "src/70_tour.js",
+    "title": "Tour opening card has no scrim and half-covers the KPI row; hero tiles unbalanced",
+    "evidence": "/tmp/rv-art-desktop/tour-00.png: the centred welcome card sits over the Leitstand without dimming the page; the KPI values '35 Stk', '96 %', '300 €' are sliced through by the card's top edge, which looks like a z-index bug. In the three hero tiles the first caption ('Stationen bei Donau Präzisionstechnik GmbH live – auch eine Maschine von 1998') runs to 5 lines while the others take 2–3, so the tiles are ragged.",
+    "fix": "For .tour-card.center add a full-screen scrim (position:fixed; inset:0; background:rgba(4,8,16,.62); backdrop-filter:blur(3px); z-index:64) and fade it out on step 2. Hero captions max 2 lines: '11 / 13 – Stationen live, auch Baujahr 1998' / '300 € – Stillstand heute, mit Ursache' / 'FA-24119 – Verzug erkannt, bevor der Kunde anruft'. Hero tiles: align-items:start, value 30px."
+   },
+   {
+    "severity": "medium",
+    "file": "src/46_tools.js",
+    "title": "Werkzeuge table truncates exactly the information that matters (time of next change)",
+    "evidence": "/tmp/rv-art-desktop/s-werkzeuge-1.png 'Werkzeuge in den Maschinen': the 'Nächster Wechsel' cell reads 'Schneide wenden nach Teil 227 · ca. 08…'. The clock time is cut, while the column next to it ('Eingebaut') has spare width. The tool subtitle 'Wendeschneidplatte · Schneide 1/2 · 1,4 min/Tei…' is truncated too. 'Planung in ca…' cells also end in an ellipsis.",
+    "fix": "Put the time first and bold: '08:56 · nach Teil 227', with the action ('Schneide wenden', 'Einrichter:in losgeschickt') on a second 11.5px muted line, white-space:normal. Rebalance columns: Werkzeug 26%, Verschleiß 16%, Reststandzeit 12%, Status 11%, Nächster Wechsel 23%, Eingebaut 7%, Gefertigt 5%. Drop the min/Teil from the subtitle (it's in the detail drawer)."
+   },
+   {
+    "severity": "low",
+    "file": "src/60_ai.js",
+    "title": "Copilot prose is cluttered by bordered entity pills; step count disagrees with order drawer",
+    "evidence": "/tmp/rv-art-desktop/cp-order.png 'Warum verspätet': each bullet carries 2–3 bordered pills with status dots ('• M02', '• FA-24138'), so line heights are jagged and the eye jumps between pills instead of reading. The stat strip says 'Fortschritt 1 % · 1 von 7 Arbeitsgängen' while the order drawer says '1 von 8 Schritten fertig' (Versand counted).",
+    "fix": "Render inline entity references as text links: mono 0.95em, var(--text), 1px dotted underline in --accent, and a 6px state dot before the text only for machines. No border or background, so line-height stays 1.55. Keep bordered pills for the stat strip and follow-up chips. Count steps the same way as 41_orders (either both include Versand or both exclude it; recommended: '1 von 7 Arbeitsgängen' in both)."
+   },
+   {
+    "severity": "low",
+    "file": "src/30_hall3d.js",
+    "title": "Hallenplan minimap labels clipped and too small",
+    "evidence": "/tmp/rv-art-desktop/h-mini-2x.png (2× upscale of the 1440 view): 'M13' renders as ''13' (the first glyph is cut by the box), the 'M08' label overflows its box edge, M06/M10/M11 labels are about 9px mono on boxes narrower than the text, and the AGV/person dots overlap labels.",
+    "fix": "Auto-fit: if the measured text width is more than the box width minus 4px, render only the number ('13') or put the label below the box. Minimum label size 10px; use the machine short name on hover. Draw dots on a layer under labels (or offset labels upward by 2px with a --bg2 halo: paint-order:stroke; stroke:var(--bg2); stroke-width:3px)."
+   },
+   {
+    "severity": "low",
+    "file": "src/40_leitstand.js",
+    "title": "Machine-tile state band reads as a rendering glitch (one third empty, no label, clipped by radius)",
+    "evidence": "/tmp/rv-art-desktop/z-ls-tile.png: the 5px multi-colour strip at the bottom edge of each tile starts about 33% in (the 4 h window reaches before the 06:00 sim start, so there is no data) and is clipped by the tile's rounded corners. Its only explanation is a title tooltip ('Zustände … letzte 4 h').",
+    "fix": "Inset the band inside the card padding (margin 8px 0 0, 4px high, radius 2px, track var(--track)). Start the window at max(now−4h, shift start) so it is always full, add 10px tick labels '06:00' and 'jetzt' on hover/focus, or drop it from the tile (the drawer already has a labelled timeline)."
+   },
+   {
+    "severity": "low",
+    "file": "src/48_quality.js",
+    "title": "Qualität: 'SPC-Warnungen' tile is red while showing '0 offen'; Erstteilprüfungen card leaves a dead hole",
+    "evidence": "/tmp/rv-art-desktop/v-qualitaet.png: the KPI tile has a red-tinted fill and border with a big red '0 offen' (the red comes from Cpk 0,64 in the sub-line). /tmp/rv-art-desktop/s-qualitaet-1.png: the 'Erstteilprüfungen' card has one row, leaving about 120px of empty canvas beside the taller Ausschuss/Sperrlager column before the Messprotokoll starts.",
+    "fix": "KPI: '0' in var(--text), and colour only the sub-line 'M03 Ø 8 h6 Cpk 0,64 – nicht fähig' in --st-fault, using the 2px top-stripe alert rule from the KPI finding. Layout: put Ersteilprüfungen and Messprotokoll in one left column with Ausschuss and Sperrlager stacked right (grid-template-columns: 1fr 360px; align-items:start), or show the last 5 FPIs (including yesterday) so the card isn't a single row."
+   },
+   {
+    "severity": "low",
+    "file": "src/20_app.js",
+    "title": "Settings modal: destructive 'Simulation neu starten' has the same visual weight as 'Speichern'; no cancel",
+    "evidence": "/tmp/rv-art-desktop/settings.png: footer shows a red-outlined 'Simulation neu starten' directly next to the primary 'Speichern', right-aligned together. There is no 'Abbrechen' button (only the × in the header).",
+    "fix": "Footer: 'Simulation neu starten' as .btn.ghost.danger aligned left (margin-right:auto), then 'Abbrechen' (.btn.ghost) plus 'Speichern' (.btn.primary) on the right. Ask for confirmation on restart ('Alle Live-Daten seit 06:00 werden zurückgesetzt')."
+   },
+   {
+    "severity": "low",
+    "file": "src/46_tools.js",
+    "title": "Tool drawer: degenerate 'Standzeit je Teil' chart and misaligned header stat",
+    "evidence": "/tmp/rv-art-desktop/d-tool-WZ-0004.png: 'Standzeit je Teil' is one full-width purple bar labelled '0 %' … '100 % von 100 %', which carries no information for an insert that made 3 parts. The header pairs a 40px '100 % beim Ausbau' with a 15px '3 Teile' block that sits on a different baseline.",
+    "fix": "Show the chart only when the tool made at least 5 parts. Otherwise show a 3-cell stat row (Teile 3 · Standzeit genutzt 60/60 min · Verbleib 'gewendet → Schneide 2/4'). Align the header: value 28px plus label 11.5px muted in two equal columns, baseline-aligned."
+   },
+   {
+    "severity": "low",
+    "file": "src/47_people.js",
+    "title": "Person drawer: two eyebrows stacked with nothing between ('QUALIFIKATIONEN' / 'TÄTIGKEITEN')",
+    "evidence": "/tmp/rv-art-desktop/d-person-P01.png (Stefan Huber): 'QUALIFIKATIONEN' is immediately followed by 'TÄTIGKEITEN' because the machine qualification list is empty, giving a broken-looking two-level heading.",
+    "fix": "Use one section 'Qualifikationen' with sub-labels inline ('Maschinen: –' in muted text when empty, then 'Tätigkeiten:' plus chips), or hide the empty sub-group and promote 'Tätigkeiten' to the section heading."
+   }
+  ]
+ },
+ {
+  "summary": "I reviewed werkfluss on phone (400×860), tablet portrait (768×1024) and tablet landscape (1024×768), plus spot checks at 360, 820 and 912 px. All runs used touch emulation (isMobile, hasTouch, pointer: coarse) on a copy built at /tmp/rv-mobile.html. I rebuilt once mid-review because 10_sim.js, 60_ai.js and 05_profile.js were changing, and re-checked every finding below on the latest build. Coverage: every view, all 7 drawer kinds, Copilot (ask, answer, with drawer), notifications, settings, the 11-step tour on all three sizes, Plantafel, TV mode, KI-Auftrag (analyse, zoom, einlasten), the Anbindung wizard (all 5 steps), \"Störung simulieren\", and the 3D hall (mobile bottom bar and sheets, label taps, \"In der Halle verfolgen\"/\"zeigen\"). Screenshots are in /tmp/rv-mobile/ (screenshots from the earlier review round were moved to /tmp/rv-mobile-prev/).\n\nSince the last round: the page no longer scrolls sideways at any tested width (360/400/768/820/912/1024). \"In der Halle verfolgen\" now closes the drawer on phone and tablet portrait. TV mode renders at 768. The Materialfluss diagram and the Plantafel are readable on phone. KI-Auftrag \"Vergrößern\" works on phone. The Copilot now covers the drawer flush (no 40 px sliver). There were no console errors on the latest build. One transient Copilot error (\"orderAdvice is not defined\") was already fixed in source when I rebuilt.\n\nThe main remaining problems:\n1. The 3D hall at tablet sizes when a machine or order is selected: overlays pile up and run off-screen, and the hall shows mouse instructions on touch devices.\n2. The demo tour on tablets and phones: the card is squeezed off-screen next to the drawer, and the highlighted element is off-screen or hidden under the card.\n3. Module CSS overrides the global touch rules, so many primary buttons are 26–32 px tall and inputs stay under 16 px (iPhone Safari zooms in when they get focus).\n4. Several key texts are cut on phone: wear % in the tool history shows \"9\" instead of \"96 %\", due dates in order cards, the next-tool-change hero, and Material's top status strip.\n5. Layout gaps at 768–1024 px: unlabeled icon sidebar, Anbindung list, Analyse loss matrix, TV-mode overlap.",
+  "findings": [
+   {
+    "severity": "high",
+    "file": "src/30_hall3d.js",
+    "title": "Hall overlays collide and run off-screen when a drawer is open on tablets",
+    "evidence": "At 768×1024, select M04 in the hall: drawer at x 288–768, but the hall stays in desktop layout (class 'h3-root narrow', not 'm'). The toolbar sits at x=-37…274, partly off-screen and on top of the status panel (14…302). The status panel (288 px wide) and the minimap (14…302, y 797–1010) fill the whole 288 px of remaining 3D area, and the mouse hint is cut off ('…Rechte Maustaste verschieben · Ma'). At 1024×768 with the drawer open, the toolbar (219…530) covers the status panel (80…368, both at y=72), and the order selection bar is cut by the drawer. Screenshots: /tmp/rv-mobile/hallsel-tab.png, /tmp/rv-mobile/follow-land.png, /tmp/rv-mobile/follow-land-machine.png. Cause: resize() decides mobile mode from the full canvas width (`const mob = w <= 640`). syncDrawer() only toggles 'narrow'.",
+    "fix": "Base the compact layout on the width actually left over: in resize() and syncDrawer() use `const avail = R.w - (R.drawerW||0)`, set `R.root.classList.toggle('m', avail <= 640)` (compact status line, bottom bar, no toolbar or minimap). Also add `nomap` when avail < 900. As a safety net, clamp the toolbar so it never overlaps the status panel: if the toolbar's left edge < status right + 8, move it to `top: calc(14px + statusHeight + 8px)`. Alternative for viewports ≤ 1024: in the hall call WF.app.hideDrawer() on select and show the existing selection bar with an 'Details' button, as phone does."
+   },
+   {
+    "severity": "high",
+    "file": "src/70_tour.js",
+    "title": "Tablet portrait: tour card squeezed into 288 px beside the drawer, partly off-screen",
+    "evidence": "At 768×1024, steps 3 ('Jede Maschine erklärt sich selbst'), 7 (Störung) and 8 (Copilot) put the card at x=-6…294. The left edge is cut off, the step label wraps over 3 lines ('DEMO- / TOUR / · 3 / 11'), and the close X sits outside the card's top-right corner. Screenshots: /tmp/rv-mobile/tour-tab-02.png, /tmp/rv-mobile/tour-tab-07.png. Cause: in placeCard(), `const w = Math.max(300, Math.min(..., avail))` with avail = 288 − 32 = 256 gives w = 300 and x = 16 + (256 − 300)/2 = −6.",
+    "fix": "In placeCard(): if `avail < 420`, don't dock beside the panel. Instead use the full-width bottom placement (left:16px; right:16px; width:auto, like the <700 px branch) over the drawer, and scroll the drawer so its ring target sits above the card (see the ring finding). Never allow `w > avail` or `x < 8` (`x = Math.max(8, …)`). Also add `.tour-step{white-space:nowrap}` for all widths, not only ≤560 px."
+   },
+   {
+    "severity": "high",
+    "file": "src/46_tools.js",
+    "title": "Phone: Wechselhistorie cuts tool names to 'M.' and wear % to '9'",
+    "evidence": "On 400×860, in Werkzeuge → Wechselhistorie, the tool name cell is 74 px wide ('WSP CNMG …', 'Abstechpla…') and only 12 px for 'Mikro-Drehwerkzeug VCGT 1103', which shows as 'M.'. The wear bar column is just as narrow, so '96 %' is clipped to '9', '85 %' to '8' and '92 %' to an empty bar. This reads as wrong data. Screenshot: /tmp/rv-mobile/phone-wz-history.png. Cause (line ~877): the container query sets `.tl-hx{grid-template-columns:minmax(0,1fr) auto; grid-template-areas:\"n c\" \"w d\"}`. The long detail text `.tl-hd` ('Rest 2 Teile · verschrottet (alle 2 Schneiden verbraucht) · 11 €') sizes the auto column and squeezes column 1.",
+    "fix": "Give the detail its own full-width row: `grid-template-areas:\"n c\" \"w w\" \"d d\"`, set `.tl-hx .tl-hd{justify-self:start;white-space:normal}` and `.tl-hx .tl-hw{min-width:140px}`. Then the name, chip and wear stay readable and the cost (e.g. '11 €') is no longer cut either."
+   },
+   {
+    "severity": "high",
+    "file": "src/70_tour.js",
+    "title": "Tour highlights an element that is off-screen or hidden under the card",
+    "evidence": "Step 3 rings the drawer's tool section (`.drawer.open .md-tools`), but placeRing() never scrolls it into view. The ring lands at y 754–1339 on 1024-high portrait and at 705–1290 on 768-high landscape, and on phone it sits under the card (card y 577–842). The screen is dimmed by the 9999 px shadow while the text refers to 'VHM-Schaftfräser Ø10 Z4: noch 2 Teile', which nobody can see. Step 6 (Werkzeuge) on phone: the card covers the whole lower half, including the Wechselplan it describes. Screenshots: /tmp/rv-mobile/tour-land-02.png, /tmp/rv-mobile/tour-phone-02.png, /tmp/rv-mobile/tour-phone-05.png.",
+    "fix": "In placeRing(sel), before measuring, scroll the target's scroll container (`target.closest('.drawer-b, .view')`) so the target starts just under the header: `cont.scrollTop += r.top - cont.getBoundingClientRect().top - 12`. Do this after render() so the card height is known, and keep the target's bottom above `card.getBoundingClientRect().top - 12`. Re-place the ring on the container's scroll event and on resize. On viewports < 700 px make every ringed step compact (3-line clamp + 'Mehr anzeigen') so the card stays about 180 px tall."
+   },
+   {
+    "severity": "medium",
+    "file": "src/styles.css",
+    "title": "Tap targets under 40 px on touch: module CSS overrides the coarse-pointer rule",
+    "evidence": "With pointer: coarse matched, the global rule `.btn.sm{height:36px}` loses to module rules. Measured: Leitstand 'Jetzt wichtig' actions ('Korrektur übernehmen', 'Quittieren', 'Auftrag öffnen') 26 px (40_leitstand `.ls-n-a .btn.sm{height:26px}`). Section jump nav 32 px, status filters ('12 Produktion' …) 28 px. Machine drawer 'In der Halle zeigen' / 'Störung simulieren' and order drawer 'In der Halle verfolgen' / 'Arbeitsgang verlagern' 30 px (`.md-acts .btn`, `.or-acts .btn{height:30px}`). Order filter chips 30 px, prio button 32×32, tool filters 28 px, hall toolbar chips 28×30, hall machine labels 42×18, Copilot follow-up chips 28 px, Copilot copy button 24×22. Screenshots: /tmp/rv-mobile/full-phone-leitstand-0.png, /tmp/rv-mobile/drawer-phone-machine.png.",
+    "fix": "In styles.css, make the touch minimums win: `@media (pointer:coarse){ .btn,.btn.sm{min-height:40px !important} .seg button,.ls-jump button,.ls-sum button,.or-fchip,.tl-filt button,.ai-sug button{min-height:40px} .or-prio,.icon-btn{min-width:40px;min-height:40px} }`. Add a matching block in 40/41/42 (`.ls-n-a .btn.sm`, `.md-acts .btn`, `.or-acts .btn` → 40 px under pointer:coarse). In 30_hall3d enlarge the label hit area on touch: `.h3-lb::before{content:'';position:absolute;inset:-11px -6px}`."
+   },
+   {
+    "severity": "medium",
+    "file": "src/styles.css",
+    "title": "Inputs under 16 px on phone: iOS Safari zooms in when the Copilot input gets focus",
+    "evidence": "Computed font sizes on 400×860 with pointer: coarse: Copilot textarea 13.5px (60_ai `.ai-comp textarea{font:400 13.5px…}`), Aufträge search 13px (`.or-search input`), Qualität SPC select 12.5px, Werkzeuge example select 12.5px. The global `input,select,textarea{font-size:16px}` coarse-pointer rule is overridden. On iPhone, tapping the Copilot input (demo step 4) zooms the whole page and breaks the layout until the user pinches back.",
+    "fix": "Use `@media (pointer:coarse){ input,select,textarea,.input{font-size:16px !important} }` in styles.css. Or set 16px explicitly in .ai-comp textarea, .or-search input, .qa-spc-ctl select and #tl-expick under pointer:coarse."
+   },
+   {
+    "severity": "medium",
+    "file": "src/30_hall3d.js",
+    "title": "Touch devices get mouse instructions in the hall; phone gets no gesture hint at all",
+    "evidence": "On tablet portrait and landscape (touch) the hint reads 'Ziehen drehen · Rechte Maustaste verschieben · Mausrad zoomen · Klick Details · Doppelklick heranholen'. At 768 px it is cut off (right edge 794 > 768). On phone the hint is hidden (`.h3-root.m .h3-hint{display:none}`), so nothing explains one-finger rotate / two-finger zoom (OrbitControls touches ONE: ROTATE, TWO: DOLLY_PAN). The minimap caption 'Klick: Maschine · Ziehen: Ausschnitt' is also mouse wording. Screenshots: /tmp/rv-mobile/tab-halle.png, /tmp/rv-mobile/land-halle.png, /tmp/rv-mobile/phone-halle.png.",
+    "fix": "In the ui.hint creation (line ~2911): `const touch = matchMedia('(pointer: coarse)').matches`. If touch, use '<b>Wischen</b> drehen · <b>Zwei Finger</b> zoomen & verschieben · <b>Tippen</b> Details · <b>Doppeltippen</b> heranholen' and 'Tippen: Maschine · Ziehen: Ausschnitt' for the minimap. Show the hint on phone too, above the bottom bar (`.h3-root.m .h3-hint{display:block;bottom:62px}`), with auto-fade after about 6 s. Add `max-width:calc(100% - 28px - var(--dw,0px)); white-space:normal; text-align:center` so it never clips."
+   },
+   {
+    "severity": "medium",
+    "file": "src/30_hall3d.js",
+    "title": "Phone route view: big route cards pile up, and the bottleneck step AG 50 is hidden",
+    "evidence": "Phone, FA-24118 → 'In der Halle verfolgen' (and tour step 5): six 2-line route cards (about 180×40 px each) cover most of the hall and the stations they belong to. AG 60 and AG 40 touch and overlap visually, and the step numbers are hidden under the cards. AG 50 'Rundschleifen Lagersitze' (M09) is culled (class 'h3-lb rt off', opacity 0). That is the step the order drawer names as the bottleneck ('Durchlauf begrenzt durch M09 Studer S33 (AG 50)'). Screenshots: /tmp/rv-mobile/route-phone.png, /tmp/rv-mobile/follow-phone.png, /tmp/rv-mobile/tour-phone-04.png.",
+    "fix": "When R.mobile is set, render route labels compact: the number badge plus the station short name on one line ('5 M09', with ✓ when done), and drop the second line (`.h3-root.m .h3-lb.rt .s{display:none}`). In the collision culling, give priority to the active step and the bottleneck step so they are never set 'off'. Put the full step list (AG, station, status, qty) in the sheet opened by 'Route zeigen'."
+   },
+   {
+    "severity": "medium",
+    "file": "src/30_hall3d.js",
+    "title": "Tablet hall: layer toggles are unlabeled 28 px coloured dots; minimap labels 8.8 px",
+    "evidence": "At 768 and 1024 (both 'narrow'), the toolbar shows four coloured circles (orange/blue/green/white) with no text: Materialfluss, Datenfluss, Personen, Beschriftung. The meaning is only in `title`, which touch devices never show. Each toggle is 28×30 px. Minimap station labels render at 8.8 px effective and M06/M09/M10/M11 crowd each other. Screenshots: /tmp/rv-mobile/tab-halle.png, /tmp/rv-mobile/land-halle.png.",
+    "fix": "In narrow mode keep short labels instead of hiding them (`.h3-root.narrow .h3-tb .h3-chip span{display:inline;font-size:11px}` with texts 'Material', 'Daten', 'Personen', 'Text'). If space is short, drop the camera-preset label rather than the layer names. Make chips at least 36×36 under pointer:coarse. Hide the minimap when the free width is < 900 px, or raise its text to 2.8 viewBox units (≥ 11 px effective)."
+   },
+   {
+    "severity": "medium",
+    "file": "src/41_orders.js",
+    "title": "Order cards cut the due date and customer name on phone and tablet landscape",
+    "evidence": "`.or-dates b` is white-space:nowrap with ellipsis. Due dates show as 'nächste Woche Mo…' on phone (115/136 px) and 1024 landscape (126/136 px), so the delivery time is missing. On phone `.or-ident` is only 143 px wide, so 'Donau Verpackungstec…' and 'Kärntner Antriebstechn…' are cut while the rest of the card row is empty. Screenshots: /tmp/rv-mobile/phone-or-nextweek.png, /tmp/rv-mobile/full-phone-auftraege-0.png.",
+    "fix": "Use a compact due format in cards ('Mo 26.10. 10:00', or 'nä. Mo 10:00' via an fmtDue short option) and allow wrapping as a fallback (`.or-dates b{white-space:normal}`). At ≤560 px use grid areas \"id pill\" \"cust cust\" \"part part\" so customer and part span the full card width."
+   },
+   {
+    "severity": "medium",
+    "file": "src/46_tools.js",
+    "title": "Phone: the 'Nächster Wechsel' hero is cut on all three lines, and its subline contradicts itself",
+    "evidence": "At the top of Werkzeuge on 400 px: eyebrow 'Nächster Wechsel · voraussichtlich · nac…' (260/302 px), title 'Citizen L20 (M03) · Mikro-Drehwerkzeug VC…' (260/285), subline 'noch nicht angekündigt · Schneide wenden · angek…' (260/350). The full subline is 'noch nicht angekündigt · … · angekündigt: 09:21 an M05', which says 'not announced' and 'announced' in the same breath. Screenshot: /tmp/rv-mobile/phone-werkzeuge.png.",
+    "fix": "At ≤560 px: `.tl-next .eyebrow,.tl-next b,.tl-next small{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}`. Rephrase the subline as 'Noch nicht angekündigt · Schneide wenden an der Maschine', and show the other machine's change separately as 'Nächste Ankündigung: 09:21 an M05'."
+   },
+   {
+    "severity": "medium",
+    "file": "src/43_analyse.js",
+    "title": "Verlustmatrix on phone/tablet: biggest cause and 'Summe' are off-screen; columns not sorted",
+    "evidence": "matrixHtml() keeps the fixed LOSS order: 'Wart. Material' (7 €) first, 'Wart. Bediener' second, 'Rüsten' (160 €, the biggest loss in the Pareto above) third. On phone the scroll area is 758 px for 334 px visible, so the visible part is mostly '·' cells. On 768 px the 'Summe' column is cut at the right edge. Machine names scroll away when you swipe sideways. Screenshots: /tmp/rv-mobile/full-phone-analyse-1.png, /tmp/rv-mobile/full-tab-analyse-1.png.",
+    "fix": "Sort `used` by column total, descending, so the order matches the Pareto: `used.sort((a,b)=>sum(b)-sum(a))`. Make the machine column sticky (`.an-matrix th.m,.an-matrix td.m{position:sticky;left:0;background:var(--card);z-index:1}`). At ≤760 px move 'Summe' to the second column (or make it sticky at right:0)."
+   },
+   {
+    "severity": "medium",
+    "file": "src/50_connect.js",
+    "title": "Anbindung list at tablet portrait: live-signal text cut off",
+    "evidence": "At 768 px the list container is about 730 px, so the 5-column grid from `@container (max-width:889px)` applies. Path, live signal and metadata are cut: 'Nachrüst-Sensorik (St…', 'Automatik · 2.412 1/min · L…', 'Signalsäule grün · Laufzeit h…', 'O8970_FA24138_OP10 · Zähl…'. The live data is the point of this page. On phone the stacked cards (≤699 px) read well. Screenshot: /tmp/rv-mobile/tab-cn-list.png.",
+    "fix": "Raise the stacked-card container query from `max-width:699px` to `max-width:799px`. Or add a 2-row layout for 700–889 px: row 1 = machine | path | level | action, row 2 = live signal across the full width (`grid-template-areas:\"m p lv act\" \"live live live live\"`)."
+   },
+   {
+    "severity": "medium",
+    "file": "src/45_material.js",
+    "title": "Phone: the top status strip is cut off and the page is about 10 screens long",
+    "evidence": "The status strip at the top (Logistik / Fremdbearbeitung / Wareneingang) uses 128 px cells with ellipsis: 'nächste Lieferung 1…', 'Härterei Wolf · zurück a…', 'Entnimmt Stangen Ti6Al4V ELI Ø10 h9 im Kragarmrega…', '45,0 m 1.4404 Ø12 h9 · +4…'. The view is 8,620 px tall on phone. 'Behälter im Umlauf' alone is about 3,500 px (every container of every station listed) and each raw material takes about 240 px. Screenshots: /tmp/rv-mobile/phone-material.png, /tmp/rv-mobile/full-phone-material-3.png … -5.png.",
+    "fix": "At ≤560 px stack the status strip in one column with a 2-line clamp instead of a one-line ellipsis. Collapse 'Behälter im Umlauf' into one summary line per station ('INDEX G220 · Eingang 3/3 · Ausgang 1/3 · 99 Stk'), expandable on tap, with an expanded state only for stations whose buffer is full or blocked. Show raw materials as compact rows (name, stock bar, status line), with supplier and consumption on tap. Target ≤ 5 screens."
+   },
+   {
+    "severity": "medium",
+    "file": "src/70_tour.js",
+    "title": "Tour 'Auftrag verfolgen' on 1024 landscape keeps the drawer open; phone tour covers the Copilot answer",
+    "evidence": "At 1024×768, step 5 leaves the FA-24118 drawer open (x 544–1024). The route gets 480 px of hall, and the tour card covers the lower half, including the selection bar. On phone, step 8 puts the card (y 585–842) over the Copilot's answer card and input. Screenshots: /tmp/rv-mobile/tour-land-04.png, /tmp/rv-mobile/tour-phone-07.png.",
+    "fix": "In the 'follow' step's run(), call `WF.app.hideDrawer()` when innerWidth < 1280 (the selection stays, the route uses the whole hall) and dock the card top-right. For steps whose ring is '.ai-panel.open' on < 700 px, collapse the card to a 56 px bar (step label + 'Weiter' + expand chevron) at the top, under the Copilot header, or use compact mode with a 2-line clamp."
+   },
+   {
+    "severity": "medium",
+    "file": "src/styles.css",
+    "title": "Icon-only sidebar on landscape tablets is unreadable on touch",
+    "evidence": "Between 901 and 1280 px (e.g. iPad landscape, 1024×768) the nav shrinks to 66 px with icons only (grid, cube, list, gauge, truck, wrench, people, shield, plug, sparkles). The labels exist only in `title`, which touch devices never show, so a prospect cannot tell 'gauge' = Analyse or 'shield' = Qualität. Screenshots: /tmp/rv-mobile/land-leitstand.png, /tmp/rv-mobile/crop-land-nav.png.",
+    "fix": "In the 901–1280 px block show short labels under the icons: `--side-w:78px; .nav-item{flex-direction:column;gap:3px;padding:8px 2px} .nav-item > span:not(.badge){display:block;font-size:10px;line-height:1.1;text-align:center;white-space:normal}`. Use short names 'Leitstand, Halle, Aufträge, Analyse, Material, Werkzeuge, Personal, Qualität, Anbindung, KI'. Alternatively, keep the full 214 px sidebar for `(pointer:coarse) and (min-width:1024px)`."
+   },
+   {
+    "severity": "medium",
+    "file": "src/20_app.js",
+    "title": "Phone: two duplicate toasts after 'Störung auslösen' cover the drawer header",
+    "evidence": "On phone, triggering a fault from the machine drawer shows two toasts at the top: 'Störung M01 Säge: Spindelüberlast …' (y 62–141) and 'Störung ALM 3340 „Spindelüberlast“ an M01 ausgelöst' (y 149–190). Together they cover the drawer title and its Copilot/close buttons, and they say the same thing. At 768 px they sit bottom-right over the drawer content, because toast avoidance only applies at ≥901 px. Screenshots: /tmp/rv-mobile/fault-phone.png, /tmp/rv-mobile/fault-tab.png.",
+    "fix": "Dedupe: suppress an action's confirmation toast when a notification toast for the same entity arrives within 2 s, or merge them into one. On ≤560 px with `body.drawer-open`, place #toasts at the bottom (`bottom: max(12px, env(safe-area-inset-bottom)); top:auto`) so the drawer header stays tappable. On 561–900 px with the drawer open, put toasts top-left or narrow them to `right: calc(min(480px,100%) + 12px)` when space allows."
+   },
+   {
+    "severity": "medium",
+    "file": "src/40_leitstand.js",
+    "title": "TV mode at 768 px: status pills run into the shift-lead info",
+    "evidence": "In TV mode on tablet portrait the status filter row has `flex-wrap:nowrap`. The last pill '1 Bereit' (x 488–574) overflows its container (18–494) and is drawn under 'Schichtleitung Stefan Huber · 10 von 10 …' (x 508–750). Screenshots: /tmp/rv-mobile/tv-tab-latest.png, /tmp/rv-mobile/tv-tab.png.",
+    "fix": "Below 1100 px allow wrapping in TV mode: `.ls-root.ls-tv .ls-bar{flex-wrap:wrap} .ls-root.ls-tv .ls-tvinfo{flex:1 1 100%;margin-left:0}`. Or hide the TV-Modus button at ≤ 900 px like on phone, since TV mode is designed for 1080p wall screens."
+   },
+   {
+    "severity": "low",
+    "file": "src/70_tour.js",
+    "title": "Phone tour: close button sits in the middle of the header row",
+    "evidence": "On < 560 px the step dots are hidden (`.tour-dots{display:none}`). The dots carried `margin-left:auto`, so the X now sits right after 'DEMO-TOUR · 3 / 11' at about x=172 instead of at the right edge, on every step. Screenshots: /tmp/rv-mobile/tour-phone-00.png, /tmp/rv-mobile/tour-phone-02.png.",
+    "fix": "Add `.tour-top [data-x]{margin-left:auto}`, which also works when the dots are visible."
+   },
+   {
+    "severity": "low",
+    "file": "src/50_connect.js",
+    "title": "Wizard stepper and level table clipped at the right edge",
+    "evidence": "At 768 px, on the final step ('Okamoto ACC angebunden'), the stepper's last item '✓ Fertig' is cut at the card edge, and the stepper label reads 'Fertigaktiv' (74 px). On phone, the 'Was jede Stufe in werkfluss freischaltet' table cuts the L3 column: '+ WERKZEU' and '+ 15–30 mi'. Screenshots: /tmp/rv-mobile/wz-tab-4.png, /tmp/rv-mobile/full-phone-anbindung-1.png.",
+    "fix": "At ≤ 900 px hide the labels of completed steps in `.cn-st` (check icon only) and keep the label only for the current step. For the level matrix on phone, shorten the header to 'L3 +WZ' and the effort row to '+15–30′', or put it in `.tbl-wrap` with the same fade mask used for the order chain."
+   },
+   {
+    "severity": "low",
+    "file": "src/40_leitstand.js",
+    "title": "Same notification shows 06:20 in the Leitstand and 08:20 in the notification panel",
+    "evidence": "On phone with the bell panel open, the panel card shows 'WARNUNG 08:20 · Schichtleitung – Termin gefährdet: FA-24119', and the Leitstand 'Jetzt wichtig' card right below it shows the same message as '06:20'. The panel uses `n.updatedT || n.t` (20_app), patchNotif uses `n.t` (40_leitstand line ~1236). The phone panel also has no backdrop and stops at 72 vh, so the duplicate card shows through underneath. Screenshot: /tmp/rv-mobile/notif-phone.png.",
+    "fix": "Use one rule in both places, e.g. 'seit 06:20 · aktualisiert 08:20' (use n.t for 'seit' and add updatedT when it differs). In 20_app, on ≤ 560 px give .notif-panel `max-height:calc(100dvh - var(--top-h) - 16px)` and a backdrop (`rgba(4,8,16,.55)`) that closes the panel on tap."
+   }
+  ]
+ }
+]

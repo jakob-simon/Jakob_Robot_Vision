@@ -221,6 +221,14 @@
       const st = WF.STATE[stateKey] || { label: stateKey, color: 'var(--st-idle)' };
       return `<span class="pill" style="--c:${st.color}"><i></i>${ui.esc(labelOverride || st.label)}</span>`;
     },
+    /** Zeitstempel einer Benachrichtigung – überall gleich: Entstehungszeit, ggf. „aktualisiert hh:mm“ (UI_GUIDE Regel 2). */
+    notifTime(n, opt = {}) {
+      if (!n) return '';
+      const t0 = WF.util.fmtClock(n.t);
+      const up = n.updatedT != null && n.updatedT - n.t > 60 ? WF.util.fmtClock(n.updatedT) : '';
+      if (opt.text) return t0 + (up ? ' · aktualisiert ' + up : '');
+      return ui.esc(t0) + (up ? ` <span class="n-upd" style="color:var(--faint)">· aktualisiert ${ui.esc(up)}</span>` : '');
+    },
     sevPill(sev, text) {
       const s = WF.SEV[sev] || WF.SEV.info;
       return `<span class="pill" style="--c:${s.color}"><i></i>${ui.esc(text || s.label)}</span>`;

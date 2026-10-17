@@ -111,7 +111,7 @@
     for (const v of WF.views) {
       const g = v.group || 'betrieb';
       if (g !== lastGroup) { nav.append(el('div', { class: 'nav-label', text: GROUPS[g] || g })); lastGroup = g; }
-      const b = el('button', { class: 'nav-item', 'data-view': v.id, title: v.title + (keyOf(v) ? ' · Taste ' + keyOf(v) : ''), html: icon(v.icon || 'dot') + `<span>${esc(v.title)}</span><span class="badge" data-badge="${v.id}"></span>` });
+      const b = el('button', { class: 'nav-item', 'data-view': v.id, title: v.title + (keyOf(v) ? ' · Taste ' + keyOf(v) : ''), html: icon(v.icon || 'dot') + `<span class="nav-t">${esc(v.title)}</span><span class="nav-s">${esc(v.short || v.title.split(' & ')[0])}</span><span class="badge" data-badge="${v.id}"></span>` });
       b.onclick = () => app.navigate(v.id);
       nav.append(b);
     }
@@ -244,7 +244,7 @@
     const acts = (n.actions || []).map((a, i) => `<button class="btn sm${i === 0 && n.status !== 'resolved' ? ' primary' : ''}" data-act="${i}">${esc(a.label)}</button>`).join('');
     const status = n.status === 'ack' ? 'quittiert' + (n.ackBy ? ' von ' + esc(n.ackBy) : '') + ' · Ursache besteht noch' : n.status === 'resolved' ? 'erledigt' + (n.resolvedT ? ' ' + U.fmtClock(n.resolvedT) : '') : '';
     return `<div class="notif ${esc(n.status)}" style="--c:${S.color}" data-id="${esc(n.id)}">
-      <div class="n-top"><span class="n-sev" style="color:${S.color}">${SEV_LABEL[n.sev] || ''}</span><span>${U.fmtClock(n.updatedT || n.t)}</span><span>·</span><span>${esc(n.role || '')}</span><span class="spacer"></span>${ent}</div>
+      <div class="n-top"><span class="n-sev" style="color:${S.color}">${SEV_LABEL[n.sev] || ''}</span><span>${WF.ui.notifTime(n)}</span><span>·</span><span>${esc(n.role || '')}</span><span class="spacer"></span>${ent}</div>
       <div class="n-t">${esc(n.title)}</div>
       ${n.body ? `<div class="n-b">${esc(n.body)}</div>` : ''}
       ${n.suggestion ? `<div class="n-s"><b>Empfehlung</b> ${esc(n.suggestion)}</div>` : ''}

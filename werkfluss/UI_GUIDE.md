@@ -38,3 +38,18 @@ bei echten Interessenten gezeigt werden können: sie muss **glaubwürdig, konsis
     Chromium `executablePath: '/opt/pw-browsers/chromium'`, Args `['--use-angle=swiftshader','--enable-unsafe-swiftshader']`)
     öffnen, `WF.app.navigate('<id>')`, Screenshot (1440×900 und 400×860) mit dem Read-Tool ansehen, Konsole auf Fehler prüfen.
     Nie in `werkfluss/dist/` schreiben (gemeinsame Datei) – eigene Ausgabedatei im Scratch/tmp verwenden.
+13. **Typografie nur aus der Skala** (`styles.css`): `--fs-2xs` 10,5 px (Eyebrow in Versalien, Achsen) · `--fs-xs` 11,5
+    (Meta, Legenden) · `--fs-sm` 12,5 (Tabellen) · `--fs-md` 13,5 (Fließtext) · `--fs-lg` 15 (Kartentitel) · `--fs-xl` 19
+    (Drawer-/Abschnittstitel, Condensed) · `--fs-2xl` 26 (Ansichtstitel) · `--fs-kpi` 28 (Kennzahl). **Nichts unter 10,5 px**,
+    auch nicht in SVG. Kartentitel immer `.card-h h3` (15 px/600) – Eyebrows sind nie Kartentitel.
+14. **Eine Kennzahl-Kachel**: `.kpi` mit `.l` (Eyebrow), `.v` (Wert, Einheit als `<small>`), `.s` (max. 2 Zeilen), optional
+    `.viz`/`.spark` unten. Höchstens zwei Werte je Kachel. Hinweis nur über `.kpi.warn` / `.kpi.crit` (Streifen oben +
+    Wertfarbe) – keine eigenen Rahmen, keine getönten Flächen, nie bei Wert 0. Keine eigenen KPI-Komponenten je Modul.
+15. **Farbsemantik**: `--st-*` nur für Zustände von Maschinen/Personen, `--accent`/`--info` für Interaktion und Datenfluss,
+    `--mat` für Material/Behälter (Lebenszyklus über Füllung/Kontur, nicht über Zustandsfarben), `--ext` für
+    Fremdbearbeitung (Härterei usw.). Mengen-/Energiebalken neutral (`--text2` mit Deckkraft), Akzent nur für die Aussage.
+16. **Zeitstempel von Meldungen** immer mit `WF.ui.notifTime(n)` (Entstehungszeit, ggf. „aktualisiert hh:mm“).
+17. **Touch**: Bedienflächen ≥ 40 px unter `@media (pointer:coarse)` (eigene Modul-Regeln dürfen das nicht unterschreiten),
+    Eingabefelder 16 px (sonst zoomt iOS). Hinweise für Maus („Rechtsklick“, „Mausrad“) auf Touch durch Gesten ersetzen.
+18. **„Engpass“** bezeichnet nur den Werks-Engpass aus `WF.sim.bottleneck()`. Der begrenzende Schritt eines Auftrags heißt
+    „begrenzt durch …“ bzw. „kritisch“.
