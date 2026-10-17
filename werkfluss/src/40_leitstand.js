@@ -75,6 +75,8 @@
   .ls-kpis .kpi .s{-webkit-line-clamp:1;overflow-wrap:anywhere}
   .ls-kpis .kpi .s b{color:var(--text2);font-weight:600}
   .ls-k-spark{height:30px}
+  .ls-kpis .ls-k-oee.ghost .s{-webkit-line-clamp:2}
+  .ls-kpis .ls-k-oee.ghost .ls-s2{display:none}
   .ls-k-spark svg{display:block;width:100%;height:100%;overflow:visible}
 
   .ls-main{display:grid;grid-template-columns:minmax(0,1fr) 344px;gap:14px;align-items:start}
@@ -236,7 +238,9 @@
   .ls-brief ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px}
   .ls-brief li{--c:var(--info);position:relative;padding-left:14px;font-size:var(--fs-sm);line-height:1.45;color:var(--text2)}
   .ls-brief li::before{content:"";position:absolute;left:1px;top:.52em;width:6px;height:6px;border-radius:50%;background:var(--c)}
-  .ls-brief li .link{font-size:inherit}
+  /* Bezüge im Briefing wie im Copilot: schlichte Links (Mono, gepunktet unterstrichen) */
+  .ls-brief li .link{font-family:var(--f-mono);font-size:.95em;font-weight:500;color:var(--text);text-decoration:underline dotted;text-decoration-color:color-mix(in srgb,var(--accent) 70%,transparent);text-underline-offset:3px}
+  .ls-brief li .link:hover{color:var(--accent);text-decoration-style:solid}
   .ls-brief-f{display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--faint);flex-wrap:wrap}
   .ls-brief-f .spacer{flex:1}
   .ls-mode{font:600 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.06em;text-transform:uppercase;padding:3px 6px;border-radius:5px;color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);border:1px solid color-mix(in srgb,var(--accent) 28%,transparent)}
@@ -350,7 +354,9 @@
   .ls-root.ls-tv .ls-k-spark{height:28px}
   .ls-root.ls-tv .ls-main{grid-template-columns:minmax(0,1fr) 400px}
   .ls-root.ls-tv .ls-grid{grid-template-columns:repeat(auto-fill,minmax(290px,1fr))}
-  .ls-root.ls-tv .ls-tile{gap:6px;padding:12px 15px 12px}
+  .ls-root.ls-tv .ls-tile{gap:5px;padding:12px 15px 12px}
+  /* TV: Werkzeugzeile nur, wenn die Maschine produziert (sonst sagt die Ursache, was los ist) – Platz für 2 Zeilen Ursache */
+  .ls-root.ls-tv .ls-tile.has-cause:not([data-state="running"]) .ls-tool,.ls-root.ls-tv .ls-tile.rest .ls-tool{display:none}
   .ls-root.ls-tv .ls-band{height:6px;margin-top:auto}
   .ls-root.ls-tv .ls-band svg{height:6px;border-radius:3px}
   .ls-root.ls-tv .ls-band span{display:none}
@@ -358,10 +364,12 @@
   .ls-root.ls-tv .ls-name .ls-id{font-size:16px}
   .ls-root.ls-tv .ls-name .ls-area,.ls-root.ls-tv .ls-th .conn,.ls-root.ls-tv .ls-op,.ls-root.ls-tv .ls-tool-n,.ls-root.ls-tv .ls-foot{display:none}
   .ls-root.ls-tv .ls-flag{font-size:14px;padding:4px 8px}
+  .ls-root.ls-tv .ls-tile.flag .ls-id{display:none}
+  .ls-root.ls-tv .ls-name b{max-width:100%}
   .ls-root.ls-tv .ls-st .pill{font-size:16px;line-height:26px;padding:2px 13px 2px 11px}
   .ls-root.ls-tv .ls-st .pill i{width:10px;height:10px}
   .ls-root.ls-tv .ls-since{font-size:14px}
-  .ls-root.ls-tv .ls-cause{font-size:14px;line-height:1.35}
+  .ls-root.ls-tv .ls-cause{font-size:14px;line-height:1.3;flex:none}
   .ls-root.ls-tv .ls-tile.has-cause .ls-op8{display:none}
   .ls-root.ls-tv .ls-ordb{padding-top:7px}
   .ls-root.ls-tv .ls-ord{font-size:18px}
@@ -374,7 +382,8 @@
   .ls-root.ls-tv .ls-tool-s{padding-left:0;font-size:14px}
   .ls-root.ls-tv .ls-tool-x{display:inline}
   .ls-root.ls-tv .ls-op8{font-size:14px}
-  .ls-root.ls-tv .ls-op8 .avatar{width:26px;height:26px;font-size:var(--fs-xs)}
+  .ls-root.ls-tv .ls-op8 .avatar{width:30px;height:30px;font-size:14px}
+  .ls-root.ls-tv .ls-more{height:24px;min-width:28px;font-size:14px;border-radius:12px}
   .ls-root.ls-tv .ls-x-h h3{font-size:18px}
   .ls-root.ls-tv .ls-x-sh{font-size:14px}
   .ls-root.ls-tv .ls-x-tr{height:10px}
@@ -406,7 +415,7 @@
     .ls-root.ls-tv{height:100%;display:grid;grid-template-rows:auto minmax(0,1fr)}
     .ls-root.ls-tv .ls-main{min-height:0;align-items:stretch}
     .ls-root.ls-tv .ls-machines{display:flex;flex-direction:column;min-height:0}
-    .ls-root.ls-tv .ls-bar{order:2;margin:10px 0 0;padding-left:210px;min-height:36px}
+    .ls-root.ls-tv .ls-bar{order:2;margin:10px 0 0;min-height:36px}
     .ls-root.ls-tv .ls-grid{flex:1;min-height:0;grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:minmax(0,1fr)}
     .ls-root.ls-tv .ls-side{min-height:0}
     .ls-root.ls-tv .ls-now{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
@@ -563,7 +572,7 @@
       const [k, i] = a.dataset.ent.split('|'); WF.app.select(k, i);
     });
     // Spaltenzahl des Rasters beobachten → Abschluss-Kachel füllt die letzte Reihe
-    if (typeof ResizeObserver === 'function') new ResizeObserver(() => fitX()).observe(R.grid);
+    if (typeof ResizeObserver === 'function') { const ro = new ResizeObserver(() => { fitX(); clipX(); }); ro.observe(R.grid); }
 
     WF.bus.on('select', (s) => { selected = s && s.kind === 'machine' ? s.id : null; for (const id in tiles) tiles[id].el.classList.toggle('sel', id === selected); });
     WF.bus.on('settings', () => {
@@ -799,6 +808,7 @@
     setText(r.since, vm.since); setAttr(r.since, 'title', vm.sinceTitle);
     setText(r.cause, vm.cause); setAttr(r.cause, 'title', vm.cause);
     setAttr(r.flag, 'hidden', !vm.flag); setAttr(r.flag, 'title', vm.flagTitle); if (vm.flag) setVar(r.flag, '--c', vm.flagC);
+    if (p.flag !== vm.flag) el.classList.toggle('flag', !!vm.flag);
     setText(r.conn, vm.conn); setAttr(r.conn, 'data-l', vm.connL); setAttr(r.conn, 'title', vm.connTitle);
     setText(r.oid, vm.oid); setText(r.pn, vm.pn); setAttr(r.pn, 'title', vm.pn);
     if (p.none !== vm.none) { r.ord.classList.toggle('none', vm.none); r.prog.hidden = vm.none; r.oid.hidden = vm.none; }
@@ -1029,6 +1039,16 @@
     setHTML(r.xList, list.length ? list.map(x =>
       `<div class="ls-x-row" style="--c:${x.c}" ${x.ent ? `data-ent="${esc(x.ent)}"` : ''} title="${esc(U.fmtDayClock(x.t) + ' – ' + x.text)}"><span class="num">${esc(tclock(x.t, now))}</span>${icon(x.ic, 14)}<span>${esc(x.text)}</span></div>`).join('')
       : `<div class="ls-x-empty">Keine Werkzeugwechsel, Arbeitsgang-Abschlüsse oder Pausen ${sh.id ? 'in den nächsten 2 Stunden' : 'bis zum Schichtbeginn'}.</div>`);
+    clipX();
+  }
+  /** Liste „Als Nächstes“: nur ganze Zeilen zeigen (Kachelhöhe folgt dem Raster) – keine angeschnittenen Texte */
+  function clipX() {
+    if (!X) return;
+    const box = X.r.xList, rows = box.querySelectorAll('.ls-x-row');
+    if (!rows.length) return;
+    for (const n of rows) if (n.style.visibility) n.style.visibility = '';
+    const bottom = box.getBoundingClientRect().bottom + 0.5;
+    for (const n of rows) if (n.getBoundingClientRect().bottom > bottom) n.style.visibility = 'hidden';
   }
 
   // ------------------------------------------------------------------ Kopf: Schicht & Personal
@@ -1154,6 +1174,7 @@
     const apq = `V ${U.fmtPct(k.availability, 1)} × L ${U.fmtPct(k.performance, 1)} × Q ${U.fmtPct(k.quality, 1)}`;
     const g = k.ghost;   // nur ohne Schicht: autonome, für den unbemannten Lauf freigegebene Maschinen
     const ghostTxt = g && g.autonomous ? `Geisterschicht: <b>${g.running} von ${g.autonomous}</b> autonomen Maschinen laufen` : g ? 'Geisterschicht: keine autonome Maschine eingeplant' : '';
+    R.kOee.classList.toggle('ghost', !!ghostTxt);
     if (ghostTxt) setHTML(R.kOeeS1, ghostTxt);
     else if (k.oee == null) setHTML(R.kOeeS1, `Ziel ${U.fmtPct(TARGET_OEE)} · noch keine Planzeit heute`);
     else {

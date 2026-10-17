@@ -91,7 +91,7 @@
     overrunSec: 600, overrunLastSec: 1200, attendFinishSec: 600, makeupLateSec: 300,
     pickEverySec: 10, switchCheckSec: 30,
     spcReactSec: 300,      // SPC-Trend: nach 5 min gibt Bediener/Einrichter die Korrektur an der Maschine ein
-    batteryLow: 25, batteryFull: 90, batteryAssign: 30, agvDrain: 0.05, agvCharge: 0.12,
+    batteryLow: 25, batteryFull: 90, batteryAssign: 30, agvDrain: 0.006, agvCharge: 0.05,
     basePowerKw: 12,
     eventsMax: 3000, notificationsMax: 400, measMax: 200, transportsKeepSec: DAY, toolsKeep: 150,
     // Werkzeug: Wechselfenster ≤ 10 % der Standzeit; Mitwechseln, wenn der eigene Wechsel in ≤ 30 min käme, höchstens 35 %
@@ -112,7 +112,8 @@
     agv: { idle: 'Bereit', toPickup: 'Fährt zur Abholung', loading: 'Lädt auf', toDrop: 'Fährt zum Ziel', unloading: 'Lädt ab', toCharge: 'Fährt zur Ladestation', charging: 'Lädt Akku', blocked: 'Blockiert' },
     forklift: { parked: 'Abgestellt', driving: 'Im Einsatz' },
     transport: { open: 'Offen', assigned: 'Zugeteilt', toPickup: 'Unterwegs zur Abholung', loaded: 'Beladen', toDrop: 'Unterwegs zum Ziel', done: 'Erledigt' },
-    transportKind: { container: 'Behälter', bars: 'Stangenmaterial', 'ext-out': 'Zur Fremdbearbeitung', 'ext-in': 'Aus Fremdbearbeitung', supply: 'Rohteile / Beistellteile' },
+    transportKind: { container: 'Behälter', bars: 'Stangenmaterial', 'ext-out': 'Zur Fremdbearbeitung', 'ext-in': 'Aus Fremdbearbeitung', supply: 'Rohteile / Beistellteile', empty: 'Leergut' },
+    transportPhase: { geplant: 'Geplant (Ziel voll)', wartend: 'Wartet auf Fahrzeug', unterwegs: 'Unterwegs', erledigt: 'Erledigt' },
     transportMode: { AGV: 'AGV', Stapler: 'Stapler' },
     container: { filling: 'Wird befüllt', ready: 'Abholbereit', transit: 'Unterwegs', input: 'Im Eingang', external: 'In Fremdbearbeitung', shipped: 'Im Versand', scrap: 'Sperrlager' },
     containerKind: { parts: 'Teile', raw: 'Rohteile', scrap: 'Ausschuss' },
@@ -168,6 +169,13 @@
   let MA = [], PA = [], AA = [];   // Arrays der Maschinen/Personen/AGVs (schnelle Schleifen)
   let CV = 0, INB = null;          // Behälter-Version (Cache-Invalidierung) und Cache für inboundQty
   let GDIRTY = false;              // Geisterschicht-Check bei der nächsten Minute neu bewerten
+  const ATR = new Set();           // Ids der nicht erledigten Transporte (Erstellreihenfolge = for-in-Reihenfolge von state.transports)
+  /** nicht erledigte Transporte (erledigte werden dabei aus dem Index entfernt) */
+  function activeTransports() {
+    const out = [];
+    for (const id of ATR) { const t = S.transports[id]; if (!t || t.status === 'done') { ATR.delete(id); if (t && t.phase !== 'erledigt') t.phase = 'erledigt'; continue; } out.push(t); }
+    return out;
+  }
   let PV = 0;                      // Plan-Version: steigt bei jeder Änderung, die die Prognose verschiebt (Cache-Invalidierung)
   const planChanged = () => { PV++; };
 
@@ -377,7 +385,7 @@
     if (!P) throw new Error('WF.sim.init: kein Profil');
     R = U.rng((P.sim.seed >>> 0) || 1);
     RI = U.rng((((P.sim.seed >>> 0) ^ 0x1A7A4E) >>> 0) || 7);
-    U.resetUids(); NIDX = {}; FC = null; PBC = null; INB = null; CV = 0; PV = 0; GDIRTY = false; OPX = null; WCC = null; RAWC = null; PLC.clear(); DIRTY.length = 0; for (const k in PROG) delete PROG[k];
+    U.resetUids(); NIDX = {}; FC = null; PBC = null; INB = null; CV = 0; PV = 0; GDIRTY = false; ATR.clear(); OPX = null; WCC = null; RAWC = null; PLC.clear(); DIRTY.length = 0; for (const k in PROG) delete PROG[k];
     ST = P.stationById || Object.fromEntries(P.stations.map(s => [s.id, s]));
     TT = P.toolTypeById || Object.fromEntries(P.toolTypes.map(t => [t.id, t]));
     GRAPH = P.graph;
@@ -404,7 +412,7 @@
       history: { t: [], good: [], oee: [], powerKw: [], wip: [], perMachine: {} },
       kpi: {}, toolCostToday: 0, energyKwh: 0, powerKw: 0, spcSince: {}, etaPub: {}, engineErrors: [],
       today: { day: Math.floor(t0 / DAY), good: 0, goodFinished: 0, scrap: 0, scrapBy: { 'Maß': 0, 'Werkzeugbruch': 0, 'Erstteil n.i.O.': 0 }, fpiOk: 0, fpiNok: 0,
-        transports: 0, shipped: 0, toolChanges: 0, faults: 0, setups: 0, energyKwh: 0, lossEur: 0 },
+        transports: 0, emptyReturns: 0, shipped: 0, toolChanges: 0, faults: 0, setups: 0, energyKwh: 0, lossEur: 0 },
       shiftStats: { id: null, startT: t0, good: 0, scrap: 0 },
       shiftId: null, inBreak: false, histAcc: { good: 0, powerSum: 0, n: 0 }, lastShiftReport: null, ghostCheck: null,
       intake: { n: 0, lastT: null, lastTpl: null }, orderSeq: 0, archived: 0,
@@ -697,16 +705,34 @@
     const mode = c.weightKg > 250 ? 'Stapler' : 'AGV';
     const tr = { id: U.uid('TR'), containerId: c.id, kind, from: { station: from }, to: { station: to }, weightKg: c.weightKg,
       mode, status: 'open', assignee: null, createdT: S.t, pickupT: null, doneT: null, orderId: c.orderId,
-      label: `${c.qty} Stk ${o.part.name} · ${stShort(from)} → ${stShort(to)}`, waitReason: null, taskId: null };
-    S.transports[tr.id] = tr;
+      label: `${c.qty} Stk ${o.part.name} · ${stShort(from)} → ${stShort(to)}`, waitReason: null, waitCode: null, phase: 'wartend', taskId: null };
+    S.transports[tr.id] = tr; ATR.add(tr.id);
     c.transportId = tr.id;
     return tr;
+  }
+  /** Leergut: geleerter Behälter am Eingang einer Maschine → zurück an den Ausgang der liefernden Station (bzw. ins
+      Rohmaterial-Lager). Ein Leergut-Transport je Strecke sammelt die Behälter (Stapel, max. 4); AGVs fahren ihn nur, wenn
+      kein Materialtransport wartet (kind 'empty', containerId null, empties = Anzahl). */
+  function emptyReturn(fromSid, toSid) {
+    if (!ST[toSid] || !ST[fromSid] || toSid === fromSid || !Object.keys(S.agvs).length) return;
+    if (!S.machines[toSid] && toSid !== 'RAW') toSid = 'RAW';
+    for (const id of ATR) {
+      const t = S.transports[id];
+      if (t && t.kind === 'empty' && t.status === 'open' && t.from.station === fromSid && t.to.station === toSid) {
+        if (t.empties < 4) { t.empties++; t.label = `Leergut (${t.empties} Behälter) · ${stShort(fromSid)} → ${stShort(toSid)}`; }
+        return;
+      }
+    }
+    const tr = { id: U.uid('TR'), containerId: null, kind: 'empty', from: { station: fromSid, slot: 'in' }, to: { station: toSid, slot: 'out' }, weightKg: 3,
+      mode: 'AGV', status: 'open', assignee: null, createdT: S.t, pickupT: null, doneT: null, orderId: null, empties: 1,
+      label: `Leergut · ${stShort(fromSid)} → ${stShort(toSid)}`, waitReason: null, waitCode: null, phase: 'wartend', taskId: null };
+    S.transports[tr.id] = tr; ATR.add(tr.id);
   }
   function createBarsTransport(m, matId) {
     const tr = { id: U.uid('TR'), containerId: null, kind: 'bars', from: { station: 'RAW' }, to: { station: m.id }, weightKg: 0,
       mode: 'Stapler', status: 'open', assignee: null, createdT: S.t, pickupT: null, doneT: null, orderId: m.op ? m.op.oid : null,
-      label: `Stangen ${S.materials[matId].name} · Rohmaterial → ${m.id}`, waitReason: null, taskId: null, materialId: matId, meters: 0 };
-    S.transports[tr.id] = tr;
+      label: `Stangen ${S.materials[matId].name} · Rohmaterial → ${m.id}`, waitReason: null, waitCode: null, phase: 'wartend', taskId: null, materialId: matId, meters: 0 };
+    S.transports[tr.id] = tr; ATR.add(tr.id);
     return tr;
   }
   /** Behälter aufnehmen (AGV/Stapler). Zählt als „weitergegeben“ für den Quell-Arbeitsgang. */
@@ -1245,20 +1271,31 @@
     m.pickSig = null;
     activateOp(m, b.o, b.i, b.lv);
   }
+  /** Rüstzustand, der für den nächsten Behälter erhalten bleibt: Waschanlage je Waschprogramm (Werkstoff), sonst je Arbeitsgang */
+  const setupKey = (m, o, i) => (m.type === 'washer' ? 'prog:' + ((o.part && o.part.material) || '-') : 'op:' + o.id + '/' + i);
   function activateOp(m, o, i, lv) {
     const r = o.routing[i];
+    const kept = !!(m.keptSetup && releasableOp(r, i) && m.keptSetup.key === setupKey(m, o, i));
+    m.keptSetup = null;
     m.op = { oid: o.id, idx: i };
     o.ops[i].machine = m.id;
     m.setupDone = false; m.released = false; m.needCorr = false; m.starvedSince = null; m.idleCause = null;
     m.rework = false; m.reworking = false;
+    if (kept) { mountForOp(m, o, i); m.setupDone = true; m.released = true; lv = Object.assign({}, lv, { why: (lv.why ? lv.why + '; ' : '') + 'Programm noch eingestellt – kein Rüsten' }); }
     if (o.status === 'freigegeben') { o.status = 'in Arbeit'; o.startT = S.t; }
     planChanged();
     ev('opSelect', 'info', { kind: 'machine', id: m.id },
       `${m.id} plant ${o.id} AG ${r.seq} „${r.op}“ ein (${o.priority === 'eil' ? 'Eilauftrag' : 'Termin ' + U.fmtDayClock(o.due)}; ${lv.why || ''})`,
       { orderId: o.id, seq: r.seq, level: lv.level });
   }
-  /** Bereitschaft eines Arbeitsgangs für Maschine m */
+  /** Bereitschaft eines Arbeitsgangs für Maschine m. Ist das Wasch-/Messprogramm noch eingestellt (keptSetup), wird nicht
+      „vorab gerüstet“: der Arbeitsgang wartet, bis die Teile da sind (Stufe 0 statt 1) */
   function opLevel(m, o, i) {
+    const lv = opLevel0(m, o, i);
+    if (lv.level === 1 && m.keptSetup && releasableOp(o.routing[i], i) && m.keptSetup.key === setupKey(m, o, i)) return { level: 0, eta: lv.eta, why: 'Programm eingestellt – wartet auf Teile' };
+    return lv;
+  }
+  function opLevel0(m, o, i) {
     const r = o.routing[i];
     // Rüsten vorab nur, wenn das Material spätestens kurz nach Rüstende eintrifft (ohne Rüstaufwand: nur bei Material am Platz)
     const lead = r.setupMin > 0 ? r.setupMin * 60 + Math.min(1200, r.setupMin * 60) : -1;
@@ -1341,6 +1378,9 @@
   }
   /** Arbeitsgang verlässt die Maschine (fertig oder unterbrochen): Aufgaben, Meldungen und Merker aufräumen */
   function releaseOpState(m, o, i, why) {
+    // Waschprogramm/Messprogramm bleibt eingestellt: kommt der nächste Behälter desselben Arbeitsgangs (Waschanlage: gleiches
+    // Waschprogramm = gleicher Werkstoff), entfällt das Rüsten
+    m.keptSetup = m.setupDone && m.released && releasableOp(o.routing[i], i) ? { key: setupKey(m, o, i), t: S.t } : null;
     cancelOpTasks(m, why);
     if (m.rework || m.reworking) {
       // Erstteil zur Nacharbeit liegt noch an der Maschine → als Eingangsteil zurückbuchen (Mengenbilanz bleibt erhalten)
@@ -1397,7 +1437,7 @@
     const dest = new Set();
     for (const cid of st.out) {
       const c = S.containers[cid], tr = c && c.transportId && S.transports[c.transportId];
-      if (!c || c.state !== 'ready' || !tr || tr.status !== 'open' || !/^Zielpuffer/.test(tr.waitReason || '')) return null;
+      if (!c || c.state !== 'ready' || !tr || tr.status !== 'open' || tr.waitCode !== 'destFull') return null;
       dest.add(stShort(tr.to.station));
     }
     return [...dest].join(', ');
@@ -1420,7 +1460,7 @@
     let stuck = 0, dest = null;
     for (const cid of st.out) {
       const c = S.containers[cid], tr = c && c.transportId && S.transports[c.transportId];
-      if (c && c.orderId === o.id && c.src === i && c.state === 'ready' && tr && tr.status === 'open' && /^Zielpuffer/.test(tr.waitReason || '')) { stuck++; dest = tr.to.station; }
+      if (c && c.orderId === o.id && c.src === i && c.state === 'ready' && tr && tr.status === 'open' && tr.waitCode === 'destFull') { stuck++; dest = tr.to.station; }
     }
     if (stuck < 2) return false;
     if (m.state === 'blocked') m.blockedSince = m.blockedSince || m.since; else m.blockedSince = null;
@@ -1555,7 +1595,7 @@
     ev('issue', 'info', { kind: 'material', id: r.material ? r.material.id : 'RAW' }, `Rohteile bereitgestellt: ${qty} Stk für ${o.id} → ${m.id}${r.material ? ' (Entnahme ' + S.materials[r.material.id].name + ')' : ''}`, { orderId: o.id, qty });
   }
   function barsTransportOf(m) {
-    for (const id in S.transports) { const t = S.transports[id]; if (t.kind === 'bars' && t.to.station === m.id && t.status !== 'done') return t; }
+    for (const id of ATR) { const t = S.transports[id]; if (t && t.kind === 'bars' && t.to.station === m.id && t.status !== 'done') return t; }
     return null;
   }
   /** Stangenlader: Nachschub beauftragen, wenn Magazin < barReorderM und noch Bedarf besteht */
@@ -1582,6 +1622,11 @@
     if (f && f.qty < opBatch(o.routing[i])) return true;
     return countOut(m.id) < Math.max(1, m.outCap);
   }
+  function blockedTr(m) {
+    const st = S.stations[m.id];
+    for (const cid of st.out) { const c = S.containers[cid]; if (c && c.state === 'ready' && c.transportId && S.transports[c.transportId]) return S.transports[c.transportId]; }
+    return null;
+  }
   function blockedWhy(m) {
     const st = S.stations[m.id];
     for (const cid of st.out) { const c = S.containers[cid]; if (c.state === 'ready' && c.transportId && S.transports[c.transportId]) return trWhy(S.transports[c.transportId]); }
@@ -1603,7 +1648,7 @@
     else {
       const c = firstInput(m.id, o.id, i);
       c.qty--; setWeight(c, o);
-      if (c.qty <= 0) removeContainer(c);
+      if (c.qty <= 0) { removeContainer(c); emptyReturn(m.id, c.src >= 0 ? o.routing[c.src].station : 'RAW'); }
     }
     op.inProc++;
     if (!op.startT) op.startT = S.t;
@@ -2993,9 +3038,9 @@
   /** Behälter-Transporte unterwegs je Zielstation (zugeteilt/beladen, nicht offen/erledigt): {n, by: {orderId|idx: n}} */
   function inflightMap() {
     const res = {};
-    for (const id in S.transports) {
+    for (const id of ATR) {
       const t = S.transports[id];
-      if (!t.containerId || t.status === 'open' || t.status === 'done') continue;
+      if (!t || !t.containerId || t.status === 'open' || t.status === 'done') continue;
       inflightAdd(res, t);
     }
     return res;
@@ -3018,17 +3063,46 @@
     if (isAct && act === 0 && !firstInput(sid, c.orderId, c.idx)) return true;
     return n < Math.max(1, m.inCap);
   }
+  /** Transport-Phase für Halle/Material: 'geplant' (Ziel voll – Behälter bleibt am Ausgang bzw. im Pufferlager),
+      'wartend' (Ziel frei, Fahrzeug/Fahrer:in fehlt), 'unterwegs', 'erledigt' */
+  function setWait(tr, code, text) { tr.waitCode = code; tr.waitReason = text; tr.phase = code === 'destFull' ? 'geplant' : code ? 'wartend' : 'unterwegs'; }
+  /** Pufferlager (PUF): Plätze frei? */
+  const pufCap = () => (ST.PUF ? Math.max(0, ST.PUF.cap != null ? ST.PUF.cap : 12) : 0);
+  const pufFree = (inflight) => { const st = S.stations.PUF; if (!st || !pufCap()) return 0; const e = (inflight || {}).PUF; return pufCap() - st.out.length - st.inp.length - (e ? e.n : 0); };
   function transportsTick() {
-    let inflight = null;
-    for (const id in S.transports) {
-      const tr = S.transports[id];
-      if (tr.status !== 'open') continue;
-      if (tr.containerId && !S.containers[tr.containerId]) { tr.status = 'done'; tr.doneT = S.t; tr.cancelled = true; continue; }
+    let inflight = null, agvWait = false, agvTxt = null;
+    const empties = [];
+    for (const tr of activeTransports()) {
+      if (tr.status !== 'open') { if (tr.phase !== 'unterwegs') tr.phase = 'unterwegs'; continue; }
+      if (tr.kind === 'empty') { empties.push(tr); continue; }
+      if (tr.containerId && !S.containers[tr.containerId]) { tr.status = 'done'; tr.doneT = S.t; tr.cancelled = true; tr.phase = 'erledigt'; continue; }
       if (!inflight) inflight = inflightMap();
-      if (!destHasRoom(tr, inflight)) { tr.waitReason = `Zielpuffer ${stShort(tr.to.station)} voll`; continue; }
+      if (!destHasRoom(tr, inflight)) {
+        // Ziel voll: Behälter bleibt geplant am Ausgang – droht der Ausgang der Quelle voll zu laufen, bringt ein freies AGV
+        // ihn ins Pufferlager (Palettenregal) und später von dort zum Ziel
+        // (nicht für die Säge: ihr Vorrat liegt geplant in der eigenen Zuschnitt-Ablage – „Zuschnitt auf Vorrat“)
+        const srcM = S.machines[tr.from.station];
+        if (tr.mode === 'AGV' && tr.kind === 'container' && srcM && srcM.type !== 'saw' && countOut(srcM.id) >= Math.max(1, srcM.outCap) && pufFree(inflight) > 0) {
+          const a = bestAgv(tr);
+          if (a) { tr.finalTo = tr.to.station; tr.to = { station: 'PUF' }; tr.label = tr.label.replace(/→ .*$/, '→ ' + stShort('PUF') + ' (Ziel ' + stShort(tr.finalTo) + ' voll)'); assignAgv(a, tr); inflightAdd(inflight, tr); continue; }
+        }
+        const dm = S.machines[tr.to.station], e = inflight[tr.to.station], nIn = countIn(tr.to.station) + (e ? e.n : 0);
+        if (tr.waitCode !== 'destFull' || tr.waitN !== nIn) { tr.waitN = nIn; setWait(tr, 'destFull', `Ziel voll (Zielpuffer ${stShort(tr.to.station)} ${nIn}/${dm ? Math.max(1, dm.inCap) : '–'})`); }
+        continue;
+      }
       if (tr.mode === 'AGV') {
         const a = bestAgv(tr);
-        if (a) { assignAgv(a, tr); if (tr.containerId) inflightAdd(inflight, tr); } else tr.waitReason = 'kein AGV frei (unterwegs/Laden)';
+        if (a) { assignAgv(a, tr); if (tr.containerId) inflightAdd(inflight, tr); }
+        else {
+          agvWait = true;
+          if (!agvTxt) {
+            const all = Object.values(S.agvs), free = all.filter(x => !x.task), charging = free.filter(x => x.mustCharge || x.battery < CFG.batteryAssign);
+            agvTxt = charging.length && charging.length === free.length
+              ? ['charging', `Fahrzeug lädt (${charging.map(x => x.name + ' ' + Math.round(x.battery) + ' %').join(', ')})`]
+              : ['noVehicle', `kein Fahrzeug frei (${all.map(x => x.name + (x.task ? ' unterwegs' : x.state === 'charging' ? ' lädt' : ' bereit')).join(', ')})`];
+          }
+          if (tr.waitReason !== agvTxt[1]) setWait(tr, agvTxt[0], agvTxt[1]);
+        }
       } else if (!tr.taskId) {
         let tk;
         if (tr.kind === 'bars') {
@@ -3041,8 +3115,14 @@
             DRV(tr.to.station, 'in'), K(CFG.agvHandleSec, 'flDrop', `Stellt Behälter an ${stShort(tr.to.station)} ab`)], { transportId: tr.id });
           tk.label = `Staplertransport ${tr.label} (${nm(tr.weightKg)} kg)`;
         }
-        tr.taskId = tk.id; tr.waitReason = 'wartet auf Logistiker:in (Stapler)';
-      }
+        tr.taskId = tk.id; setWait(tr, 'noDriver', 'wartet auf Logistiker:in (Stapler)');
+      } else if (tr.waitCode !== 'noDriver' || tr.phase !== 'wartend') setWait(tr, 'noDriver', 'wartet auf Logistiker:in (Stapler)');   // Aufgabe zurückgegeben (Pause/Schichtende)
+    }
+    // Leergut zuletzt: nur ein freies AGV mit Akku über der Lade-Reserve (Materialtransporte haben Vorrang)
+    for (const tr of empties) {
+      const a = agvWait ? null : bestAgv(tr);
+      if (a && a.battery >= CFG.batteryAssign + 10) { assignAgv(a, tr); agvWait = true; }
+      else if (tr.waitCode !== 'lowPrio') setWait(tr, 'lowPrio', 'Leergut – fährt, sobald ein AGV frei ist');
     }
   }
   function bestAgv(tr) {
@@ -3058,9 +3138,9 @@
     return best;
   }
   function assignAgv(a, tr) {
-    a.task = tr.id; a.taskLabel = tr.label; tr.assignee = a.id; tr.status = 'toPickup'; tr.waitReason = null;
+    a.task = tr.id; a.taskLabel = tr.label; tr.assignee = a.id; tr.status = 'toPickup'; setWait(tr, null, null);
     a.state = 'toPickup';
-    routeTo(a, ST[tr.from.station].dockNode, stPos(tr.from.station, 'out'));
+    routeTo(a, ST[tr.from.station].dockNode, stPos(tr.from.station, tr.from.slot || 'out'));
   }
   function chargerPos(a) { const c = ST.CHG; return a.slot % 2 ? c.outPos : c.inPos; }
   function atCharger(a) { const p = chargerPos(a); return Math.hypot(a.pos.x - p.x, a.pos.z - p.z) < 0.3; }
@@ -3088,18 +3168,30 @@
   function agvHandleDone(a) {
     const tr = S.transports[a.task];
     if (!tr) { a.task = null; a.state = 'idle'; return; }
+    if (a.state === 'loading' && tr.kind === 'empty') {
+      a.load = null; a.loadKind = 'empty'; a.loadN = tr.empties || 1; tr.status = 'toDrop'; tr.pickupT = S.t; a.state = 'toDrop';
+      routeTo(a, ST[tr.to.station].dockNode, stPos(tr.to.station, tr.to.slot || 'in'));
+      return;
+    }
     if (a.state === 'loading') {
       const c = S.containers[tr.containerId];
       if (!c || !c.location || c.location.kind !== 'station') { tr.status = 'done'; tr.doneT = S.t; tr.cancelled = true; a.task = null; a.state = 'idle'; return; }
       pickupContainer(c, { kind: 'agv', id: a.id });
-      a.load = c.id; tr.status = 'toDrop'; tr.pickupT = S.t; a.state = 'toDrop';
+      a.load = c.id; a.loadKind = 'container'; tr.status = 'toDrop'; tr.pickupT = S.t; a.state = 'toDrop';
       routeTo(a, ST[tr.to.station].dockNode, stPos(tr.to.station, 'in'));
       return;
     }
     if (a.state === 'unloading') {
       const c = S.containers[a.load];
-      if (c) dropContainer(c, tr.to.station);
-      a.load = null; tr.status = 'done'; tr.doneT = S.t; a.task = null; a.taskLabel = null; a.freeSince = S.t; a.transportsToday++; S.today.transports++;
+      if (c && tr.to.station === 'PUF' && tr.finalTo) {
+        // Pufferlager: Behälter zwischenlagern (kein Zugang beim Ziel-Arbeitsgang), Weitertransport zum Ziel sofort geplant
+        c.state = 'ready'; c.relocate = true; placeAt(c, 'PUF', 'out'); c.transportId = null; c.bufferedT = S.t;
+        const nt = createTransport(c); if (nt) { nt.fromBuffer = true; setWait(nt, 'destFull', `Ziel voll (Zielpuffer ${stShort(nt.to.station)})`); }
+        ev('buffer', 'info', { kind: 'container', id: c.id }, `${c.qty} Stk ${c.partName} (${c.orderId}) ins Pufferlager – Ziel ${stShort(tr.finalTo)} voll; Weitertransport, sobald Platz ist`, { orderId: c.orderId, from: tr.from.station, to: tr.finalTo });
+      } else if (c) dropContainer(c, tr.to.station);
+      const wasEmpty = tr.kind === 'empty';
+      a.load = null; a.loadKind = null; a.loadN = 0; tr.status = 'done'; tr.phase = 'erledigt'; tr.doneT = S.t; a.task = null; a.taskLabel = null; a.freeSince = S.t; a.transportsToday++;
+      if (wasEmpty) S.today.emptyReturns = (S.today.emptyReturns || 0) + 1; else S.today.transports++;
       if (a.battery < CFG.batteryLow) {
         a.mustCharge = true;
         notify({ key: 'agvbat:' + a.id, sev: 'info', role: 'Logistik', entity: { kind: 'agv', id: a.id }, title: `${a.name}: Akku niedrig (${Math.round(a.battery)} %)`,
@@ -3297,7 +3389,7 @@
     S.yesterday = Object.assign({ kpi: kpis() }, S.today);
     for (const id in S.machines) S.machines[id].kd = freshStats(S.machines[id]);
     S.today = { day: Math.floor(S.t / DAY), good: 0, goodFinished: 0, scrap: 0, scrapBy: { 'Maß': 0, 'Werkzeugbruch': 0, 'Erstteil n.i.O.': 0 }, fpiOk: 0, fpiNok: 0,
-      transports: 0, shipped: 0, toolChanges: 0, faults: 0, setups: 0, energyKwh: 0, lossEur: 0 };
+      transports: 0, emptyReturns: 0, shipped: 0, toolChanges: 0, faults: 0, setups: 0, energyKwh: 0, lossEur: 0 };
     for (const id in S.toolStock) S.toolStock[id].scrapToday = 0;
     S.toolCostToday = 0;
     for (const id in S.people) { const p = S.people[id]; p.workSec = 0; p.dutySec = 0; p.utilToday = 0; p.tasksToday = 0; }
@@ -3436,7 +3528,7 @@
   function notifyWait(m) {
     const key = 'wait:' + m.id;
     // nachts: im Geisterschicht-Check angekündigter Stopp → Sammelmeldung ergänzen (keine zweite Warnung)
-    if (!cur && ghostCovers(m)) { ghostCompose(); return; }
+    if (!cur && ghostCovers(m)) { const e = S.ghostCheck.machines[m.id]; if (e.waitingSince == null || e.liveState !== m.state) ghostCompose(); return; }
     if (hasOpen(key) && NIDX[key].causeT === m.cause) return;
     const label = WF.STATE[m.state].label, c = curOf(m), night = !cur;
     const next = tclock(nextWorkStart(S.t + 1));
@@ -3455,9 +3547,9 @@
       rec = code === 'offShift' ? `zu Schichtbeginn ${next} zuerst erledigen` : code === 'tooLate' ? 'bei der Übergabe als erste Aufgabe ansagen' : 'Bediener einer ruhigen Maschine oder Einrichter:in einsetzen';
     } else if (m.state === 'blocked') {
       role = 'Logistik';
-      const why = blockedWhy(m), full = /^Zielpuffer/.test(why);
+      const why = blockedWhy(m), bt = blockedTr(m), full = !!(bt && bt.waitCode === 'destFull');
       cause = `Ausgang voll – ${why}`;
-      rec = night ? `zu Schichtbeginn ${next} zuerst abholen` : full ? `Eingang an ${why.replace(/^Zielpuffer /, '').replace(/ voll.*$/, '')} freiräumen oder Auftrag mit freiem Ziel vorziehen` : 'Abholung priorisieren (AGV/Stapler)';
+      rec = night ? `zu Schichtbeginn ${next} zuerst abholen` : full ? `Eingang an ${stShort(bt.to.station)} freiräumen oder Auftrag mit freiem Ziel vorziehen` : 'Abholung priorisieren (AGV/Stapler)';
     } else if (m.state === 'starved') {
       const ext = /Fremdbearbeitung/.test(m.cause), raw = /Rohmaterial|Lager/.test(m.cause), bars = /Stangen/.test(m.cause);
       role = raw ? 'Einkauf' : 'Logistik';
@@ -3662,6 +3754,7 @@
     const stops = list.filter(ghostStop), nx = tclock(G.nextStart);
     for (const e of stops) {
       const m = S.machines[e.machineId];
+      e.liveState = m.state;
       if (night && m.state !== 'running' && m.state !== 'toolchange' && (WAIT_STATES[m.state] || m.state === 'fault' || S.t >= e.stopT - 600)) e.waitingSince = e.waitingSince != null ? e.waitingSince : m.since;
       else if (night && m.state === 'running') e.waitingSince = null;
     }
@@ -4287,6 +4380,7 @@
       const s = ST[l.id], st = S.stations[l.id]; if (!s) return null;
       const base = l.slot === 'out' ? s.outPos : s.inPos;
       const k = Math.max(0, (l.slot === 'out' ? st.out : st.inp).indexOf(c.id));
+      if (l.id === 'PUF' && s.footprint) { const f = s.footprint, per = Math.max(1, Math.floor((f.w - 0.6) / 1.4)); return { x: r6(f.x + 1 + (k % per) * 1.4), z: r6(f.z + f.d + 0.7 + Math.floor(k / per) * 0.9), level: 0, slotIndex: k }; }
       return { x: r6(base.x + ((k % 3) - 1) * 0.9), z: r6(base.z + Math.floor(k / 3) * 0.9 * (base.z > 20 ? 1 : -1)), level: 0, slotIndex: k };
     }
     if (l.kind === 'agv') { const a = S.agvs[l.id]; return a ? { x: a.pos.x, z: a.pos.z, level: 1, slotIndex: 0 } : null; }

@@ -495,6 +495,13 @@
   .tl-kpis .kpi .viz:empty{display:none}
   .tl-kpis .kpi .viz svg{display:block;max-width:100%;overflow:visible}
   .tl-kstack{display:flex;gap:2px;height:6px;width:100%;border-radius:3px;overflow:hidden;margin-bottom:3px}
+  .tl-k3{position:relative;height:22px;flex:1;min-width:0;margin-right:34px}
+  .tl-k3 .ln{position:absolute;left:0;right:0;top:12px;height:2px;border-radius:1px;background:var(--line2)}
+  .tl-k3 .nw{position:absolute;left:0;top:6px;width:2px;height:14px;border-radius:1px;background:var(--accent)}
+  .tl-k3 .mk{position:absolute;top:9px;width:8px;height:8px;margin-left:-4px;border-radius:2px;background:var(--st-tool)}
+  .tl-k3 .mk.p{background:var(--card);border:1.3px dashed var(--st-tool)}
+  .tl-k3 .mk.w{background:var(--st-wait)}
+  .tl-k3 .e{position:absolute;right:-34px;top:5px;font-size:var(--fs-2xs);color:var(--faint)}
   .tl-kstack i{display:block;height:100%;background:var(--c)}
   .tl-kpis .tl-sm{display:none}
   .tl-kpis .kpi.click{cursor:pointer}
@@ -765,7 +772,7 @@
   .tl-cost-r:hover span{color:var(--text)}
   .tl-cost-r{display:grid;grid-template-columns:minmax(0,1fr) 90px 52px;gap:10px;align-items:center;font-size:var(--fs-sm)}
   .tl-cost-r span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2)}
-  .tl-cost-r span small{color:var(--faint);margin-left:4px}
+  .tl-cost-r span small{font-size:var(--fs-2xs);color:var(--faint);margin-left:4px}
   .tl-cost-r b{font-variant-numeric:tabular-nums;text-align:right;font-weight:600}
   .tl-cost-r .bar{min-width:0}
 
@@ -812,12 +819,12 @@
 
   /* Detail-Drawer */
   .tl-d-hero{display:flex;flex-direction:column;gap:10px}
-  .tl-d-top{display:grid;grid-template-columns:repeat(2,minmax(0,1fr)) auto;gap:6px 16px;align-items:start}
+  .tl-d-top{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px;align-items:start}
   .tl-d-kv{min-width:0}
   .tl-d-kv .v{font:600 var(--fs-kpi)/1.05 var(--f-cond);font-variant-numeric:tabular-nums;color:var(--text);white-space:nowrap}
   .tl-d-kv .v small{font:500 var(--fs-lg)/1 var(--f-cond);color:var(--muted);margin-left:3px}
   .tl-d-kv .l{font-size:var(--fs-xs);line-height:1.35;color:var(--muted);margin-top:3px}
-  .tl-d-st{justify-self:end;align-self:start}
+  .tl-d-st{grid-column:1/-1;grid-row:1;justify-self:start}
   .tl-d-stat3{grid-template-columns:repeat(3,minmax(0,1fr))!important}
   .tl-d-grid .v.t{font-size:var(--fs-lg);line-height:1.5;white-space:normal;overflow:visible}
   .tl-used{display:flex;flex-direction:column;gap:5px}
@@ -869,6 +876,7 @@
   }
   @container tltb (max-width:600px){
     .tl-tr{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"n st" "w r" "p p";gap:7px 12px}
+    .tl-tn small{white-space:normal}
     .tl-pl > b{white-space:normal}
   }
   @container tlstk (max-width:1090px){
@@ -909,7 +917,15 @@
     .tl-he-t small{display:inline;margin:0}
     .tl-pipe-l{display:none}
     .tl-crib{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .tl-crib > div{padding:9px 10px 9px 14px}
+    .tl-crib .l{white-space:normal;line-height:1.25}
     .tl-crib > div:last-child{grid-column:1/-1;border-top:1px solid var(--line)}
+    .tl-qi-h{flex-wrap:wrap;row-gap:3px}
+    .tl-qi-h em{margin-left:auto}
+    .tl-qi-h span.tl-qt{order:5;flex:1 1 100%;white-space:normal}
+    .tl-qi-d{align-items:flex-start}
+    .tl-qi-d span{white-space:normal}
+    .tl-qi-d span:not(.m):not(.avatar){flex:none}
     .tl-filt{flex-wrap:nowrap;overflow-x:auto;margin:0 -14px;padding:0 14px 2px;scrollbar-width:none}
     .tl-filt::-webkit-scrollbar{display:none}
     .tl-filt button.zero{display:none}
@@ -925,6 +941,8 @@
     .tl-cost-r,.tl-inst button{min-height:40px}
     .tl-tabsel button{min-height:44px}
     .tl-hx{min-height:40px}
+    .tl-root .seg button{min-height:40px}
+    .tl-he-h .link{padding:8px 0;margin:-8px 0}
   }
   `, 'tl-css');
 
@@ -991,7 +1009,11 @@
     const pc = t.plannedChange;
     const R0 = (cls, main, sub) => ({ cls, when: null, part: null, main, sub: sub || '' });
     const RT = (cls, tt, part, sub, main) => ({ cls, when: tt != null ? tclock(tt, now) : null, part, main: main || part || '–', sub: sub || '' });
-    if (t.status === 'changing') return R0('', 'Wird gerade gewechselt', t.explain ? t.explain.replace(/^Wird gerade gewechselt\s*/, '').replace(/^\(|\)\s*–.*$/g, '') : '');
+    if (t.status === 'changing') {
+      // Engine: „Schneide wird gerade gewendet (L. Wagner, noch ca. 7 s) – …“ → Aussage + „L. Wagner · noch ca. 7 s“
+      const ex = String(t.explain || ''), m = /\(([^)]*)\)/.exec(ex);
+      return R0('', /gewendet/.test(ex) ? 'Schneide wird gerade gewendet' : 'Wird gerade gewechselt', m ? m[1].replace(/,\s*/g, ' · ') : '');
+    }
     if (t.status === 'broken') return R0('stop', 'Wechsel vor dem nächsten Teil', 'Werkzeugbruch – nach der Reparatur');
     if (t.status === 'due') return R0('stop', 'Wechsel angefordert', 'Standzeit reicht nicht für das nächste Teil');
     if (pc) {
@@ -1184,13 +1206,14 @@
     let html, c = 'var(--st-tool)', cls = '';
     const mName = (mx) => `${esc(mx.short)} (${esc(mx.id)})`;
     if (chg) {
-      html = `<span class="tl-nx-t"><small>läuft</small>Jetzt</span><span class="tl-nx-b"><span class="eyebrow">Werkzeugwechsel läuft</span><b>${mName(chg.mx)} · ${esc(chg.tools.map(toolShort).join(', '))}</b><small>${esc(chg.by)} wechselt · fertig ca. ${esc(tclock(chg.mx.changing.t1, now))}</small></span>`;
+      html = `<span class="tl-nx-t"><small>bis ca.</small>${esc(tclock(Math.max(now, chg.mx.changing.t1), now))}</span><span class="tl-nx-b"><span class="eyebrow">Werkzeugwechsel läuft</span><b>${mName(chg.mx)} · ${esc(chg.tools.map(toolShort).join(', '))}</b><small>${esc(chg.by)} wechselt seit ${esc(tclock(chg.mx.changing.t0, now))}</small></span>`;
       R.next.dataset.sel = chg.sel;
     } else if (plan && (!proj || plan.t <= proj.t + 60)) {
       if (plan.g.waitFromT != null) c = 'var(--st-wait)';
       const pIdx = plan.g.tools.length > 0 && plan.g.tools.every(willIndex);
       // eine Aussage je Teil: was (wenden / tauschen) · wer und wo – „an der Maschine“ nicht doppelt
-      const act = pIdx ? 'Schneide wenden' : 'Werkzeug tauschen';
+      const pAny = plan.g.tools.some(willIndex);
+      const act = pIdx ? 'Schneide wenden' : pAny ? 'tauschen und wenden' : 'Werkzeug tauschen';
       const who = plan.by ? `${plan.by} · ${plan.stage}` : plan.stage === 'Werkzeug liegt bereit' ? 'Werkzeug liegt bereit' : plan.g.note ? plan.g.note : pIdx ? 'Bediener:in wird rechtzeitig gerufen' : 'Einrichter:in wird rechtzeitig losgeschickt';
       const waitTxt = plan.g.waitFromT != null ? (plan.mx.mv.state === 'waitTool' ? 'Maschine wartet' : 'Maschine steht ab ' + tclock(plan.g.waitFromT, now)) : null;
       html = `<span class="tl-nx-t"><small>ca.</small>${esc(tclock(plan.t, now))}</span><span class="tl-nx-b"><span class="eyebrow">Nächster Wechsel · angekündigt</span><b>${mName(plan.mx)} · ${esc(plan.tools.map(toolShort).join(', '))}</b><small>${esc([afterTxt(plan.g.afterPart), waitTxt, act, who].filter(Boolean).join(' · '))}</small></span>`;
@@ -1201,8 +1224,9 @@
       if (p.waitFromT != null) c = 'var(--st-wait)';
       // Unterzeile sagt nur Eindeutiges: noch nicht angekündigt (bzw. Stillstand) und was zu tun ist.
       // Ein bereits angekündigter Wechsel an einer anderen Maschine steht getrennt darunter – kein „nicht angekündigt … angekündigt“.
-      const what = [afterTxt(p.afterPart), p.waitFromT != null ? `Stillstand ab ca. ${tclock(p.waitFromT, now)}` : 'noch nicht angekündigt', p.index ? 'Schneide wenden an der Maschine' : 'Werkzeug tauschen'].join(' · ');
-      const other = plan ? `<small class="tl-nx-o">Danach angekündigt: <b>${esc(tclock(plan.t, now))}</b> an ${mName(plan.mx)}</small>` : '';
+      const anyIdx = p.members.some(mb => mb.index);
+      const what = [afterTxt(p.afterPart), p.waitFromT != null ? `Stillstand ab ca. ${tclock(p.waitFromT, now)}` : 'noch nicht angekündigt', p.index ? 'Schneide wenden an der Maschine' : anyIdx ? 'tauschen und wenden' : 'Werkzeug tauschen'].join(' · ');
+      const other = plan ? `<small class="tl-nx-o">Nächster angekündigter Wechsel: <b>${esc(tclock(plan.t, now))}</b> · ${mName(plan.mx)}</small>` : '';
       html = `<span class="tl-nx-t"><small>ca.</small>${esc(tclock(p.t, now))}</span><span class="tl-nx-b"><span class="eyebrow">Nächster Wechsel · voraussichtlich</span><b>${mName(proj.mx)} · ${esc(p.members.map(mb => toolShort(mb.s.tx.name)).join(', '))}</b><small>${esc(what)}</small>${other}</span>`;
       R.next.dataset.sel = p.lead.id ? 'tool|' + p.lead.id : 'machine|' + proj.mx.id;
     } else {
@@ -1247,13 +1271,13 @@
     const bins = Array.from({ length: hZ - hA }, () => 0);
     for (const e of m.evToday) { const b = Math.floor((e.t - m.ds) / 3600) - hA; if (b >= 0 && b < bins.length) bins[b] += (e.data && e.data.tools ? e.data.tools.length : 1); }
     const mxb = Math.max(1, ...bins), bw = 5, gap = 2, wv = bins.length * (bw + gap) - gap;
-    setHTML(R.k2v, `<svg width="${wv}" height="28" viewBox="0 0 ${wv} 28" aria-hidden="true">${bins.map((v, i) => { const fut = hA + i > hNow, hh = v ? Math.max(3, v / mxb * 26) : 2; return `<rect x="${i * (bw + gap)}" y="${(28 - hh).toFixed(1)}" width="${bw}" height="${hh.toFixed(1)}" rx="1.5" style="fill:${v ? 'var(--st-tool)' : fut ? 'var(--line)' : 'var(--line2)'};opacity:${hA + i === hNow ? 1 : v ? 0.75 : 1}"><title>${String(hA + i).padStart(2, '0')}:00 – ${v} ${v === 1 ? 'Werkzeug' : 'Werkzeuge'}</title></rect>`; }).join('')}</svg>`);
-    // nächste 2 h: Marker auf einer Linie
-    const w3 = 120, X3 = (t) => 4 + U.clamp((t - now) / 7200, 0, 1) * (w3 - 8);
-    let s3 = `<line x1="4" x2="${w3 - 4}" y1="18" y2="18" style="stroke:var(--line2)" stroke-width="2" stroke-linecap="round"/><line x1="4" x2="4" y1="12" y2="24" style="stroke:var(--accent)" stroke-width="2"/>`;
-    for (const x of m.proj2) s3 += `<rect x="${(X3(x.t) - 4).toFixed(1)}" y="14" width="8" height="8" rx="2" style="fill:var(--card);stroke:var(--st-tool)" stroke-width="1.3" stroke-dasharray="2 1.5"/>`;
-    for (const x of m.plan2) s3 += `<rect x="${(X3(x.g.t) - 4).toFixed(1)}" y="14" width="8" height="8" rx="2" style="fill:${x.g.waitFromT != null ? 'var(--st-wait)' : 'var(--st-tool)'}"/>`;
-    setHTML(R.k3v, `<svg width="${w3}" height="28" viewBox="0 0 ${w3} 28" aria-hidden="true">${s3}</svg>`);
+    setHTML(R.k2v, `<svg width="100%" height="28" viewBox="0 0 ${wv} 28" preserveAspectRatio="none" aria-hidden="true">${bins.map((v, i) => { const fut = hA + i > hNow, hh = v ? Math.max(3, v / mxb * 26) : 2; return `<rect x="${i * (bw + gap)}" y="${(28 - hh).toFixed(1)}" width="${bw}" height="${hh.toFixed(1)}" style="fill:${v ? 'var(--st-tool)' : fut ? 'var(--line)' : 'var(--line2)'};opacity:${hA + i === hNow ? 1 : v ? 0.75 : 1}"><title>${String(hA + i).padStart(2, '0')}:00 – ${v} ${v === 1 ? 'Werkzeug' : 'Werkzeuge'}</title></rect>`; }).join('')}</svg>`);
+    // nächste 2 h: Marker auf einer Zeitlinie (HTML, volle Kachelbreite, Marker bleiben quadratisch)
+    const P3 = (t) => (U.clamp((t - now) / 7200, 0, 1) * 100).toFixed(1);
+    let s3 = '<i class="ln"></i><i class="nw"></i>';
+    for (const x of m.proj2) s3 += `<i class="mk p" style="left:${P3(x.t)}%"></i>`;
+    for (const x of m.plan2) s3 += `<i class="mk${x.g.waitFromT != null ? ' w' : ''}" style="left:${P3(x.g.t)}%"></i>`;
+    setHTML(R.k3v, `<div class="tl-k3" title="Wechsel in den nächsten 2 h: gefüllt = geplant, gestrichelt = voraussichtlich">${s3}<span class="e">+2 h</span></div>`);
     setHTML(R.k4v, '');
     // Kosten kumuliert über den Tag
     const ct = [];
@@ -1690,7 +1714,7 @@
       const restSub = t.remainingMin != null ? `${minTxt(t.remainingMin)} Schnittzeit` : t.status === 'idle' ? 'nicht im Arbeitsgang' : '';
       const eg = edgeOf(t);
       // Unterzeile ohne min/Teil (steht im Detail) – damit sie nicht abgeschnitten wird
-      const sub = `${kindLabel(t.kind)}${eg ? ` · Schneide ${eg.no}/${eg.of}` : ''} · Standzeit ${U.fmtNum(t.life)} min${t.dressEvery ? ` · Abrichten alle ${t.dressEvery} Teile` : ''}`;
+      const sub = `${kindLabel(t.kind)}${eg ? ` · Schneide ${eg.no}/${eg.of}` : ` · Standzeit ${U.fmtNum(t.life)} min`}${t.dressEvery ? ` · Abrichten alle ${t.dressEvery} Teile` : ''}`;
       const mountedSec = t.mountedT != null ? now - t.mountedT : null;
       const html = `<span class="tl-slot c-slot">${t.slot ? 'T' + t.slot : '–'}</span>
         <div class="tl-tn c-n"><b title="${esc(t.name)}">${showM ? `<span class="mono" style="color:var(--muted);font-weight:500;margin-right:6px">${esc(t.machineId)}</span>` : ''}${esc(t.name)}</b><small>${esc(sub)}<span class="tl-mid">${t.mountedT != null ? ' · eingebaut ' + esc(tclock(t.mountedT, now)) : ''}${t.parts != null ? ' · ' + esc(teile(t.parts)) + ' mit Schneide' : ''}</span></small></div>
@@ -1997,7 +2021,7 @@
     const showLadder = tv.cutMinPerPart > 0 && tv.life > 0;
     return `<section class="tl-d-hero">
         <div class="tl-d-top">
-          <div class="tl-d-kv"><div class="v">${esc(U.fmtNum(tv.wearPct, 0))}<small>%</small></div><div class="l">Verschleiß${tv.wearAfterPartPct != null && tv.wearAfterPartPct > tv.wearPct && running ? ` · nach dem laufenden Teil ${esc(pct(tv.wearAfterPartPct, 0))}` : ''}</div></div>
+          <div class="tl-d-kv"><div class="v">${esc(U.fmtNum(tv.wearPct, 0))}<small>%</small></div><div class="l">Verschleiß${tv.wearAfterPartPct != null && tv.wearAfterPartPct > tv.wearPct && running ? ` · nach dem Teil ${esc(pct(tv.wearAfterPartPct, 0))}` : ''}</div></div>
           <div class="tl-d-kv"><div class="v">${rp != null ? esc(U.fmtNum(rp)) + `<small>${rp === 1 ? 'Teil' : 'Teile'}</small>` : '–'}</div><div class="l">${rp != null ? 'Reststandzeit' + (tv.remainingMin != null ? ' · ' + esc(minTxt(tv.remainingMin)) : '') : 'Reststandzeit unbekannt'}</div></div>
           <div class="tl-d-st">${chip(stLabel(tv.status), c, 'dot' + (tv.status === 'changing' ? ' pulse' : ''))}</div></div>
         <div class="tl-d-box" style="--c:${c}"><div class="tl-d-box-h">${icon('info', 14)}<span>Warum?</span></div><div>${esc(tv.explain || '–')}</div></div>

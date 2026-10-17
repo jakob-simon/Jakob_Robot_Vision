@@ -296,7 +296,7 @@ function qualified(skills, tk, pid) {
     // Kontrolle des ersten Teils nach Formwerkzeug-Wechsel (fpi local) darf der Bediener/Einrichter an der Maschine machen
     case 'fpi': return sk.has('qs') || (!!(tk && tk.data && tk.data.local) && (own || sk.has('setup')));
     case 'inspect': return sk.has('qs');
-    case 'repair': return sk.has('repair');
+    case 'repair': return sk.has('repair') || (sk.has('setup') && !sk.has('lead'));   // Instandhaltung, sonst Einrichter:in (Engine-Regel)
     case 'forklift': case 'bars': return sk.has('forklift');
     case 'assembly': return sk.has('assembly');
     default: return null;
@@ -2294,7 +2294,8 @@ function nightPhase() {
   try {
     SIM.init(PROFILE);
     const day0 = Math.floor(st().t / DAY) * DAY, t2230 = day0 + 22 * H + 30 * MIN, t2100 = day0 + 21 * H, tEnd = day0 + DAY + 6 * H + 30 * MIN;
-    const seitBad = [], lossNight = {}, blocked = { saw: 0, sawStaffed: 0 };
+    const seitBad = [], lossNight = {}, blocked = { saw: 0, sawStaffed: 0 }, flow = { staffed: 0, moving: 0, first40: 0, first40n: 0, badPhase: [], pufMax: 0 };
+    const pufCap = (STATION.PUF && STATION.PUF.cap) || 12;
     let checked2230 = false, checked2100 = false;
     while (st().t < tEnd) {
       SIM.advance(60);
@@ -2313,6 +2314,20 @@ function nightPhase() {
       }
       // Säge: Ausgang voll nur kurz (Zuschnitt auf Vorrat ist „Bereit“)
       if (!off && !inBreak(expectedShift(t), t)) { blocked.sawStaffed++; if (S0.machines.M01 && S0.machines.M01.state === 'blocked') blocked.saw++; }
+      // Materialfluss sichtbar: in der Schichtzeit fährt meist ein AGV bzw. der Stapler; Transportphase/Wartegrund je offenem Transport
+      if (!off) {
+        const mv = Object.values(S0.agvs).some((a) => a.route) || Object.values(S0.people).some((p) => p.task && (p.task.type === 'forklift' || p.task.type === 'bars') && p.route);
+        flow.staffed++; if (mv) flow.moving++;
+        if (t - day0 - 8 * H - 40 * MIN <= 40 * MIN) { flow.first40n++; if (mv) flow.first40++; }
+      }
+      for (const tr of Object.values(S0.transports)) {
+        if (tr.status === 'done') continue;
+        R();
+        const okP = tr.status === 'open' ? ((tr.phase === 'geplant') === (tr.waitCode === 'destFull') && (tr.phase === 'geplant' || tr.phase === 'wartend') && (!tr.waitCode || typeof tr.waitReason === 'string')) : tr.phase === 'unterwegs';
+        if (!okP && t - tr.createdT > 10 && flow.badPhase.length < 3) flow.badPhase.push(`${clk(t)} ${tr.id} ${tr.kind} status ${tr.status} phase ${tr.phase} waitCode ${tr.waitCode} „${tr.waitReason}“`);
+        if (tr.kind === 'empty' && (tr.containerId || tr.mode !== 'AGV')) flow.badPhase.push(`${tr.id}: Leergut transport with container/mode ${tr.mode}`);
+      }
+      if (S0.stations.PUF) flow.pufMax = Math.max(flow.pufMax, S0.stations.PUF.inp.length + S0.stations.PUF.out.length);
       // ohne Schicht: nicht autonome Maschinen stehen geplant (kein Verlust)
       if (off && x >= 22 * H + 5 * MIN) {
         for (const mid of MACHINE_IDS_LIST) {
@@ -2383,6 +2398,12 @@ function nightPhase() {
     const sawShare = blocked.sawStaffed ? blocked.saw / blocked.sawStaffed : 0;
     if (sawShare > 0.05) fail('night', `saw M01 'blocked' ${U3(sawShare)} of staffed time (expected rare – cut ahead / switch orders instead)`, 'sawblk');
     note('night', `saw M01 blocked ${(sawShare * 100).toFixed(1)} % of staffed minutes Mo–Di; ${notes.filter((n) => COMPACT.test(n.key) && n.status !== 'resolved').length} notification texts checked`);
+    R(3);
+    const mvShare = flow.staffed ? flow.moving / flow.staffed : 0, mv40 = flow.first40n ? flow.first40 / flow.first40n : 0;
+    if (mvShare < 0.35) fail('night', `an AGV/forklift moves only ${U3(mvShare)} of staffed minutes (expected regular visible material flow, ≥ 35 %)`, 'flowmv');
+    if (flow.badPhase.length) fail('night', `transport phase/waitReason inconsistent: ${flow.badPhase[0]}`, 'flowphase');
+    if (flow.pufMax > pufCap) fail('night', `Pufferlager holds ${flow.pufMax} containers > cap ${pufCap}`, 'pufcap');
+    note('night', `material flow: AGV/forklift moving ${(mvShare * 100).toFixed(0)} % of staffed minutes (first 40 min after 08:40: ${(mv40 * 100).toFixed(0)} %), Pufferlager max ${flow.pufMax}/${pufCap}`);
   } catch (e) { warn('load', `test suite error in night phase: ${errStr(e)}`); }
   finally { offN(); }
 }

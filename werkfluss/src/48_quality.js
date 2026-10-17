@@ -137,7 +137,6 @@
   .qa-kpis{grid-template-columns:repeat(5,minmax(0,1fr))}
   @media (max-width:900px){.qa-kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}}
   @media (max-width:560px){.qa-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.qa-kpis .kpi:last-child:nth-child(odd){grid-column:1/-1}}
-  .qa-kpis .kpi{display:flex;flex-direction:column}
   .qa-kpis .kpi.click{cursor:pointer}.qa-kpis .kpi.click:hover{border-color:var(--line2)}
   .qa-kpis .kpi .v{display:flex;align-items:baseline;gap:5px}
   .qa-kpis .kpi .v small{margin-left:0}
@@ -145,82 +144,96 @@
   .qa-kpis .kpi .s b{color:var(--text2);font-weight:600}
   .qa-kpis .kpi .s{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.4}
   .qa-now .m b{color:var(--text2);font-weight:600}
-  .qa-now .m.occ{color:var(--faint);font-size:11.5px}
-  .qa-kpis .kpi.warn{border-color:color-mix(in srgb,var(--st-wait) 45%,var(--line));background:color-mix(in srgb,var(--st-wait) 6%,var(--card))}
-  .qa-kpis .kpi.warn .v{color:color-mix(in srgb,var(--st-wait) 72%,var(--text))}
-  .qa-kpis .kpi.crit{border-color:color-mix(in srgb,var(--st-fault) 45%,var(--line));background:color-mix(in srgb,var(--st-fault) 6%,var(--card))}
-  .qa-kpis .kpi.crit .v{color:color-mix(in srgb,var(--st-fault) 72%,var(--text))}
-  .qa-fpy{display:flex;height:6px;gap:2px;margin-top:7px}
+  .qa-now .m.occ{color:var(--faint);font-size:var(--fs-xs)}
+  .qa-kpis .kpi .s .bad{color:var(--st-fault)}
+  .qa-kpis .kpi .s .bad b{color:inherit}
+  .qa-kpis .kpi .s .wa,.qa-kpis .kpi .s .wa b{color:var(--st-wait)}
+  .qa-fpy{display:flex;height:6px;gap:2px;margin-top:auto;padding-top:0}
+  .qa-fpy-w{margin-top:auto;padding-top:8px}
   .qa-fpy i{display:block;height:100%;border-radius:2px;background:var(--c)}
-  .qa-tag{font:600 9.5px/1 var(--f-ui);letter-spacing:.06em;text-transform:uppercase;padding:2px 5px;border-radius:4px;color:var(--muted);border:1px solid var(--line2);margin-left:6px;vertical-align:2px}
+  .qa-tag{font:600 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.06em;text-transform:uppercase;padding:2px 5px;border-radius:4px;color:var(--muted);border:1px solid var(--line2);margin-left:6px;vertical-align:2px}
 
   /* Messraum-Strecke */
   .qa-lab{display:grid;grid-template-columns:minmax(220px,300px) minmax(0,1fr) minmax(200px,280px);align-items:stretch}
   .qa-lab > div{padding:12px 14px;min-width:0}
   .qa-lab > div + div{border-left:1px solid var(--line)}
   .qa-lab .eyebrow{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-  .qa-lab .eyebrow b{font-weight:600;color:var(--text2);letter-spacing:0;text-transform:none;font-size:11.5px}
+  .qa-lab .eyebrow b{font-weight:600;color:var(--text2);letter-spacing:0;text-transform:none;font-size:var(--fs-xs)}
   .qa-now{display:flex;flex-direction:column;gap:6px}
   .qa-now .row{gap:8px}
-  .qa-now .t{font-size:13px;line-height:1.4;color:var(--text)}
-  .qa-now .m{font-size:12px;color:var(--muted)}
+  .qa-now .t{font-size:var(--fs-md);line-height:1.4;color:var(--text)}
+  .qa-now .m{font-size:var(--fs-sm);color:var(--muted)}
   .qa-now .bar{height:5px}
   .qa-q{display:flex;align-items:center;gap:6px;overflow:hidden;padding-bottom:2px;min-height:58px}
-  .qa-ct{--c:var(--mat);flex:none;display:flex;flex-direction:column;gap:2px;width:var(--qa-cw,136px);min-width:0;padding:7px 10px;border-radius:8px;background:color-mix(in srgb,var(--c) 8%,var(--bg2));border:1px solid color-mix(in srgb,var(--c) 30%,transparent);cursor:pointer;font-size:12px;position:relative}
+  .qa-ct{--c:var(--mat);flex:none;display:flex;flex-direction:column;gap:2px;width:var(--qa-cw,136px);min-width:0;padding:7px 10px;border-radius:8px;background:color-mix(in srgb,var(--c) 8%,var(--bg2));border:1px solid color-mix(in srgb,var(--c) 30%,transparent);cursor:pointer;font-size:var(--fs-sm);position:relative}
   .qa-ct > *{min-width:0;overflow:hidden;text-overflow:ellipsis}
   .qa-ct:hover{border-color:color-mix(in srgb,var(--c) 60%,transparent)}
-  .qa-ct b{font:600 12.5px/1.2 var(--f-mono);color:var(--text)}
-  .qa-ct span{color:var(--muted);white-space:nowrap;font-size:11.5px}
+  .qa-ct b{font:600 var(--fs-sm)/1.2 var(--f-mono);color:var(--text)}
+  .qa-ct span{color:var(--muted);white-space:nowrap;font-size:var(--fs-xs)}
   .qa-ct em{font-style:normal;font-weight:600;color:var(--text2);font-variant-numeric:tabular-nums}
   .qa-ct.tr{border-style:dashed;opacity:.8}
-  .qa-ct.nx::before{content:"als Nächstes";position:absolute;top:-8px;left:8px;font:600 9px/14px var(--f-ui);letter-spacing:.06em;text-transform:uppercase;padding:0 5px;border-radius:4px;background:var(--mat);color:var(--accent-ink)}
+  .qa-ct.nx::before{content:"als Nächstes";position:absolute;top:-8px;left:8px;font:600 var(--fs-2xs)/14px var(--f-ui);letter-spacing:.06em;text-transform:uppercase;padding:0 5px;border-radius:4px;background:var(--mat);color:var(--accent-ink)}
   .qa-q{padding-top:8px}
   .qa-ct.cur{--c:var(--info)}
-  .qa-ct.cur::before{content:"in Prüfung";position:absolute;top:-8px;left:8px;font:600 9px/14px var(--f-ui);letter-spacing:.06em;text-transform:uppercase;padding:0 5px;border-radius:4px;background:var(--info);color:var(--accent-ink)}
+  .qa-ct.cur::before{content:"in Prüfung";position:absolute;top:-8px;left:8px;font:600 var(--fs-2xs)/14px var(--f-ui);letter-spacing:.06em;text-transform:uppercase;padding:0 5px;border-radius:4px;background:var(--info);color:var(--accent-ink)}
   .qa-arrow{flex:none;width:16px;color:var(--faint);display:flex;align-items:center;justify-content:center}
-  .qa-more{flex:none;align-self:stretch;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;width:52px;border-radius:8px;border:1px dashed var(--line2);color:var(--text2);font:600 13px/1.1 var(--f-ui);cursor:default}
-  .qa-more small{font:500 10.5px/1.1 var(--f-ui);color:var(--muted)}
-  .qa-q-empty{font-size:12.5px;color:var(--muted)}
+  .qa-more{flex:none;align-self:stretch;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;width:52px;border-radius:8px;border:1px dashed var(--line2);color:var(--text2);font:600 var(--fs-md)/1.1 var(--f-ui);cursor:default}
+  .qa-more small{font:500 var(--fs-2xs)/1.1 var(--f-ui);color:var(--muted)}
+  .qa-q-empty{font-size:var(--fs-sm);color:var(--muted)}
   .qa-fpis{display:flex;flex-direction:column;gap:6px}
-  .qa-fp{--c:var(--st-setup);display:flex;align-items:center;gap:8px;font-size:12px;padding:6px 9px;border-radius:7px;background:color-mix(in srgb,var(--c) 8%,var(--bg2));border:1px solid color-mix(in srgb,var(--c) 28%,transparent);cursor:pointer}
+  .qa-fp{--c:var(--st-setup);display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);padding:6px 9px;border-radius:7px;background:color-mix(in srgb,var(--c) 8%,var(--bg2));border:1px solid color-mix(in srgb,var(--c) 28%,transparent);cursor:pointer}
   .qa-fp b{font-weight:600;color:var(--text)}
   .qa-fp span{color:var(--muted);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
   .qa-fp em{font-style:normal;color:var(--text2);font-variant-numeric:tabular-nums;white-space:nowrap}
   .qa-fp.warn{--c:var(--st-wait)}
   .qa-fp.warn em{color:var(--st-wait)}
 
-  .qa-main{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:14px;align-items:start}
+  /* zwei Spalten gleich hoch: die jeweils letzte Karte füllt auf, ihr Fußtext steht unten (keine Lücke vor dem Messprotokoll) */
+  .qa-main{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:14px;align-items:stretch}
   .qa-col{display:flex;flex-direction:column;gap:14px;min-width:0}
+  .qa-col > .card:last-child{flex:1 1 auto;display:flex;flex-direction:column}
+  .qa-col > .card:last-child .qa-card-f{margin-top:auto}
+  .qa-up{padding:10px 14px 12px;border-top:1px solid var(--line)}
+  .qa-up-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:6px}
+  .qa-up-h .muted{font-size:var(--fs-xs)}
+  .qa-up-r{display:grid;grid-template-columns:44px minmax(0,1fr) minmax(0,1.3fr) auto;gap:10px;align-items:center;min-height:32px;padding:4px 6px;margin:0 -6px;border-radius:7px;font-size:var(--fs-sm);cursor:pointer}
+  .qa-up-r:hover{background:color-mix(in srgb,var(--raise) 35%,transparent)}
+  .qa-up-r b{font:600 var(--fs-md) var(--f-cond);color:var(--text)}
+  .qa-up-r .nm{color:var(--text2);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .qa-up-r .o{font-family:var(--f-mono);font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .qa-up-r .t{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right;min-width:72px}
+  .qa-up-r .t small{display:block;font-weight:500;color:var(--muted);font-size:var(--fs-xs)}
+  .qa-up-e{font-size:var(--fs-sm);color:var(--muted)}
   .qa-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start}
 
   /* SPC */
   .qa-spc .card-h{flex-wrap:wrap}
   .qa-spc-ctl{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
-  .qa-spc-ctl select.input{width:auto;max-width:360px;height:30px;padding:3px 30px 3px 10px;font-size:12.5px;background-color:var(--bg2)}
-  .qa-spc-ctl .seg button{padding:5px 9px;font-size:12px}
-  .qa-spc-meta{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);padding:10px 14px 0}
+  .qa-spc-ctl select.input{width:auto;max-width:360px;height:30px;padding:3px 30px 3px 10px;font-size:var(--fs-sm);background-color:var(--bg2)}
+  .qa-spc-ctl .seg button{padding:5px 9px;font-size:var(--fs-sm)}
+  .qa-spc-meta{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap;font-size:var(--fs-sm);color:var(--muted);padding:10px 14px 0}
   .qa-spc-meta b{color:var(--text);font-weight:600}
-  .qa-spc-meta .link{font-size:12.5px}
+  .qa-spc-meta .link{font-size:var(--fs-sm)}
   .qa-chart{position:relative;padding:6px 8px 0 4px}
   .qa-chart svg{display:block;width:100%;overflow:visible}
-  .qa-chart text{font-family:var(--f-ui);font-size:10.5px;fill:var(--muted)}
+  .qa-chart text{font-family:var(--f-ui);font-size:var(--fs-2xs);fill:var(--muted)}
   .qa-chart .tk{font-variant-numeric:tabular-nums}
-  .qa-chart .lb{font-weight:600;font-size:10.5px}
+  .qa-chart .lb{font-weight:600;font-size:var(--fs-2xs)}
   .qa-chart .grid{stroke:var(--line);stroke-width:1}
   .qa-chart .hit{fill:transparent;cursor:crosshair}
-  .qa-lg{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:var(--muted);padding:6px 14px 0}
+  .qa-lg{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:var(--fs-xs);color:var(--muted);padding:6px 14px 0}
   .qa-lg span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
   .qa-lg svg{flex:none}
   .qa-st{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:0;margin:12px 14px 0;border:1px solid var(--line);border-radius:9px;background:var(--bg2);overflow:hidden}
   .qa-st > div{padding:8px 11px;min-width:0}
   .qa-st > div + div{border-left:1px solid var(--line)}
-  .qa-st .l{font:600 9.5px/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
-  .qa-st .v{font:600 18px/1.25 var(--f-cond);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .qa-st .v small{font:500 11px/1 var(--f-ui);color:var(--muted);margin-left:3px}
+  .qa-st .l{font:600 var(--fs-2xs)/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .qa-st .v{font:600 var(--fs-xl)/1.25 var(--f-cond);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .qa-st .v small{font:500 var(--fs-xs)/1 var(--f-ui);color:var(--muted);margin-left:3px}
   .qa-st .v.ok{color:var(--st-run)} .qa-st .v.warn{color:var(--st-wait)} .qa-st .v.crit{color:var(--st-fault)}
-  .qa-expl{margin:10px 14px 0;font-size:12.5px;line-height:1.5;color:var(--text2)}
+  .qa-expl{margin:10px 14px 0;font-size:var(--fs-sm);line-height:1.5;color:var(--text2)}
   .qa-expl b{color:var(--text);font-weight:600}
-  .qa-hint{--c:var(--st-wait);margin:10px 14px 0;display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:9px;background:color-mix(in srgb,var(--c) 8%,var(--bg2));border:1px solid color-mix(in srgb,var(--c) 32%,transparent);font-size:12.5px;line-height:1.5;color:var(--text2)}
+  .qa-hint{--c:var(--st-wait);margin:10px 14px 0;display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:9px;background:color-mix(in srgb,var(--c) 8%,var(--bg2));border:1px solid color-mix(in srgb,var(--c) 32%,transparent);font-size:var(--fs-sm);line-height:1.5;color:var(--text2)}
   .qa-hint .ico{flex:none;color:var(--c);margin-top:2px}
   .qa-hint b{color:var(--text);font-weight:600}
   .qa-hint .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
@@ -228,7 +241,7 @@
   .qa-hint.ok{--c:var(--st-run)}
   .qa-hint.crit{--c:var(--st-fault)}
   .qa-spc-foot{height:14px}
-  .qa-tip{position:fixed;z-index:80;pointer-events:none;background:var(--card2);border:1px solid var(--line2);border-radius:8px;padding:7px 10px;font-size:12px;line-height:1.45;box-shadow:var(--shadow);max-width:280px;color:var(--text2)}
+  .qa-tip{position:fixed;z-index:80;pointer-events:none;background:var(--card2);border:1px solid var(--line2);border-radius:8px;padding:7px 10px;font-size:var(--fs-sm);line-height:1.45;box-shadow:var(--shadow);max-width:280px;color:var(--text2)}
   .qa-tip b{color:var(--text);font-weight:600}
 
   /* Prozessfähigkeit */
@@ -237,38 +250,38 @@
   .qa-cr:hover{background:color-mix(in srgb,var(--raise) 35%,transparent)}
   .qa-cr.on{background:color-mix(in srgb,var(--accent) 7%,transparent);box-shadow:inset 2px 0 0 var(--accent)}
   .qa-cr .n{min-width:0;display:flex;flex-direction:column;gap:1px}
-  .qa-cr .n b{font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .qa-cr .n span{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .qa-cr .n b{font-weight:600;font-size:var(--fs-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .qa-cr .n span{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .qa-cr .n em{font-style:normal;color:var(--st-run)}
   .qa-cr .tr{position:relative;display:block;height:8px;border-radius:3px;background:var(--track)}
   .qa-cr .tr i{position:absolute;left:0;top:0;bottom:0;border-radius:0 3px 3px 0}
   .qa-cr .tr b{position:absolute;top:-3px;bottom:-3px;width:0;border-left:1px solid var(--muted);opacity:.7}
-  .qa-cr .v{font:600 15px/1 var(--f-cond);text-align:right;font-variant-numeric:tabular-nums}
-  .qa-cap-ax{position:relative;height:12px;margin:2px 14px 0;margin-left:calc(100% - 14px - 38px - 10px - 104px);width:104px;font:500 9.5px/1 var(--f-ui);color:var(--faint)}
+  .qa-cr .v{font:600 var(--fs-lg)/1 var(--f-cond);text-align:right;font-variant-numeric:tabular-nums}
+  .qa-cap-ax{position:relative;height:12px;margin:2px 14px 0;margin-left:calc(100% - 14px - 38px - 10px - 104px);width:104px;font:500 var(--fs-2xs)/1 var(--f-ui);color:var(--faint)}
   .qa-cap-ax span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}
-  .qa-cap-more{font-size:11.5px;color:var(--faint);padding:6px 14px 0}
+  .qa-cap-more{font-size:var(--fs-xs);color:var(--faint);padding:6px 14px 0}
   /* Balken */
   .qa-bars{display:grid;grid-template-columns:minmax(78px,max-content) minmax(50px,1fr) max-content max-content;gap:9px 10px;align-items:center}
   .qa-br{display:contents}
   .qa-br.click > *{cursor:pointer}
   .qa-br.click:hover .qa-l{color:var(--text)}
-  .qa-l{font-size:12.5px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .qa-l{font-size:var(--fs-sm);color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .qa-tr{position:relative;height:12px;border-radius:3px;background:var(--track)}
   .qa-tr i{position:absolute;left:0;top:0;bottom:0;border-radius:0 4px 4px 0;background:var(--c,var(--st-fault))}
-  .qa-v{font:600 13px/1 var(--f-ui);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;color:var(--text)}
-  .qa-v small{font-weight:500;color:var(--muted);font-size:11px;margin-left:2px}
-  .qa-m{font-size:11.5px;color:var(--muted);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;min-width:52px}
-  .qa-sub{font:600 10px/1 var(--f-ui);letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin:16px 0 10px}
+  .qa-v{font:600 var(--fs-md)/1 var(--f-ui);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;color:var(--text)}
+  .qa-v small{font-weight:500;color:var(--muted);font-size:var(--fs-xs);margin-left:2px}
+  .qa-m{font-size:var(--fs-xs);color:var(--muted);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;min-width:52px}
+  .qa-sub{font:600 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin:16px 0 10px}
   .qa-sub:first-child{margin-top:0}
-  .qa-note{font-size:11.5px;color:var(--faint);margin-top:12px;line-height:1.45}
-  .qa-empty{font-size:12.5px;color:var(--muted);padding:6px 0;display:flex;gap:8px;align-items:center}
+  .qa-note{font-size:var(--fs-xs);color:var(--faint);margin-top:12px;line-height:1.45}
+  .qa-empty{font-size:var(--fs-sm);color:var(--muted);padding:6px 0;display:flex;gap:8px;align-items:center}
   .qa-empty .ico{color:var(--st-run);flex:none}
 
   /* Tabellen */
   .qa-tbl td{font-variant-numeric:tabular-nums}
-  .qa-tbl td.mono,.qa-tbl .mono{font-size:12px}
-  .qa-tbl td .sub{display:block;font-size:11px;color:var(--faint)}
-  .qa-res{--c:var(--st-run);display:inline-flex;align-items:center;gap:5px;font:600 11px/18px var(--f-ui);padding:0 8px 0 6px;border-radius:999px;white-space:nowrap;color:color-mix(in srgb,var(--c) 82%,white);background:color-mix(in srgb,var(--c) 14%,transparent);border:1px solid color-mix(in srgb,var(--c) 36%,transparent)}
+  .qa-tbl td.mono,.qa-tbl .mono{font-size:var(--fs-sm)}
+  .qa-tbl td .sub{display:block;font-size:var(--fs-xs);color:var(--faint)}
+  .qa-res{--c:var(--st-run);display:inline-flex;align-items:center;gap:5px;font:600 var(--fs-xs)/18px var(--f-ui);padding:0 8px 0 6px;border-radius:999px;white-space:nowrap;color:color-mix(in srgb,var(--c) 82%,white);background:color-mix(in srgb,var(--c) 14%,transparent);border:1px solid color-mix(in srgb,var(--c) 36%,transparent)}
   .qa-res i{width:6px;height:6px;border-radius:50%;background:var(--c)}
   .qa-res.nok{--c:var(--st-fault)} .qa-res.open{--c:var(--st-setup)} .qa-res.wait{--c:var(--st-wait)} .qa-res.rw{--c:var(--st-wait)}
   .qa-gauge{display:block}
@@ -277,7 +290,7 @@
   .qa-tbl tr.cur td{background:color-mix(in srgb,var(--accent) 6%,transparent)}
   .qa-tbl tr.cur td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
   .qa-tot td{font-weight:600;color:var(--text);background:var(--bg2)}
-  .qa-tbl td .sub{white-space:nowrap;font-family:var(--f-ui);font-size:11px}
+  .qa-tbl td .sub{white-space:nowrap;font-family:var(--f-ui);font-size:var(--fs-xs)}
   .qa-tbl td b{font-weight:600;color:var(--text)}
   .qa-late{color:var(--st-wait)!important}
   .qa-fpit td{padding-top:7px;padding-bottom:7px}
@@ -286,18 +299,19 @@
   .qa-sp:last-child{border-bottom:0}
   .qa-sp.click{cursor:pointer}.qa-sp.click:hover{background:color-mix(in srgb,var(--raise) 35%,transparent)}
   .qa-sp > div{display:flex;flex-direction:column;gap:1px;min-width:0}
-  .qa-sp .a b{font:600 12.5px/1.3 var(--f-mono);color:var(--text)}
+  .qa-sp .a b{font:600 var(--fs-sm)/1.3 var(--f-mono);color:var(--text)}
   .qa-sp .b{align-items:flex-end;flex:none}
   .qa-sp .b b{font-weight:600;font-variant-numeric:tabular-nums;color:var(--text)}
-  .qa-sp span{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .qa-sp span{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .qa-sp span.r{color:var(--faint)}
-  .qa-card-f{padding:9px 14px 11px;border-top:1px solid var(--line);font-size:11.5px;color:var(--faint);line-height:1.45}
+  .qa-card-f{padding:9px 14px 11px;border-top:1px solid var(--line);font-size:var(--fs-xs);color:var(--faint);line-height:1.45}
 
   @media (max-width:1280px){.qa-main{grid-template-columns:minmax(0,1fr) 320px}.qa-lab{grid-template-columns:minmax(200px,260px) minmax(0,1fr) minmax(190px,240px)}}
   @media (max-width:1100px){.qa-main,.qa-two{grid-template-columns:minmax(0,1fr)}.qa-lab{grid-template-columns:minmax(0,1fr)}.qa-lab > div + div{border-left:0;border-top:1px solid var(--line)}.qa-st{grid-template-columns:repeat(3,minmax(0,1fr))}.qa-st > div:nth-child(4){border-left:0}.qa-st > div:nth-child(n+4){border-top:1px solid var(--line)}}
   @media (max-width:560px){.qa-spc-ctl{width:100%}.qa-spc-ctl select.input{max-width:none;flex:1;min-width:0;width:100%}.qa-bars{grid-template-columns:minmax(64px,max-content) minmax(40px,1fr) max-content}.qa-m{display:none}
     .qa-st{grid-template-columns:repeat(2,minmax(0,1fr))}.qa-st > div:nth-child(n){border-left:0;border-top:1px solid var(--line)}.qa-st > div:nth-child(2n){border-left:1px solid var(--line)}.qa-st > div:nth-child(-n+2){border-top:0}
     .qa-tbl .hm{display:none}.qa-tbl td,.qa-tbl th{padding-left:8px;padding-right:8px}}
+  @media (pointer:coarse){.qa-spc-ctl select.input{height:40px}.qa-cr,.qa-up-r,.qa-sp.click{min-height:44px}.qa-fp{min-height:40px}.qa-ct{min-height:44px}}
   .qa-mo{display:none}
   @media (max-width:560px){.qa-mo{display:inline}}
   `, 'quality');
@@ -313,15 +327,16 @@
         <div class="view-h"><div><h1 class="view-t">Qualität</h1>
           <p class="view-sub">Gutteile, Ausschuss und Prozessfähigkeit – direkt aus den Messwerten jedes Arbeitsgangs. Trends werden erkannt, bevor Ausschuss entsteht.</p></div></div>
         <div class="kpis qa-kpis">
-          <div class="kpi"><div class="l">Gutteilquote (FPY)</div><div class="v" data-r="kFpy">–</div><div class="s" data-r="kFpyS">–</div><div class="qa-fpy" data-r="kFpyB"></div></div>
+          <div class="kpi"><div class="l">Gutteilquote (FPY)</div><div class="v" data-r="kFpy">–</div><div class="s" data-r="kFpyS">–</div><div class="qa-fpy-w"><div class="qa-fpy" data-r="kFpyB"></div></div></div>
           <div class="kpi click" data-r="kScrapBox" title="Zu Ausschuss nach Ursache"><div class="l">Ausschuss heute</div><div class="v" data-r="kScrap">–</div><div class="s" data-r="kScrapS">–</div></div>
           <div class="kpi click" data-r="kFpiBox" title="Zu den Erstteilprüfungen"><div class="l">Erstteile heute</div><div class="v" data-r="kFpi">–</div><div class="s" data-r="kFpiS">–</div></div>
           <div class="kpi"><div class="l">Prüflose am Messraum</div><div class="v" data-r="kLab">–</div><div class="s" data-r="kLabS">–</div></div>
           <div class="kpi click" data-r="kSpcBox" title="SPC-Regelkarte des betroffenen Merkmals öffnen"><div class="l">SPC-Warnungen</div><div class="v" data-r="kSpc">–</div><div class="s" data-r="kSpcS">–</div></div>
         </div>
         <section class="card" aria-label="Messraum">
+          <div class="card-h"><h3>Messraum</h3><span class="muted" data-r="labSub"></span></div>
           <div class="qa-lab">
-            <div><div class="eyebrow">Messraum · in Prüfung</div><div class="qa-now" data-r="labNow"></div></div>
+            <div><div class="eyebrow">In Prüfung</div><div class="qa-now" data-r="labNow"></div></div>
             <div><div class="eyebrow">Warteschlange Prüflose <b data-r="labQn"></b></div><div class="qa-q" data-r="labQ"></div></div>
             <div><div class="eyebrow">Erstteile warten auf Freigabe <b data-r="labFn"></b></div><div class="qa-fpis" data-r="labF"></div></div>
           </div>
@@ -343,6 +358,8 @@
           <section class="card" data-r="fpiCard" aria-label="Erstteilprüfungen">
             <div class="card-h"><h3>Erstteilprüfungen</h3><span class="muted" data-r="fpiSub"></span></div>
             <div class="tbl-wrap qa-tw" data-r="fpi"></div>
+            <div class="qa-up" data-r="fpiUp"></div>
+            <div class="qa-card-f">Erstteil = erstes Teil nach dem Rüsten (oder nach dem Wechsel eines Formwerkzeugs). Die Serie läuft erst nach der Freigabe weiter – Wartezeit bis zur Freigabe ist Stillstand.</div>
           </section>
           </div>
           <div class="qa-col">
@@ -390,7 +407,7 @@
       if (lk) { e.stopPropagation(); const [k, id] = lk.dataset.sel.split('|'); if (k === 'char') { selectKey(id); R.spcCard.scrollIntoView({ behavior: 'smooth', block: 'start' }); } else WF.app.select(k, id); }
     });
     // Listen pausieren ihre Aktualisierung, solange der Mauszeiger darüber ist (Klickziele bleiben stabil)
-    for (const k of ['log', 'fpi', 'sperr', 'cap', 'labQ', 'labF', 'byMachine']) {
+    for (const k of ['log', 'fpi', 'fpiUp', 'sperr', 'cap', 'labQ', 'labF', 'byMachine']) {
       const n = R[k]; n.addEventListener('mouseenter', () => { n._hover = true; }); n.addEventListener('mouseleave', () => { n._hover = false; });
     }
     R.chart.addEventListener('mousemove', onChartMove);
@@ -422,7 +439,9 @@
     setHTML(R.kFpi, `${U.fmtNum(k.fpiOk)}<small>i.O.</small><span class="sep">·</span>${U.fmtNum(k.fpiNok)}<small>n.i.O.</small>`);
     const waitL = open.filter(x => !x.local).sort((a, b) => b.waitingSec - a.waitingSec);
     setHTML(R.kFpiS, open.length ? `<b>${open.length} offen</b>${waitL[0] ? ` · ${esc(waitL[0].mid)} ${waitL[0].stage === 'measure' ? 'wird gemessen' : 'wartet ' + esc(durMin(waitL[0].waitingSec))}` : ''}` : 'keine offen');
-    R.kFpiBox.classList.toggle('warn', open.some(x => x.stage !== 'measure' && x.waitingSec >= 600));
+    // lange Wartezeit betrifft nicht den Wert (i.O./n.i.O.) – Hinweis nur in der Zusatzzeile
+    const fpiLate = open.some(x => !x.local && x.stage !== 'measure' && x.waitingSec >= 600);
+    if (fpiLate) setHTML(R.kFpiS, `<span class="wa">${R.kFpiS.innerHTML}</span>`);
     const lab = labQueue(now);
     setHTML(R.kLab, `${lab.items.length}<small>${lab.items.length === 1 ? 'Los' : 'Lose'}</small>${lab.items.length ? `<span class="sep">·</span>${U.fmtNum(lab.qty)}<small>Stk</small>` : ''}`);
     setText(R.kLabS, lab.items.length ? `ca. ${U.fmtDur(lab.sec)} Prüfzeit${lab.transit ? ` · ${lab.transit} unterwegs` : ''}` : lab.transit ? `${lab.transit} unterwegs zum Messraum` : 'Warteschlange leer');
@@ -439,13 +458,13 @@
     } else {
       kv = `0<small>offen</small>${spcToday.length ? `<span class="sep">·</span>${spcToday.length}<small>heute</small>` : ''}`;
       const bits = [];
-      if (worst && worst.cpk < 1) bits.push(`<b>${esc(worst.station)} ${esc(worst.name)}: Cpk ${U.fmtNum(worst.cpk, 2)}</b> – nicht fähig`);
+      if (worst && worst.cpk < 1) bits.push(`<span class="bad"><b>${esc(worst.station)} ${esc(worst.name)}: Cpk ${U.fmtNum(worst.cpk, 2)}</b> – nicht fähig</span>`);
       // Anzahl steht schon im Wert („2 heute“) – hier nur der Stand
       if (spcToday.length) bits.push(spcToday.every(n => n.status === 'resolved') ? `${spcToday.length === 1 ? 'Trend' : 'Trends'} korrigiert` : `${spcAck.length} quittiert`);
       else if (spcAck.length) bits.push(`${spcAck.length} quittiert`);
       if (!bits.length) bits.push('kein Trend heute', capInfo.n ? (capInfo.low ? `${capInfo.low} ${capInfo.low === 1 ? 'Merkmal' : 'Merkmale'} Cpk < 1,33` : 'alle Merkmale fähig') : '');
       ks = bits.filter(Boolean).join(' · ');
-      kc = worst && worst.cpk < 1 ? 'crit' : (spcToday.length || spcAck.length) ? 'warn' : '';
+      kc = '';   // Wert 0 offen: kein Hinweisstreifen (UI-Regel 14) – nur die Zusatzzeile nennt das nicht fähige Merkmal
     }
     setHTML(R.kSpc, kv);
     setHTML(R.kSpcS, ks);
@@ -522,13 +541,16 @@
       setText(R.labQn, lab.items.length ? `${lab.items.length} · ${U.fmtNum(lab.qty)} Stk · ca. ${U.fmtDur(lab.sec)}` : '');
       const firstPlanned = planL.filter(e => !e.active).reduce((m, e) => Math.min(m, e.start), Infinity);
       const all = lab.items.map(x => ({ c: x.c, r: x.r, tr: null })).concat(trans.map(x => { const o = Sx.orders[x.c.orderId]; return { c: x.c, r: o ? o.routing[x.c.idx] : null, tr: x.t }; }));
-      let nextDone = false;
+      let nextDone = false, curDone = false;
       const chip = (x) => {
-        const { c, r, tr } = x, k = c.orderId + '/' + (r ? r.seq : ''), e = plan[k], cur = !tr && k === curO;
-        const first = !tr && !cur && !nextDone && (!e || e.start <= firstPlanned + 1);
-        if (!tr && !cur && !nextDone) nextDone = true;
+        const { c, r, tr } = x, k = c.orderId + '/' + (r ? r.seq : ''), e = plan[k], cur = !tr && k === curO && !curDone;
+        if (cur) curDone = true;
+        const sameLot = !tr && !cur && k === curO;
+        const first = !tr && !cur && !sameLot && !nextDone && (!e || e.start <= firstPlanned + 1);
+        if (!tr && !cur && !sameLot && !nextDone) nextDone = true;
         const when = tr ? 'unterwegs (' + esc(tr.mode) + ')'
           : cur ? (mv && mv.etaBusyEnd != null ? 'belegt bis ca. ' + esc(tclock(mv.etaBusyEnd, now)) : 'in Prüfung')
+          : sameLot ? 'gleiches Los, danach'
           : e ? 'ca. ' + esc(tclock(e.start, now)) + '–' + esc(tclock(e.end, now))
           : r && r.cycleMin ? 'ca. ' + esc(U.fmtDur(c.qty * r.cycleMin * 60)) + ' Prüfzeit' : esc(c.id);
         const tip = `${c.id} · ${c.partName || ''}${r ? ' · AG ' + r.seq + ' ' + r.op : ''}${tr ? ' – unterwegs: ' + (tr.label || '') : e ? ` – Plan: Prüfung ${tclock(e.start, now)}–${tclock(e.end, now)}${e.opEnd > e.end + 600 ? ', Arbeitsgang fertig ca. ' + tclock(e.opEnd, now) : ''}` : ''}`;
@@ -546,6 +568,7 @@
       R.labQ.innerHTML = parts.length ? parts.join('') : '<div class="qa-q-empty">Keine Prüflose in der Warteschlange – Behälter erscheinen hier, sobald sie am Messraum ankommen.</div>';
     }
     const fp = openFpis().filter(x => !x.local).sort((a, b) => b.waitingSec - a.waitingSec);
+    setText(R.labSub, `${lab.items.length ? `${lab.items.length} ${lab.items.length === 1 ? 'Prüflos' : 'Prüflose'} in der Warteschlange` : 'Warteschlange leer'} · ${fp.length ? `${fp.length} ${fp.length === 1 ? 'Erstteil wartet' : 'Erstteile warten'}` : 'kein Erstteil offen'}`);
     const fsig = fp.map(x => x.mid + x.stage + Math.floor(x.waitingSec / 60)).join(',');
     if (sig.labF !== fsig && !R.labF._hover) {
       sig.labF = fsig;
@@ -846,7 +869,38 @@
       return r;
     }).filter(r => r.res || r.stage).sort((a, b) => (b.res ? 0 : 1) - (a.res ? 0 : 1) || (b.ready || (b.res && b.res.t) || 0) - (a.ready || (a.res && a.res.t) || 0));
   }
+  /** Nächste Erstteile laut Plan: Arbeitsgänge mit Erstteilprüfung, deren Rüsten noch bevorsteht (forecast().machines) */
+  let upCache = { k: -1, list: [] };
+  function upcomingFpis(now) {
+    const k = Math.floor(now / 60);
+    if (upCache.k === k) return upCache.list;
+    let fc = null; try { fc = WF.sim.forecast(); } catch (e) { fc = null; }
+    const Sx = S(), out = [];
+    for (const mid of P().machines) {
+      for (const e of (fc && fc.machines && fc.machines[mid]) || []) {
+        const o = Sx.orders[e.orderId], r = o && o.routing.find(x => x.seq === e.seq);
+        if (!r || !r.firstPiece) continue;
+        const t = e.setupEnd != null ? e.setupEnd : e.start;
+        if (t == null || t < now) continue;
+        out.push({ mid, orderId: e.orderId, seq: e.seq, op: r.op, t, setupMin: r.setupMin || 0 });
+      }
+    }
+    upCache = { k, list: out.sort((a, b) => a.t - b.t).slice(0, 3) };
+    return upCache.list;
+  }
+  function renderUpcoming(now) {
+    if (R.fpiUp._hover && sig.up) return;
+    const list = upcomingFpis(now);
+    const usig = list.map(x => x.mid + x.orderId + x.seq + Math.floor(x.t / 60)).join(',');
+    if (sig.up === usig) return;
+    sig.up = usig;
+    R.fpiUp.innerHTML = `<div class="qa-up-h"><span class="eyebrow">Nächste Erstteile laut Plan</span><span class="muted">nach dem Rüsten</span></div>` + (list.length
+      ? list.map(x => `<div class="qa-up-r" data-sel="machine|${esc(x.mid)}" title="${esc(mLabel(x.mid))} · ${esc(x.orderId)} AG ${esc(x.seq)} ${esc(x.op)} – Rüsten ca. ${esc(U.fmtDur(x.setupMin * 60))}, danach Erstteilprüfung">
+          <b>${esc(x.mid)}</b><span class="nm">${esc(st(x.mid) ? st(x.mid).short : '')}</span><span class="o">${esc(x.orderId)} · AG ${esc(x.seq)}</span><span class="t">ca. ${esc(tclock(x.t, now))}</span></div>`).join('')
+      : '<div class="qa-up-e">Kein weiteres Rüsten mit Erstteilprüfung geplant.</div>');
+  }
   function renderFpi(now) {
+    renderUpcoming(now);
     if (R.fpi._hover && sig.fpi) return;
     const recs = fpiRecords(now);
     const fsig = recs.map(r => r.mid + (r.ready || '') + (r.res ? r.res.id : r.stage) + (r.res ? '' : Math.floor((now - (r.ready || now)) / 60))).join(',');

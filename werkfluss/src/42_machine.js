@@ -28,152 +28,175 @@
   // ------------------------------------------------------------------ CSS (Präfix .md-)
   WF.ui.css(`
   .md-sub{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-  .md-hero{display:flex;flex-direction:column;gap:9px}
+  .md-hero{display:flex;flex-direction:column;gap:10px}
   .md-st{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .md-st .pill{font-size:14px;line-height:24px;padding:3px 12px 3px 10px}
+  .md-st .pill{font-size:var(--fs-md);line-height:24px;padding:3px 12px 3px 10px}
   .md-st .pill i{width:9px;height:9px}
-  .md-since{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .md-since{font-size:var(--fs-sm);color:var(--muted);font-variant-numeric:tabular-nums}
   .md-phase{margin-left:auto}
-  .md-cause{font-size:14px;line-height:1.45;color:var(--text);overflow-wrap:anywhere}
-  .md-box{--c:var(--info);border-radius:9px;padding:10px 12px;background:color-mix(in srgb,var(--c) 8%,var(--bg2));border:1px solid color-mix(in srgb,var(--c) 30%,transparent);font-size:12.5px;line-height:1.45;color:var(--text2);display:flex;flex-direction:column;gap:4px}
-  .md-box-h{display:flex;align-items:center;gap:7px;color:color-mix(in srgb,var(--c) 75%,var(--text));font-weight:600;font-size:13px}
+  .md-cause{font-size:var(--fs-lg);line-height:1.45;color:var(--text);overflow-wrap:anywhere}
+  .md-box{--c:var(--info);border-radius:9px;padding:10px 12px;background:color-mix(in srgb,var(--c) 8%,var(--bg2));border:1px solid color-mix(in srgb,var(--c) 30%,transparent);font-size:var(--fs-sm);line-height:1.45;color:var(--text2);display:flex;flex-direction:column;gap:4px}
+  .md-box-h{display:flex;align-items:center;gap:7px;color:color-mix(in srgb,var(--c) 75%,var(--text));font-weight:600;font-size:var(--fs-md)}
   .md-box-h .ico{flex:none}
   .md-box-h .spacer{flex:1}
-  .md-box-h small{font-weight:500;color:var(--muted);font-size:11.5px;white-space:nowrap}
+  .md-box-h small{font-weight:500;color:var(--muted);font-size:var(--fs-xs);white-space:nowrap}
   .md-box b{color:var(--text);font-weight:600}
   .md-box .row{margin-top:4px}
-  .md-people{display:flex;flex-direction:column;gap:5px}
-  .md-person{display:flex;align-items:center;gap:8px;font-size:12.5px;min-width:0;background:transparent;border:0;padding:0;color:inherit;text-align:left;cursor:pointer}
+  .md-people{display:flex;flex-direction:column;gap:2px}
+  .md-person{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);min-width:0;min-height:30px;background:transparent;border:0;padding:0;color:inherit;text-align:left;cursor:pointer}
   .md-person:hover b{text-decoration:underline}
-  .md-person .avatar{width:24px;height:24px;font-size:10px}
+  .md-person .avatar{width:24px;height:24px;font-size:var(--fs-2xs)}
   .md-person span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted)}
   .md-person b{font-weight:600;color:var(--text2)}
-  .md-band{display:flex;flex-direction:column;gap:4px}
-  .md-band-ax{position:relative;height:12px;font:500 10px/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums}
+  .md-band{display:flex;flex-direction:column;gap:5px}
+  .md-band svg{border-radius:3px}
+  .md-band-ax{position:relative;height:12px;font:500 var(--fs-2xs)/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums}
   .md-band-ax span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}
-  .md-band-ax span:first-child{transform:none}
-  .md-band-ax span:last-child{transform:translateX(-100%)}
-  .md-legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11.5px;color:var(--muted)}
+  .md-band-ax span.a0{transform:none}
+  .md-band-ax span.a1{transform:translateX(-100%);color:var(--text2);font-weight:600}
+  .md-legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:var(--fs-xs);color:var(--muted)}
   .md-legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
   .md-legend i{width:8px;height:8px;border-radius:2px;background:var(--c)}
   .md-legend b{color:var(--text2);font-weight:600;font-variant-numeric:tabular-nums}
 
   .md-acts{display:flex;flex-wrap:wrap;gap:6px}
-  .md-acts .btn{height:30px;font-size:12.5px}
-  .md-acts-note{font-size:11.5px;color:var(--faint);margin-top:6px;line-height:1.4}
+  .md-acts-note{font-size:var(--fs-xs);color:var(--faint);margin-top:7px;line-height:1.45}
 
   .md-sec h4{display:flex;align-items:center;gap:8px}
   .md-sec h4 .spacer{flex:1}
-  .md-sec h4 small{font:500 11.5px/1 var(--f-ui);letter-spacing:0;text-transform:none;color:var(--faint)}
+  .md-sec h4 small{font:500 var(--fs-xs)/1 var(--f-ui);letter-spacing:0;text-transform:none;color:var(--faint)}
   .md-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 13px;display:flex;flex-direction:column;gap:9px}
-  .md-ord-h{display:flex;align-items:baseline;gap:8px;min-width:0;font-size:14px}
-  .md-ord-h .link{font-family:var(--f-mono);font-size:13px;flex:none}
+  .md-ord-h{display:flex;align-items:baseline;gap:8px;min-width:0;font-size:var(--fs-lg)}
+  .md-ord-h .link{font-family:var(--f-mono);font-size:var(--fs-md);flex:none}
   .md-ord-h b{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
-  .md-tag{--c:var(--st-wait);flex:none;align-self:center;font:600 10.5px/1 var(--f-ui);padding:3px 7px;border-radius:5px;color:var(--c);background:color-mix(in srgb,var(--c) 12%,transparent);border:1px solid color-mix(in srgb,var(--c) 32%,transparent)}
-  .md-meta{font-size:12px;color:var(--muted);line-height:1.5}
+  .md-tag{--c:var(--st-wait);flex:none;align-self:center;font:600 var(--fs-2xs)/1 var(--f-ui);padding:3px 7px;border-radius:5px;color:var(--c);background:color-mix(in srgb,var(--c) 12%,transparent);border:1px solid color-mix(in srgb,var(--c) 32%,transparent)}
+  .md-meta{font-size:var(--fs-sm);color:var(--muted);line-height:1.5}
   .md-meta b{color:var(--text2);font-weight:600}
+  .md-meta.sm{font-size:var(--fs-xs)}
   .md-prog{display:flex;flex-direction:column;gap:5px}
-  .md-prog-t{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:12.5px;font-variant-numeric:tabular-nums}
+  .md-prog-t{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:var(--fs-sm);font-variant-numeric:tabular-nums}
   .md-prog-t b{font-weight:600}
   .md-prog-t span{color:var(--muted);white-space:nowrap}
   .md-prog .bar{height:7px}
   .md-prog .bar.thin{height:4px}
-  .md-chain{display:flex;flex-wrap:wrap;align-items:center;gap:4px 2px;font:500 11px/1 var(--f-mono)}
-  .md-chain .md-step{--c:var(--line2);display:inline-flex;align-items:center;gap:4px;padding:4px 6px;border-radius:6px;border:1px solid var(--line);color:var(--faint);background:transparent;cursor:default;white-space:nowrap}
-  .md-chain .md-step.done{color:var(--muted)}
+  /* Arbeitsplan-Kette: Pfeil gehört zum folgenden Schritt – beim Umbruch steht nie ein Pfeil allein */
+  .md-chain{display:flex;flex-wrap:wrap;align-items:center;gap:6px 0;font:500 var(--fs-xs)/1 var(--f-mono)}
+  .md-chain .md-step{--c:var(--line2);display:inline-flex;align-items:center;white-space:nowrap}
+  .md-chain .md-step + .md-step::before{content:"›";padding:0 5px;color:var(--faint);font-family:var(--f-ui)}
+  .md-chain .md-step > span{display:inline-flex;align-items:center;gap:4px;padding:4px 7px;border-radius:6px;border:1px solid var(--line);color:var(--faint);background:transparent}
+  .md-chain .md-step.done > span{color:var(--muted)}
   .md-chain .md-step.done .ico{color:var(--st-run)}
-  .md-chain .md-step.cur{color:var(--text);border-color:color-mix(in srgb,var(--c) 60%,transparent);background:color-mix(in srgb,var(--c) 14%,transparent)}
-  .md-chain .md-step.click{cursor:pointer}
-  .md-chain .md-step.click:hover{border-color:var(--line2);color:var(--text2)}
-  .md-chain .md-arr{color:var(--faint);padding:0 1px}
+  .md-chain .md-step.cur > span{color:var(--text);border-color:color-mix(in srgb,var(--c) 60%,transparent);background:color-mix(in srgb,var(--c) 14%,transparent)}
+  .md-chain .md-step.ext > span{border-color:color-mix(in srgb,var(--ext) 40%,transparent);color:color-mix(in srgb,var(--ext) 75%,var(--text2))}
+  .md-chain .md-step.click > span{cursor:pointer}
+  .md-chain .md-step.click > span:hover{border-color:var(--line2);color:var(--text2)}
+  .md-route{padding:2px 0 2px}
+  .md-route li[data-ent]{cursor:pointer}
+  .md-route li[data-ent]:hover b{color:var(--accent)}
 
-  .md-tools{width:100%;border-collapse:collapse;font-size:12.5px}
-  .md-tools th{text-align:left;font:600 10px/1.2 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:0 6px 7px;border-bottom:1px solid var(--line);white-space:nowrap}
+  .md-tools{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+  .md-tools th{text-align:left;font:600 var(--fs-2xs)/1.2 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:0 6px 7px;border-bottom:1px solid var(--line);white-space:nowrap}
   .md-tools th.r,.md-tools td.r{text-align:right}
   .md-tools td{padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}
   .md-tools tr.md-tr{cursor:pointer}
   .md-tools tr.md-tr:hover td{background:color-mix(in srgb,var(--raise) 35%,transparent)}
   .md-tools tr.md-tr.on td{background:color-mix(in srgb,var(--accent) 7%,transparent)}
   .md-tools tr.md-tr.on td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
-  .md-tools .md-slot{font:600 11px/1.5 var(--f-mono);color:var(--muted);width:26px}
+  .md-tools .md-slot{font:600 var(--fs-xs)/1.5 var(--f-mono);color:var(--muted);width:26px}
   .md-tools .md-tn{font-weight:600;color:var(--text);line-height:1.3}
-  .md-tools .md-tk{font-size:11px;color:var(--faint);margin-top:2px}
-  .md-tools .md-pc{font-size:11.5px;margin-top:4px;color:color-mix(in srgb,var(--c) 75%,var(--text));font-weight:500}
+  .md-tools .md-tk{font-size:var(--fs-xs);color:var(--faint);margin-top:2px}
+  .md-tools .md-pc{font-size:var(--fs-xs);margin-top:4px;color:color-mix(in srgb,var(--c) 75%,var(--text));font-weight:500}
   .md-wear{display:flex;flex-direction:column;gap:4px;min-width:62px;align-items:flex-end}
   .md-wear .bar{width:62px;height:5px;min-width:0}
-  .md-wear span{font:500 11.5px/1 var(--f-mono);color:var(--text2)}
+  .md-wear span{font:500 var(--fs-xs)/1 var(--f-mono);color:var(--text2)}
   .md-rest{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600;margin-bottom:5px}
-  .md-rest small{display:block;font-weight:400;color:var(--faint);font-size:10.5px;margin-top:2px}
-  .md-chip{--c:var(--st-idle);display:inline-block;font:600 10.5px/1.3 var(--f-ui);padding:2px 6px;border-radius:5px;color:color-mix(in srgb,var(--c) 85%,white);background:color-mix(in srgb,var(--c) 13%,transparent);border:1px solid color-mix(in srgb,var(--c) 32%,transparent);white-space:nowrap}
-  .md-explain{border-radius:9px;padding:10px 12px;background:var(--bg2);border:1px solid var(--line);font-size:12.3px;line-height:1.5;color:var(--text2);display:flex;flex-direction:column;gap:6px}
-  .md-explain .md-ex-h{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.04em}
+  .md-rest small{display:block;font-weight:400;color:var(--faint);font-size:var(--fs-2xs);margin-top:2px}
+  .md-chip{--c:var(--st-idle);display:inline-block;font:600 var(--fs-2xs)/1.3 var(--f-ui);padding:2px 6px;border-radius:5px;color:color-mix(in srgb,var(--c) 85%,white);background:color-mix(in srgb,var(--c) 13%,transparent);border:1px solid color-mix(in srgb,var(--c) 32%,transparent);white-space:nowrap}
+  .md-explain{border-radius:9px;padding:10px 12px;background:var(--bg2);border:1px solid var(--line);font-size:var(--fs-sm);line-height:1.5;color:var(--text2);display:flex;flex-direction:column;gap:6px}
+  .md-explain .md-ex-h{display:flex;align-items:center;gap:7px;font-size:var(--fs-xs);color:var(--muted);font-weight:600;letter-spacing:.04em}
   .md-explain .md-ex-h .ico{color:var(--info)}
   .md-explain .md-ex-h .spacer{flex:1}
-  .md-explain .md-rule{font-size:11.5px;line-height:1.5;color:var(--muted);border-top:1px solid var(--line);padding-top:6px}
+  .md-explain .md-rule{font-size:var(--fs-xs);line-height:1.5;color:var(--muted);border-top:1px solid var(--line);padding-top:6px}
   .md-explain .md-rule b{color:var(--text2);font-weight:600}
-  .md-idle-tools{font-size:11.5px;color:var(--faint);margin-top:8px}
+  .md-idle-tools{font-size:var(--fs-xs);color:var(--faint);margin-top:8px}
 
-  .md-sig{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-  .md-s{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:0;display:flex;flex-direction:column;gap:3px}
-  .md-s.wide{grid-column:1/-1}
-  .md-s .l{font:600 9.5px/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
-  .md-s .v{font:600 19px/1.15 var(--f-cond);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .md-s .v small{font:500 12px/1 var(--f-ui);color:var(--muted);margin-left:3px}
-  .md-s .v.mono{font:500 12.5px/1.5 var(--f-mono);white-space:normal;overflow-wrap:anywhere}
-  .md-s .sp{height:22px;margin-top:2px}
-  .md-s .sp svg{display:block;width:100%;height:22px;overflow:visible}
-  .md-sp-ax{display:flex;justify-content:space-between;font:500 9.5px/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums;margin-top:2px}
+  /* Kennzahl-Kacheln im Drawer: dieselbe .kpi-Anatomie wie überall, nur kompakter */
+  .md-sig,.md-dl4{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .md-dl4{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .md-sig .kpi,.md-dl4 .kpi{min-height:0;padding:9px 11px 9px;border-radius:8px}
+  .md-sig .kpi .v,.md-dl4 .kpi .v{font-size:var(--fs-xl);margin-top:4px;overflow:hidden;text-overflow:ellipsis}
+  .md-sig .kpi .v small,.md-dl4 .kpi .v small{font-size:var(--fs-xs)}
+  .md-sig .kpi.wide{grid-column:1/-1}
+  .md-sig .kpi .v.mono{font:500 var(--fs-sm)/1.5 var(--f-mono);white-space:normal;overflow-wrap:anywhere}
+  .md-sig .kpi .v.light{display:flex;align-items:center;font:600 var(--fs-md)/1.2 var(--f-ui);min-height:24px}
+  .md-sig .kpi .viz svg{display:block;width:100%;height:22px;overflow:visible}
+  .md-sp-ax{display:flex;justify-content:space-between;font:500 var(--fs-2xs)/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums;margin-top:3px}
   .md-stack{display:inline-flex;flex-direction:column;gap:2px;padding:3px;border-radius:4px;background:var(--bg2);border:1px solid var(--line2);vertical-align:middle;margin-right:8px}
   .md-stack i{width:9px;height:6px;border-radius:2px;background:var(--track)}
   .md-stack i.on{background:var(--c);box-shadow:0 0 6px var(--c)}
-  .md-s .v.light{display:flex;align-items:center;font:600 13px/1.2 var(--f-ui)}
-  .md-sig-f{font-size:11px;color:var(--faint);margin-top:8px}
+  .md-sig-f{font-size:var(--fs-xs);color:var(--faint);margin-top:8px;line-height:1.45}
   .md-l0{display:flex;gap:12px;align-items:flex-start}
   .md-l0 .ico{color:var(--st-wait);flex:none;margin-top:2px}
 
   .md-buf{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
   .md-buf-c{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:9px 10px;min-width:0;display:flex;flex-direction:column;gap:6px}
-  .md-buf-h{display:flex;align-items:center;justify-content:space-between;gap:6px;font:600 10px/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
-  .md-buf-h span:last-child{font:500 11.5px/1 var(--f-mono);letter-spacing:0;color:var(--text2);text-transform:none}
+  .md-buf-h{display:flex;align-items:center;justify-content:space-between;gap:6px;font:600 var(--fs-2xs)/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .md-buf-h span:last-child{font:500 var(--fs-xs)/1 var(--f-mono);letter-spacing:0;color:var(--text2);text-transform:none}
   .md-slots{display:flex;gap:3px}
   .md-slots i{flex:1;height:6px;border-radius:2px;background:var(--track);border:1px solid var(--line2)}
   .md-slots i.f{background:var(--mat);border-color:var(--mat)}
   .md-slots.full i.f{background:var(--st-wait);border-color:var(--st-wait)}
-  .md-cont{display:flex;flex-direction:column;gap:1px;font-size:12px;padding:5px 6px;margin:0 -6px;border-radius:6px;cursor:pointer;background:transparent;border:0;color:inherit;text-align:left;width:calc(100% + 12px)}
+  .md-cont{display:flex;flex-direction:column;gap:1px;font-size:var(--fs-sm);padding:5px 6px;margin:0 -6px;border-radius:6px;cursor:pointer;background:transparent;border:0;color:inherit;text-align:left;width:calc(100% + 12px)}
   .md-cont:hover{background:color-mix(in srgb,var(--raise) 45%,transparent)}
   .md-cont b{font-weight:600}
-  .md-cont span{color:var(--muted);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .md-buf-e{font-size:11.5px;color:var(--faint)}
+  .md-cont span{color:var(--muted);font-size:var(--fs-xs);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .md-buf-e{font-size:var(--fs-xs);color:var(--faint)}
 
   .md-oee{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 18px;align-items:center}
-  .md-oee-v{font:600 34px/1 var(--f-cond);font-variant-numeric:tabular-nums}
-  .md-oee-v small{display:block;font:500 11.5px/1.3 var(--f-ui);color:var(--muted);margin-top:4px}
+  .md-oee-v{font:600 var(--fs-kpi)/1 var(--f-cond);font-variant-numeric:tabular-nums}
+  .md-oee-v small{display:block;font:500 var(--fs-xs)/1.3 var(--f-ui);color:var(--muted);margin-top:5px}
   .md-apq{display:flex;flex-direction:column;gap:6px}
-  .md-apq div{display:grid;grid-template-columns:86px minmax(0,1fr) 52px;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
+  .md-apq div{display:grid;grid-template-columns:86px minmax(0,1fr) 52px;gap:8px;align-items:center;font-size:var(--fs-xs);color:var(--muted)}
   .md-apq div b{font-variant-numeric:tabular-nums;text-align:right;color:var(--text2);font-weight:600}
   .md-dist{display:flex;height:10px;border-radius:3px;overflow:hidden;background:var(--track)}
   .md-dist i{display:block;height:100%;background:var(--c)}
-  .md-dl4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-  .md-dl4 > div{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 9px;min-width:0}
-  .md-dl4 .l{font:600 9.5px/1.2 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
-  .md-dl4 .v{font:600 16px/1.3 var(--f-cond);font-variant-numeric:tabular-nums;white-space:nowrap}
 
   .md-q{display:flex;flex-direction:column}
-  .md-qr{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:4px 9px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+  .md-qr{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:4px 9px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line);font-size:var(--fs-sm)}
   .md-qr:last-child{border-bottom:0}
   .md-qr > i{width:8px;height:8px;border-radius:50%;background:var(--c);align-self:center}
   .md-qr .md-qm{min-width:0}
   .md-qr .md-qm div:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .md-qr .md-qm div + div{font-size:11.5px;color:var(--muted);margin-top:2px}
-  .md-qr .md-qd{font-size:11.5px;color:var(--muted);white-space:nowrap;text-align:right}
+  .md-qr .md-qm div + div{font-size:var(--fs-xs);color:var(--muted);margin-top:2px}
+  .md-qr .md-qd{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;text-align:right}
 
-  .md-ev{display:grid;grid-template-columns:40px minmax(0,1fr);gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12px;line-height:1.4}
+  /* Meldungen zu dieser Maschine (gleicher Inhalt und Zeitstempel wie im Benachrichtigungscenter) */
+  .md-nl{display:flex;flex-direction:column;gap:8px}
+  .md-n{--c:var(--st-wait);background:var(--card);border:1px solid var(--line);border-radius:9px;padding:10px 12px;box-shadow:inset 3px 0 0 var(--c)}
+  .md-n.ack{opacity:.72}
+  .md-n-top{display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;min-width:0}
+  .md-n-top .sev{font:700 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--c);flex:none}
+  .md-n-top > span:last-child{overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .md-n-t{font-weight:600;font-size:var(--fs-md);line-height:1.3;margin:5px 0 2px}
+  .md-n-b{font-size:var(--fs-sm);color:var(--text2);line-height:1.42}
+  .md-n-s{margin-top:7px;font-size:var(--fs-sm);line-height:1.42;color:var(--text2);padding:7px 10px;border-radius:7px;background:color-mix(in srgb,var(--accent) 7%,var(--bg2));border:1px solid color-mix(in srgb,var(--accent) 18%,transparent)}
+  .md-n-s b{color:var(--accent);font-weight:600}
+  .md-n-a{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;align-items:center}
+  .md-n-a .st{font-size:var(--fs-xs);color:var(--muted)}
+
+  .md-ev{display:grid;grid-template-columns:40px minmax(0,1fr);gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:var(--fs-sm);line-height:1.4}
   .md-ev:last-child{border-bottom:0}
-  .md-ev .num{color:var(--muted);font-size:11.5px}
+  .md-ev .num{color:var(--muted);font-size:var(--fs-xs)}
   .md-ev span:last-child{color:var(--text2);overflow-wrap:anywhere}
   .md-ev i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--c);margin-right:6px;vertical-align:1px}
-  .md-dl{font-size:12.5px}
+  .md-dl{font-size:var(--fs-sm)}
   @media (max-width:440px){ .md-dl4{grid-template-columns:repeat(2,minmax(0,1fr))} .md-tools .md-slot{display:none} }
+  @media (pointer:coarse){
+    .md-acts .btn,.md-n-a .btn{min-height:40px}
+    .md-person{min-height:40px}
+    .md-cont{min-height:40px;justify-content:center}
+    .md-chain .md-step.click > span{padding:9px 9px}
+  }
   `, 'md-css');
 
   // ------------------------------------------------------------------ Signal-Aufzeichnung (für Sparklines; läuft im Hintergrund, 2×/s)
@@ -313,14 +336,17 @@
     if (ppl.length) {
       h += `<div class="md-people">${ppl.map(p => `<button class="md-person" data-ent="person|${esc(p.id)}" title="${esc(p.name)} (${esc(p.role)}) – ${esc(p.activity || '')}"><span class="avatar">${esc(WF.ui.initials(p.name))}</span><span><b>${esc(p.name)}</b> · ${esc(p.responsible ? 'zuständig – ' + (p.activity || p.stateLabel) : (p.taskLabel || p.activity || p.stateLabel))}${p.where ? ' · ' + esc(p.where) : ''}</span></button>`).join('')}</div>`;
     } else if (mv.loading === 'auto') h += `<div class="md-meta">Niemand im Dienst – Maschine läuft autonom weiter, solange Material, Standzeit und Ausgangspuffer reichen.</div>`;
-    // Zustandsband 8 h mit Achse
-    const W = 8 * 3600, t0 = now - W;
-    const ticks = [];
-    for (let k = 0; k <= 4; k++) { const t = t0 + k * W / 4; ticks.push(`<span style="left:${k * 25}%">${k === 4 ? 'jetzt' : U.fmtClock(t)}</span>`); }
+    // Zustandsband: höchstens 8 h zurück, aber nie vor dem ersten aufgezeichneten Zustand (kein leerer Anfang); Achse in vollen Stunden
+    const segs = mv.segments || [];
+    const t0 = Math.min(now - 1800, Math.max(now - 8 * 3600, segs.length ? segs[0].t0 : now - 8 * 3600)), W = now - t0;
+    const P = (t) => (t - t0) / W * 100;
+    const ticks = [`<span class="a0" style="left:0">${esc(tclock(t0, now))}</span>`, `<span class="a1" style="left:100%">jetzt</span>`];
+    const step = W > 5 * 3600 ? 7200 : 3600;
+    for (let t = Math.ceil((t0 + 1) / step) * step; t < now; t += step) { const p = P(t); if (p > 13 && p < 87) ticks.push(`<span style="left:${p.toFixed(2)}%">${esc(U.fmtClock(t))}</span>`); }
     const secs = {};
-    for (const sg of mv.segments || []) { const a = Math.max(t0, sg.t0), b = Math.min(now, sg.t1 == null ? now : sg.t1); if (b > a) secs[sg.state] = (secs[sg.state] || 0) + (b - a); }
+    for (const sg of segs) { const a = Math.max(t0, sg.t0), b = Math.min(now, sg.t1 == null ? now : sg.t1); if (b > a) secs[sg.state] = (secs[sg.state] || 0) + (b - a); }
     const leg = Object.keys(secs).sort((a, b) => secs[b] - secs[a]).slice(0, 5).map(k => `<span style="--c:${(WF.STATE[k] || {}).color}"><i></i>${esc((WF.STATE[k] || {}).label || k)} <b>${esc(U.fmtDur(secs[k]))}</b></span>`).join('');
-    h += `<div class="md-band" title="Zustände der letzten 8 Stunden">${WF.ui.stateBand(mv.segments, t0, now, { w: 448, h: 12 })}<div class="md-band-ax">${ticks.join('')}</div><div class="md-legend">${leg}</div></div>`;
+    h += `<div class="md-band" title="Zustände ${esc(tclock(t0, now))}–${esc(U.fmtClock(now))}">${WF.ui.stateBand(segs, t0, now, { w: 448, h: 10 })}<div class="md-band-ax">${ticks.join('')}</div><div class="md-legend">${leg}</div></div>`;
     void st;
     return h + '</div>';
   }
@@ -353,6 +379,31 @@
   }
   function sigActions(mv) { const tc = toolChangeSensible(mv); return [tc.ok, tc.why, !!mv.fault].join('|'); }
 
+  /** Offene/quittierte Meldungen zu dieser Maschine – gleicher Text, gleiche Aktionen und Zeitstempel wie im Benachrichtigungscenter */
+  function machineNotifs(id) {
+    const sevR = { crit: 0, warn: 1, info: 2, ok: 3 };
+    return (S().notifications || []).filter(n => (n.status === 'open' || n.status === 'ack') && (
+      (n.entity && n.entity.kind === 'machine' && n.entity.id === id) || (n.spc && n.spc.machineId === id) ||
+      (n.ghost && Array.isArray(n.ghost.machines) && n.ghost.machines.some(e => e && (e.machineId || e.id) === id && e.stopT != null && e.reason !== 'done' && e.reason !== 'ahead' && e.reason !== 'through')) ||
+      String(n.key || '').split(':').slice(1).indexOf(id) >= 0))
+      .sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1) || (sevR[a.sev] ?? 4) - (sevR[b.sev] ?? 4) || b.t - a.t).slice(0, 4);
+  }
+  function secNotifs(mv) {
+    const list = machineNotifs(mv.id);
+    if (!list.length) return '';
+    return '<div class="md-nl">' + list.map(n => {
+      const sv = WF.SEV[n.sev] || WF.SEV.info;
+      const acts = (n.actions || []).map((a, i) => ({ a, i })).filter(x => x.a.action && !(x.a.action.type === 'select' && x.a.action.kind === 'machine' && x.a.action.id === mv.id));
+      return `<div class="md-n${n.status === 'ack' ? ' ack' : ''}" style="--c:${sv.color}">
+        <div class="md-n-top"><span class="sev">${esc(sv.label)}</span><span>${WF.ui.notifTime(n)}${n.role ? ' · ' + esc(n.role) : ''}</span></div>
+        <div class="md-n-t">${esc(n.title)}</div>${n.body ? `<div class="md-n-b">${esc(n.body)}</div>` : ''}
+        ${n.suggestion ? `<div class="md-n-s"><b>Empfehlung</b> ${esc(n.suggestion)}</div>` : ''}
+        <div class="md-n-a">${acts.map((x, k) => `<button type="button" class="btn sm${k === 0 && x.a.action.type !== 'select' && n.status === 'open' ? ' primary' : ''}" data-nact="run|${esc(n.id)}|${x.i}">${esc(x.a.label)}</button>`).join('')}${n.status === 'open' ? `<button type="button" class="btn sm ghost" data-nact="ack|${esc(n.id)}">Quittieren</button>` : `<span class="st">quittiert${n.ackBy ? ' von ' + esc(n.ackBy) : ''} · Ursache besteht noch</span>`}</div>
+      </div>`;
+    }).join('') + '</div>';
+  }
+  function sigNotifs(mv) { return machineNotifs(mv.id).map(n => n.id + n.status + (n.updatedT || n.t) + n.title + (n.body || '') + (n.suggestion || '') + (n.actions || []).map(a => a.label).join('/')).join('|'); }
+
   function secOrder(mv, now) {
     if (!mv.order) {
       const q = mv.queue[0];
@@ -366,15 +417,25 @@
     const total = mv.partsTotal || 0, done = mv.partsDone || 0, running = mv.partNo != null;
     // Arbeitsplan-Kette
     let chain = '';
-    if (so) {
+    // Eine Arbeitsplan-Darstellung für alle Ansichten (WF.ui.route aus 41_orders, senkrecht im schmalen Drawer);
+    // Schritte an anderen Maschinen öffnen deren Detail. Ohne WF.ui.route: kompakte Kette.
+    if (so && WF.ui.route) {
+      try {
+        let k = 0;
+        const html = WF.ui.route(o.id, { mode: 'stack', current: o.seq, orderId: o.id }) || '';
+        chain = html ? `<div class="md-route">${html.replace(/<li class="/g, (m) => { const r = so.routing[k++]; return r && r.station !== mv.id && S().machines[r.station] ? `<li data-ent="machine|${esc(r.station)}" class="` : m; })}</div>` : '';
+      } catch (e) { chain = ''; }
+    }
+    if (so && !chain) {
       const ci = so.routing.findIndex(r => r.seq === o.seq);
       chain = '<div class="md-chain" aria-label="Arbeitsplan">' + so.routing.map((r, i) => {
         const opx = so.ops[i];
-        const cls = i === ci ? 'cur' : opx && opx.complete ? 'done' : '';
+        const cls = i === ci ? 'cur' : opx && opx.complete ? 'done' : r.station === 'EXT' ? 'ext' : '';
         const isM = !!(WF.profile.stationById[r.station] && S().machines[r.station]);
         const lbl = r.station === 'VERSAND' ? 'Versand' : r.station === 'EXT' ? 'Extern' : r.station;
         const tip = `AG ${r.seq} ${r.op} – ${r.station === 'EXT' && r.ext ? r.ext.partner : stName(r.station)}${opx && opx.complete ? ' (fertig)' : i === ci ? ' (hier)' : ''}`;
-        return (i ? '<span class="md-arr">›</span>' : '') + `<span class="md-step ${cls}${isM && r.station !== mv.id ? ' click' : ''}" style="--c:${mv.stateColor}" title="${esc(tip)}" ${isM && r.station !== mv.id ? `data-ent="machine|${esc(r.station)}"` : ''}>${cls === 'done' ? icon('check', 11) : ''}${esc(lbl)}</span>`;
+        const click = isM && r.station !== mv.id;
+        return `<span class="md-step ${cls}${click ? ' click' : ''}" style="--c:${mv.stateColor}"><span title="${esc(tip)}" ${click ? `data-ent="machine|${esc(r.station)}"` : ''}>${cls === 'done' ? icon('check', 11) : ''}${esc(lbl)}</span></span>`;
       }).join('') + '</div>';
     }
     return `<div class="md-card">
@@ -385,7 +446,7 @@
       <div class="md-prog">
         <div class="md-prog-t"><b>${running ? `Teil ${esc(U.fmtNum(mv.partNo))} von ${esc(U.fmtNum(total))}` : `${esc(U.fmtNum(done))} von ${esc(U.fmtNum(total))} bearbeitet`}</b><span>${mv.etaOpEnd != null ? `Arbeitsgang fertig ca. <b>${esc(tclock(mv.etaOpEnd, now))}</b>` : ''}</span></div>
         <span class="bar" style="--c:${mv.stateColor}"><i data-live-w="opFrac" style="width:0%"></i></span>
-        <div class="md-meta" style="font-size:11.5px">${esc(U.fmtNum(done))} bearbeitet${ov ? (() => { const opv = ov.ops.find(x => x.seq === o.seq); return opv && opv.scrap ? ` · davon ${esc(opv.scrap)} Ausschuss` : ''; })() : ''}${total > done ? ` · ${esc(U.fmtNum(total - done))} offen` : ''}${total > o.qty ? ` · Soll inkl. ${esc(total - o.qty)} Ersatz für Ausschuss` : ''}</div>
+        <div class="md-meta sm">${esc(U.fmtNum(done))} bearbeitet${ov ? (() => { const opv = ov.ops.find(x => x.seq === o.seq); return opv && opv.scrap ? ` · davon ${esc(opv.scrap)} Ausschuss` : ''; })() : ''}${total > done ? ` · ${esc(U.fmtNum(total - done))} offen` : ''}${total > o.qty ? ` · Soll inkl. ${esc(total - o.qty)} Ersatz für Ausschuss` : ''}</div>
       </div>
       ${running ? `<div class="md-prog">
         <div class="md-prog-t"><b data-live="partLbl"></b><span data-live="partEnd"></span></div>
@@ -441,7 +502,7 @@
     return `<div class="tbl-wrap"><table class="md-tools"><thead><tr><th class="md-slot"></th><th>Werkzeug</th><th class="r">Verschleiß</th><th class="r">Rest · Status</th></tr></thead><tbody>${rows}</tbody></table></div>
       ${idle.length ? `<div class="md-idle-tools">Außerdem montiert, im Arbeitsgang nicht im Einsatz: ${idle.map(t => esc(t.name) + ' (' + esc(U.fmtNum(t.wearPct, 0)) + ' %)').join(', ')}</div>` : ''}
       <div class="md-explain" style="margin-top:10px">
-        <div class="md-ex-h">${icon('info', 14)}<span>WARUM? · ${esc(sel.name)}</span><span class="spacer"></span>${sel.id ? `<button class="link" data-ent="tool|${esc(sel.id)}" style="font-size:11.5px;font-weight:500;letter-spacing:0">Werkzeugdetails</button>` : ''}</div>
+        <div class="md-ex-h">${icon('info', 14)}<span>WARUM? · ${esc(sel.name)}</span><span class="spacer"></span>${sel.id ? `<button class="link" data-ent="tool|${esc(sel.id)}" style="font-size:var(--fs-xs);font-weight:500;letter-spacing:0">Werkzeugdetails</button>` : ''}</div>
         <div>${esc(sel.explain || '–')}</div>
         <div class="md-rule">${toolRule(sel)}</div>
       </div>`;
@@ -472,7 +533,8 @@
       </div></div></div>`;
     }
     const arr = SAMPLES[mv.id] || [];
-    const tile = (l, v, spark, wide) => `<div class="md-s${wide ? ' wide' : ''}"><span class="l">${l}</span><span class="v${typeof v === 'object' ? ' ' + v.cls : ''}" ${typeof v === 'object' && v.live ? `data-live="${v.live}"` : ''}>${typeof v === 'object' ? v.html : v}</span>${spark ? `<div class="sp">${spark}</div><div class="md-sp-ax"><span>−30 min</span><span>jetzt</span></div>` : ''}</div>`;
+    // .kpi-Anatomie: Eyebrow · Wert (Einheit als <small>) · Verlauf unten (.viz, feste Zeitachse −30 min … jetzt)
+    const tile = (l, v, spark, wide) => `<div class="kpi${wide ? ' wide' : ''}"><div class="l">${l}</div><div class="v${typeof v === 'object' ? ' ' + v.cls : ''}" ${typeof v === 'object' && v.live ? `data-live="${v.live}"` : ''}>${typeof v === 'object' ? v.html : v}</div>${spark ? `<div class="viz">${spark}<div class="md-sp-ax"><span>−30 min</span><span>jetzt</span></div></div>` : ''}</div>`;
     const light = `<span class="md-stack"><i class="${sg.stackLight === 'red' ? 'on' : ''}" style="--c:${STACK.red}"></i><i class="${sg.stackLight === 'yellow' ? 'on' : ''}" style="--c:${STACK.yellow}"></i><i class="${sg.stackLight === 'green' ? 'on' : ''}" style="--c:${STACK.green}"></i></span>${esc(sg.stackLightLabel || '–')}`;
     let h = '<div class="md-sig">';
     if (lv === 1) {
@@ -533,12 +595,12 @@
       <div class="md-dist" aria-label="Zustandsverteilung heute">${dist}</div>
       <div class="md-legend">${leg}</div>
       <div class="md-dl4">
-        <div><div class="l">Gutteile</div><div class="v">${esc(U.fmtNum(mv.goodToday))}</div></div>
-        <div><div class="l">Ausschuss</div><div class="v" style="${mv.scrapToday ? 'color:var(--st-wait)' : ''}">${esc(U.fmtNum(mv.scrapToday))}</div></div>
-        <div><div class="l">Energie</div><div class="v">${esc(U.fmtNum(mv.energyKwhToday, 0))} <small class="muted" style="font-size:11px">kWh</small></div></div>
-        <div><div class="l">Stillstand</div><div class="v">${esc(U.fmtEur(mv.lossEurToday))}</div></div>
+        <div class="kpi"><div class="l">Gutteile</div><div class="v">${esc(U.fmtNum(mv.goodToday))}<small>Stk</small></div></div>
+        <div class="kpi${mv.scrapToday ? ' warn' : ''}"><div class="l">Ausschuss</div><div class="v">${esc(U.fmtNum(mv.scrapToday))}<small>Stk</small></div></div>
+        <div class="kpi"><div class="l">Energie</div><div class="v">${esc(U.fmtNum(mv.energyKwhToday, 0))}<small>kWh</small></div></div>
+        <div class="kpi"><div class="l">Stillstand</div><div class="v">${esc(U.fmtNum(mv.lossEurToday, 0))}<small>€</small></div></div>
       </div>
-      <div class="md-meta" style="font-size:11px">OEE = Verfügbarkeit × Leistung × Qualität; Bezugszeit ist die Schichtzeit ohne Pausen mit eingeplantem Auftrag. Stillstand = ${esc(U.fmtEur(mv.rate))}/h Maschinenstundensatz × Zeit ohne Produktion.</div>
+      <div class="md-meta sm">OEE = Verfügbarkeit × Leistung × Qualität; Bezugszeit ist die Schichtzeit ohne Pausen mit eingeplantem Auftrag. Stillstand = ${esc(U.fmtEur(mv.rate))}/h Maschinenstundensatz × Zeit ohne Produktion.</div>
     </div>`;
   }
   function sigToday(mv) { const o = mv.oeeToday || {}; return [o.oee, o.availability, o.performance, o.quality].map(x => x == null ? '' : Math.round(x * 1000)).join(',') + '|' + Object.values(mv.stateTimes || {}).map(x => Math.floor(x / 60)).join(',') + '|' + mv.goodToday + mv.scrapToday + Math.round(mv.energyKwhToday) + mv.lossEurToday; }
@@ -603,7 +665,7 @@
     else { const noBreak = st.type === 'cylgrinder' || st.type === 'surfgrinder' || st.type === 'saw'; cat = (F.generic || []).filter(x => !(x.toolBreak && noBreak)).concat(F[st.automation] || [], F[st.type] || []); }
     const body = document.createElement('div');
     body.className = 'stack';
-    body.innerHTML = `<p class="muted" style="margin:0;font-size:13px">Demo-Funktion: löst an <b style="color:var(--text)">${esc(id)} ${esc(st.short || '')}</b> einen Alarm aus dem Störungskatalog aus. Danach sieht man, wie werkfluss reagiert – Benachrichtigung an die Instandhaltung, automatische Zuteilung der Reparatur, Auswirkung auf Liefertermine und Werkzeugplanung.</p>
+    body.innerHTML = `<p class="muted" style="margin:0;font-size:var(--fs-md)">Demo-Funktion: löst an <b style="color:var(--text)">${esc(id)} ${esc(st.short || '')}</b> einen Alarm aus dem Störungskatalog aus. Danach sieht man, wie werkfluss reagiert – Benachrichtigung an die Instandhaltung, automatische Zuteilung der Reparatur, Auswirkung auf Liefertermine und Werkzeugplanung.</p>
       <label class="field" for="md-fcode">Alarm<select class="input" id="md-fcode"><option value="">Zufälliger Alarm aus dem Katalog</option>${cat.map(f => `<option value="${esc(f.code)}">${esc(f.code)} – ${esc(f.text)}${f.toolBreak ? ' (nur während der Bearbeitung)' : ''}</option>`).join('')}</select></label>`;
     WF.app.modal({ title: 'Störung simulieren', body, actions: [
       { label: 'Abbrechen' },
@@ -623,10 +685,10 @@
     const body = document.createElement('div');
     body.className = 'stack';
     const sh = WF.sim.shift();
-    body.innerHTML = `<p class="muted" style="margin:0;font-size:13px">Der Wechsel erfolgt an einer Teilegrenze – nie mitten im Teil – und wird dem Einrichter als Auftrag angezeigt. Ohne Auswahl wählt werkfluss selbst: das Werkzeug, dessen Standzeit für <b style="color:var(--text)">${esc(mv.order.id)} AG ${esc(mv.order.seq)}</b> zuerst ausläuft, plus Werkzeuge, die sinnvoll mitgewechselt werden.</p>
+    body.innerHTML = `<p class="muted" style="margin:0;font-size:var(--fs-md)">Der Wechsel erfolgt an einer Teilegrenze – nie mitten im Teil – und wird dem Einrichter als Auftrag angezeigt. Ohne Auswahl wählt werkfluss selbst: das Werkzeug, dessen Standzeit für <b style="color:var(--text)">${esc(mv.order.id)} AG ${esc(mv.order.seq)}</b> zuerst ausläuft, plus Werkzeuge, die sinnvoll mitgewechselt werden.</p>
       <div class="stack" style="gap:6px">${tc.ts.map(t => {
         const shortT = t.remainingParts < t.neededParts;
-        return `<label style="display:flex;gap:9px;align-items:flex-start;font-size:13px;cursor:pointer"><input type="checkbox" value="${esc(t.typeId)}" style="margin-top:3px"><span><b>${esc(t.name)}</b><br><span class="muted" style="font-size:12px">${esc(U.fmtNum(t.wearPct, 0))} % Verschleiß · noch ${esc(teile(t.remainingParts))} · Bedarf ${esc(teile(t.neededParts))} – ${shortT ? 'reicht nicht bis AG-Ende' : 'reicht bis AG-Ende'}</span></span></label>`;
+        return `<label style="display:flex;gap:10px;align-items:flex-start;font-size:var(--fs-md);cursor:pointer;min-height:40px"><input type="checkbox" value="${esc(t.typeId)}" style="margin-top:3px;width:18px;height:18px;flex:none"><span><b>${esc(t.name)}</b><br><span class="muted" style="font-size:var(--fs-sm)">${esc(U.fmtNum(t.wearPct, 0))} % Verschleiß · noch ${esc(teile(t.remainingParts))} · Bedarf ${esc(teile(t.neededParts))} – ${shortT ? 'reicht nicht bis AG-Ende' : 'reicht bis AG-Ende'}</span></span></label>`;
       }).join('')}</div>
       <label class="field" for="md-when">Zeitpunkt<select class="input" id="md-when"><option value="">An der nächsten Teilegrenze</option>${sh.id && sh.endsAt > now + 900 ? `<option value="${sh.endsAt - 1800}">Kurz vor Schichtende (ab ${esc(U.fmtClock(sh.endsAt - 1800))}) – z. B. vor der Geisterschicht</option>` : ''}</select></label>
       <label class="field" for="md-reason">Grund (optional)<input class="input" id="md-reason" maxlength="80" value="vom Leitstand vorgezogen"></label>`;
@@ -648,6 +710,7 @@
   const SECTIONS = [
     { key: 'status', title: null, render: secStatus, sig: sigStatus },
     { key: 'actions', title: null, render: secActions, sig: sigActions },
+    { key: 'notifs', title: 'Meldungen', render: secNotifs, sig: sigNotifs, hide: (mv) => !machineNotifs(mv.id).length, sub: (mv) => { const l = machineNotifs(mv.id), o = l.filter(n => n.status === 'open').length; return o ? `${o} offen` : l.length ? 'quittiert' : ''; } },
     { key: 'order', title: 'Auftrag & Fortschritt', render: secOrder, sig: sigOrder },
     { key: 'tools', title: 'Werkzeuge', render: (mv, now, st) => secTools(mv, st), sig: (mv, now, st) => sigTools(mv, st), sub: (mv) => { const n = mv.tools.filter(t => t.status !== 'idle').length; return n ? `${n} im Arbeitsgang` : ''; } },
     { key: 'signals', title: 'Live-Signale', render: secSignals, sig: sigSignals, sub: (mv) => `Level ${mv.conn.level} · ${WF.sim.label('conn', mv.conn.level)}` },
@@ -682,6 +745,14 @@
       if (tr && !e.target.closest('[data-ent]')) { selectTool(tr.dataset.tool, el); return; }
       const ent = e.target.closest('[data-ent]');
       if (ent) { const [k, i] = ent.dataset.ent.split('|'); if (LINKABLE[k]) WF.app.select(k, i); return; }
+      const na = e.target.closest('[data-nact]');
+      if (na) {
+        const [kind, nid, idx] = na.dataset.nact.split('|');
+        const n = (S().notifications || []).find(x => x.id === nid); if (!n) return;
+        if (kind === 'ack') { const r = WF.sim.actions.ack(n.id, 'Schichtleitung'); WF.app.toast(r && r.msg ? r.msg : 'Quittiert', r && r.ok === false ? 'warn' : 'ok'); }
+        else { const a = (n.actions || [])[Number(idx)]; if (a) WF.app.runAction(a.action); }
+        update(el, true); return;
+      }
       const act = e.target.closest('[data-act]'); if (!act || act.disabled) return;
       switch (act.dataset.act) {
         case 'repair': { const r = WF.sim.actions.repair(id); WF.app.toast(r.msg || 'Behoben', r.ok === false ? 'warn' : 'ok'); update(el, true); break; }
@@ -707,6 +778,7 @@
           if (focusKey) { const f = n.body.querySelector(`[data-tool="${CSS.escape(focusKey)}"],[data-act="${CSS.escape(focusKey)}"],[data-ent="${CSS.escape(focusKey)}"]`); if (f) f.focus({ preventScroll: true }); }
         }
         if (n.sub && sec.sub) { const s = sec.sub(mv); if (st.subs[sec.key] !== s) { st.subs[sec.key] = s; n.sub.textContent = s; } }
+        if (sec.hide) { const hd = !!sec.hide(mv); if (n.node.hidden !== hd) n.node.hidden = hd; }
       }
       // schnelle Werte
       const live = liveOrder(mv, now);

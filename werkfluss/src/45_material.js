@@ -38,8 +38,13 @@
 
   // Farben (nur Tokens)
   const AGV_C = { idle: 'var(--st-idle)', toPickup: 'var(--info)', loading: 'var(--mat)', toDrop: 'var(--mat)', unloading: 'var(--mat)', toCharge: 'var(--st-setup)', charging: 'var(--st-setup)', blocked: 'var(--st-fault)' };
-  const TR_C = { open: 'var(--st-wait)', assigned: 'var(--info)', toPickup: 'var(--info)', loaded: 'var(--mat)', toDrop: 'var(--mat)', done: 'var(--st-run)' };
-  const CT_C = { filling: 'var(--info)', ready: 'var(--st-wait)', transit: 'var(--mat)', input: 'var(--st-run)', external: 'var(--st-tool)', shipped: 'var(--st-run)', scrap: 'var(--st-fault)' };
+  // Transporte: offen neutral (lange Wartezeit → Warnfarbe in trColor), zugeteilt = Informationsfluss, beladen = Material
+  const TR_C = { open: 'var(--muted)', assigned: 'var(--info)', toPickup: 'var(--info)', loaded: 'var(--mat)', toDrop: 'var(--mat)', done: 'var(--faint)' };
+  // Behälter: Lebenszyklus in der Material-Familie (UI_GUIDE Regel 15) – nie Maschinenzustandsfarben; Fremdbearbeitung = --ext
+  const CT_C = { filling: 'var(--mat)', ready: 'var(--mat)', transit: 'var(--mat)', input: 'var(--muted)', external: 'var(--ext)', shipped: 'var(--faint)', scrap: 'var(--st-fault)' };
+  const ctMark = (state) => `<i class="mt-mk k-${esc(state)}" aria-hidden="true"></i>`;
+  // Mengenbalken neutral, Warnfarbe nur für die Aussage (unter Mindestbestand ohne Bestellung)
+  const STOCK_C = 'color-mix(in srgb,var(--text2) 60%,transparent)';
   const FORM = { Stange: 'Stange', Platte: 'Platte', Stk: 'Rohteile' };
   const WAIT_WARN = 15 * 60, WAIT_CRIT = 45 * 60;
 
@@ -430,7 +435,7 @@
   .mt-head .view-h{margin:0;flex:1 1 340px;min-width:0}
   .mt-head .view-sub{max-width:56ch}
   .mt-lage{display:flex;align-items:stretch;background:var(--card);border:1px solid var(--line);border-radius:var(--r);min-width:0;flex-wrap:wrap}
-  .mt-lg{display:flex;align-items:center;gap:9px;padding:7px 13px;min-width:0;cursor:default}
+  .mt-lg{display:flex;align-items:center;gap:10px;padding:8px 14px;min-width:0;cursor:default}
   .mt-lg > div{min-width:0}
   .mt-lg b{overflow:hidden;text-overflow:ellipsis}
   .mt-lg + .mt-lg{border-left:1px solid var(--line)}
@@ -442,25 +447,15 @@
   .mt-lg.click:hover b{text-decoration:underline;text-underline-offset:2px}
 
   .mt-kpis{display:grid;gap:10px;grid-template-columns:repeat(6,minmax(0,1fr))}
-  .mt-kpis .kpi{position:relative;display:flex;flex-direction:column;min-height:96px}
-  .mt-kpis .kpi .v{display:flex;align-items:baseline;gap:5px;flex:none}
-  .mt-kvrow{display:flex;align-items:flex-end;gap:10px;min-width:0}
-  .mt-ksp{flex:1;min-width:0;height:30px;margin-bottom:4px}
-  .mt-ksp svg{display:block;width:100%;height:30px;overflow:visible}
-  .mt-ksp:empty{display:none}
-  .mt-kpis .kpi .v small{margin-left:0}
-  .mt-kpis .kpi .s{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35}
   .mt-kpis .kpi .s b{color:var(--text2);font-weight:600}
   .mt-kpis .kpi.click{cursor:pointer}
   .mt-kpis .kpi.click:hover{border-color:var(--line2)}
-  .mt-kpis .kpi .mt-kbar{display:flex;gap:3px;margin-top:auto;padding-top:7px}
-  .mt-kpis .kpi .mt-kbar span{flex:1;height:4px;border-radius:2px;background:var(--track);overflow:hidden;position:relative}
-  .mt-kpis .kpi .mt-kbar span i{position:absolute;inset:0 auto 0 0;background:var(--c,var(--accent));border-radius:2px;transition:width .4s ease}
-  .mt-kpis .kpi.warn{border-color:color-mix(in srgb,var(--st-wait) 40%,var(--line))}
-  .mt-kpis .kpi.crit{border-color:color-mix(in srgb,var(--st-fault) 45%,var(--line));background:color-mix(in srgb,var(--st-fault) 6%,var(--card))}
-  .mt-kpis .kpi .v.warn{color:color-mix(in srgb,var(--st-wait) 85%,var(--text))}
-  .mt-kpis .kpi .v.crit{color:color-mix(in srgb,var(--st-fault) 85%,var(--text))}
-  .mt-kdot{position:absolute;top:12px;right:12px;width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 20%,transparent)}
+  .mt-kpis .kpi .viz{height:30px;display:flex;align-items:flex-end}
+  .mt-kpis .kpi .viz:empty{display:none}
+  .mt-kpis .kpi .viz svg{display:block;width:100%;height:28px;overflow:visible}
+  .mt-kbar{display:flex;gap:4px;width:100%;align-items:flex-end;padding-bottom:3px}
+  .mt-kbar span{flex:1;height:5px;border-radius:3px;background:var(--track);overflow:hidden;position:relative}
+  .mt-kbar span i{position:absolute;inset:0 auto 0 0;background:var(--c,var(--text2));border-radius:3px;transition:width .4s ease}
 
   .mt-card-h{display:flex;align-items:center;justify-content:space-between;gap:10px 14px;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid var(--line)}
   .mt-card-h h3{margin:0;font:600 var(--fs-lg)/1.2 var(--f-ui);letter-spacing:.005em}
@@ -489,16 +484,16 @@
   .mt-svg text{font-family:var(--f-ui)}
   .mt-floor{fill:var(--bg2);stroke:var(--line2);stroke-width:1.2}
   .mt-wall{fill:none;stroke:var(--muted);stroke-width:2.2;stroke-linecap:round;opacity:.55}
-  .mt-door{font:600 var(--fs-2xs) var(--f-ui);letter-spacing:.08em;fill:var(--faint);text-transform:uppercase}
+  .mt-door{font:600 var(--fs-xs) var(--f-ui);letter-spacing:.08em;fill:var(--faint);text-transform:uppercase}
   .mt-doorm{stroke:var(--faint);stroke-width:1;stroke-dasharray:2 3}
   .mt-aisle{fill:none;stroke:color-mix(in srgb,var(--line) 70%,var(--bg2));stroke-width:10;stroke-linecap:round;stroke-linejoin:round}
   .mt-aisle-c{fill:none;stroke:color-mix(in srgb,var(--line2) 65%,transparent);stroke-width:.8;stroke-dasharray:5 7}
   .mt-room{fill:color-mix(in srgb,var(--card) 50%,transparent);stroke:var(--line);stroke-width:1;stroke-dasharray:3 3}
-  .mt-room-t{font:600 var(--fs-2xs) var(--f-ui);letter-spacing:.08em;fill:var(--faint);text-transform:uppercase}
+  .mt-room-t{font:600 var(--fs-xs) var(--f-ui);letter-spacing:.08em;fill:var(--faint);text-transform:uppercase}
   .mt-fp{fill:color-mix(in srgb,var(--line) 32%,transparent);stroke:color-mix(in srgb,var(--line) 80%,transparent);stroke-width:.8}
-  .mt-area{font:600 var(--fs-2xs) var(--f-ui);letter-spacing:.12em;fill:color-mix(in srgb,var(--faint) 85%,transparent);text-transform:uppercase}
+  .mt-area{font:600 var(--fs-xs) var(--f-ui);letter-spacing:.12em;fill:color-mix(in srgb,var(--faint) 85%,transparent);text-transform:uppercase}
   .mt-ext-band{fill:none;stroke:var(--line);stroke-width:1;stroke-dasharray:2 4}
-  .mt-ext-t{font:600 var(--fs-2xs) var(--f-ui);letter-spacing:.12em;fill:var(--faint);text-transform:uppercase}
+  .mt-ext-t{font:600 var(--fs-xs) var(--f-ui);letter-spacing:.12em;fill:var(--faint);text-transform:uppercase}
 
   .mt-e{cursor:pointer;transition:opacity .2s ease}
   .mt-e .g{fill:none;stroke:var(--mat);opacity:0;stroke-linecap:round}
@@ -508,10 +503,12 @@
   .mt-e.recent .b{opacity:.62}
   .mt-e.recent .f{opacity:.6}
   .mt-e .h{fill:none;stroke:transparent;pointer-events:stroke}
-  .mt-e.ext .b{stroke-dasharray:7 5;opacity:.5}
+  .mt-e.ext .b{stroke:var(--ext);stroke-dasharray:7 5;opacity:.6}
+  .mt-e.ext .a{fill:var(--ext)}
+  .mt-e.ext .g{stroke:var(--ext)}
   .mt-e.ext .f{display:none}
-  .mt-e.pend .b{stroke:var(--st-wait);stroke-dasharray:3 5;opacity:.6}
-  .mt-e.pend .a{fill:var(--st-wait);opacity:.7}
+  .mt-e.pend .b{stroke:var(--mat);stroke-dasharray:3 5;opacity:.55}
+  .mt-e.pend .a{fill:var(--mat);opacity:.6}
   .mt-e.pend .g,.mt-e.pend .f{display:none}
   .mt-e.direct .b{stroke-dasharray:1.5 5;opacity:.75}
   .mt-e.direct .g,.mt-e.direct .f{display:none}
@@ -524,9 +521,9 @@
   .mt-el{pointer-events:none}
   .mt-el rect{fill:var(--card);stroke:color-mix(in srgb,var(--mat) 45%,var(--line2));stroke-width:1}
   .mt-el text{font:700 var(--fs-sm) var(--f-cond);fill:var(--text);letter-spacing:.02em}
-  .mt-el.pend rect{stroke:color-mix(in srgb,var(--st-wait) 50%,var(--line2))}
-  .mt-el.pend text{fill:color-mix(in srgb,var(--st-wait) 80%,var(--text))}
-  .mt-el.ext rect{stroke-dasharray:3 2}
+  .mt-el.pend rect{stroke:color-mix(in srgb,var(--mat) 45%,var(--line2));stroke-dasharray:3 2}
+  .mt-el.pend text{fill:color-mix(in srgb,var(--mat) 75%,var(--text))}
+  .mt-el.ext rect{stroke:color-mix(in srgb,var(--ext) 50%,var(--line2));stroke-dasharray:3 2}
 
   .mt-node{cursor:pointer;transition:opacity .2s ease}
   .mt-node .bg{fill:var(--card2);stroke:var(--line2);stroke-width:1.1;transition:stroke .15s ease}
@@ -534,17 +531,17 @@
   .mt-node.wait .bg{stroke:color-mix(in srgb,var(--st-wait) 55%,var(--line2))}
   .mt-node.fault .bg{fill:color-mix(in srgb,var(--st-fault) 14%,var(--card2));stroke:color-mix(in srgb,var(--st-fault) 70%,var(--line2))}
   .mt-node.store .bg{fill:color-mix(in srgb,var(--card) 92%,var(--mat))}
-  .mt-node.partner .bg{fill:color-mix(in srgb,var(--st-tool) 7%,var(--card));stroke:color-mix(in srgb,var(--st-tool) 45%,var(--line2));stroke-dasharray:4 3}
+  .mt-node.partner .bg{fill:color-mix(in srgb,var(--ext) 7%,var(--card));stroke:color-mix(in srgb,var(--ext) 45%,var(--line2));stroke-dasharray:4 3}
   .mt-node.charge .bg{fill:transparent;stroke:color-mix(in srgb,var(--st-setup) 40%,var(--line2));stroke-dasharray:3 3}
   .mt-node.sel .bg{stroke:var(--accent);stroke-width:1.8}
   .mt-node .t{font:600 var(--fs-md) var(--f-cond);fill:var(--text);letter-spacing:.01em}
-  .mt-node .id{font:500 var(--fs-2xs) var(--f-mono);fill:var(--muted)}
-  .mt-node .sub{font:500 var(--fs-2xs) var(--f-ui);fill:var(--muted)}
+  .mt-node .id{font:500 var(--fs-xs) var(--f-mono);fill:var(--muted)}
+  .mt-node .sub{font:500 var(--fs-xs) var(--f-ui);fill:var(--muted)}
   .mt-node .sub.warn{fill:color-mix(in srgb,var(--st-wait) 85%,var(--text))}
   .mt-node .sub.crit{fill:color-mix(in srgb,var(--st-fault) 85%,var(--text))}
   .mt-node .sub.ok{fill:color-mix(in srgb,var(--st-run) 70%,var(--text2))}
   .mt-node .ic{color:var(--mat)}
-  .mt-node.partner .ic{color:var(--st-tool)}
+  .mt-node.partner .ic{color:var(--ext)}
   .mt-node.charge .ic{color:var(--st-setup)}
   .mt-node .sd{fill:var(--c,var(--st-idle))}
   .mt-node .sdh{fill:var(--c,var(--st-idle));opacity:0}
@@ -553,12 +550,13 @@
   .mt-node .pip{fill:var(--track);stroke:color-mix(in srgb,var(--line2) 90%,transparent);stroke-width:.8}
   .mt-node .pip.on{fill:color-mix(in srgb,var(--text2) 70%,transparent);stroke:none}
   .mt-node .pip.rd{fill:var(--mat);stroke:none}
+  .mt-node .pip.fl{fill:transparent;stroke:var(--mat);stroke-width:1}
   .mt-node .pip.full{fill:var(--st-wait);stroke:none}
-  .mt-node .pipt{font:600 var(--fs-2xs) var(--f-ui);fill:var(--faint);letter-spacing:.06em}
-  .mt-node .pipn{font:600 var(--fs-2xs) var(--f-ui);fill:var(--text2)}
+  .mt-node .pipt{font:600 var(--fs-xs) var(--f-ui);fill:var(--faint);letter-spacing:.06em}
+  .mt-node .pipn{font:600 var(--fs-xs) var(--f-ui);fill:var(--text2)}
   .mt-node .bdg{display:none}
-  .mt-node .bdg circle{fill:var(--st-wait);stroke:var(--card);stroke-width:2}
-  .mt-node .bdg text{font:700 var(--fs-2xs) var(--f-ui);fill:color-mix(in srgb,var(--st-wait) 14%,black)}
+  .mt-node .bdg circle{fill:var(--mat);stroke:var(--card);stroke-width:2}
+  .mt-node .bdg text{font:700 var(--fs-xs) var(--f-ui);fill:color-mix(in srgb,var(--mat) 14%,black)}
   .mt-node.haswait .bdg{display:block}
   .mt-node .pk{fill:none;stroke:var(--info);stroke-width:1.5;opacity:0}
   .mt-node.pick .pk{animation:mtPick 1.4s ease-out infinite}
@@ -576,7 +574,7 @@
   .mt-veh .vf{fill:var(--c)}
   .mt-veh .vk{stroke:var(--c);stroke-width:1.6;stroke-linecap:round}
   .mt-veh .vl{fill:var(--mat);stroke:color-mix(in srgb,var(--mat) 50%,black);stroke-width:.6}
-  .mt-veh .vt{font:700 var(--fs-2xs) var(--f-ui);fill:var(--text2);letter-spacing:.04em;paint-order:stroke;stroke:var(--bg2);stroke-width:3px;stroke-linejoin:round}
+  .mt-veh .vt{font:700 var(--fs-xs) var(--f-ui);fill:var(--text2);letter-spacing:.04em;paint-order:stroke;stroke:var(--bg2);stroke-width:3px;stroke-linejoin:round}
   .mt-veh .vh{fill:transparent}
   .mt-veh{cursor:pointer}
   .mt-veh .vg{fill:var(--c);opacity:0}
@@ -588,7 +586,7 @@
   .mt-pulse .pl{fill:none;stroke:var(--info);stroke-width:1.4;stroke-dasharray:3 4;opacity:.85}
   .mt-pulse .pc{fill:var(--info);filter:drop-shadow(0 0 4px var(--info))}
   .mt-pulse .pt rect{fill:color-mix(in srgb,var(--info) 16%,var(--panel));stroke:color-mix(in srgb,var(--info) 55%,transparent)}
-  .mt-pulse .pt text{font:600 var(--fs-2xs) var(--f-ui);fill:color-mix(in srgb,var(--info) 70%,white)}
+  .mt-pulse .pt text{font:600 var(--fs-xs) var(--f-ui);fill:color-mix(in srgb,var(--info) 70%,white)}
 
   .mt-tip{position:absolute;z-index:5;pointer-events:none;min-width:220px;max-width:320px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:var(--shadow);padding:10px 12px;font-size:var(--fs-sm);color:var(--text2);line-height:1.45}
   .mt-tip .tt{display:flex;align-items:center;gap:6px;font-weight:600;color:var(--text);font-size:var(--fs-md);margin-bottom:4px}
@@ -611,7 +609,10 @@
   .mt-ffoot > div + div{border-left:1px solid var(--line)}
   .mt-ffoot .eyebrow{margin-bottom:8px;display:flex;align-items:center;gap:8px}
   .mt-ffoot .eyebrow .spacer{flex:1}
-  .mt-ffoot .eyebrow span:last-child{letter-spacing:0;text-transform:none;font-weight:500;color:var(--faint);font-size:var(--fs-xs)}
+  .mt-ffoot .eyebrow .hint{letter-spacing:0;text-transform:none;font-weight:500;color:var(--faint);font-size:var(--fs-xs)}
+  .mt-toptg{display:none;align-items:center;gap:4px;height:40px;margin:-14px -4px -14px 0;padding:0 4px;border:0;background:transparent;color:var(--accent);font:600 var(--fs-xs)/1 var(--f-ui);letter-spacing:0;text-transform:none;cursor:pointer}
+  .mt-toptg .ico{transition:transform .18s ease}
+  .mt-topwrap.open .mt-toptg .ico{transform:rotate(90deg)}
   .mt-bil{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
   .mt-bil div{min-width:0}
   .mt-bil b{display:block;font:600 var(--fs-xl)/1.1 var(--f-cond);font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -644,7 +645,8 @@
   .mt-legend{display:flex;flex-wrap:wrap;gap:6px 16px;padding:4px 14px 11px;font-size:var(--fs-xs);color:var(--muted)}
   .mt-legend span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
   .mt-legend svg{flex:none;overflow:visible}
-  @container mtflow (max-width:1060px){ .mt-fin{min-width:1216px} }
+  /* Hallenplan skaliert mit der Kartenbreite (viewBox 1200) – unter 1100 px wischbar statt kleiner, damit SVG-Beschriftungen ≥ 10,5 px bleiben */
+  @container mtflow (max-width:1100px){ .mt-fin{min-width:1216px} }
   @container mtflow (max-width:640px){
     .mt-legend{display:none;flex-direction:column;gap:7px;padding:2px 14px 12px}
     .mt-flow.legopen .mt-legend{display:flex}
@@ -655,7 +657,6 @@
   .mt-fleetsec{container:mtfleet / inline-size}
   .mt-fleet{display:grid;gap:10px;grid-template-columns:repeat(3,minmax(0,1fr))}
   @container mtfleet (max-width:820px){ .mt-fleet{grid-template-columns:repeat(2,minmax(0,1fr))} .mt-fleet > .mt-vc:nth-child(3):last-child{grid-column:1/-1} }
-  @container mtfleet (max-width:540px){ .mt-fleet{grid-template-columns:minmax(0,1fr)} }
   .mt-vc{--c:var(--st-idle);position:relative;display:flex;flex-direction:column;gap:10px;padding:12px 14px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);cursor:pointer;min-width:0;box-shadow:inset 3px 0 0 var(--c);transition:border-color .15s ease,background-color .15s ease;text-align:left;color:inherit;font:inherit}
   .mt-vc:hover{border-color:var(--line2);background:color-mix(in srgb,var(--card2) 50%,var(--card))}
   .mt-vc.sel{border-color:color-mix(in srgb,var(--accent) 70%,transparent)}
@@ -776,16 +777,16 @@
   .mt-cg-h .cnt b{font:600 var(--fs-sm) var(--f-ui);color:var(--text2)}
   .mt-cg-h .sdot{width:7px;height:7px;border-radius:50%;background:var(--c);flex:none}
   .mt-cg-h.lnkh{cursor:pointer}
-  .mt-cg-h.lnkh:hover b{color:var(--accent)}
-  .mt-cg.ext{border-color:color-mix(in srgb,var(--st-tool) 35%,var(--line))}
+  @media (hover:hover){ .mt-cg-h.lnkh:hover b{color:var(--accent)} }
+  .mt-cg.ext{border-color:color-mix(in srgb,var(--ext) 35%,var(--line))}
   .mt-cg.transit{border-color:color-mix(in srgb,var(--mat) 35%,var(--line))}
   .mt-cg.scrap{opacity:.85}
   .mt-cg-b{display:flex;flex-direction:column;padding:4px 5px 6px}
   .mt-cg-sl{font:600 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.12em;text-transform:uppercase;color:var(--faint);padding:7px 6px 4px}
-  .mt-ct{--c:var(--muted);display:grid;grid-template-columns:8px minmax(0,1fr) auto;column-gap:8px;row-gap:1px;align-items:center;padding:5px 6px;border-radius:6px;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;width:100%}
+  .mt-ct{--c:var(--muted);display:grid;grid-template-columns:18px minmax(0,1fr) auto;column-gap:8px;row-gap:1px;align-items:center;padding:5px 6px;border-radius:6px;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;width:100%}
   .mt-ct:hover{background:color-mix(in srgb,var(--raise) 50%,transparent)}
   .mt-ct.sel{background:color-mix(in srgb,var(--accent) 12%,transparent)}
-  .mt-ct > i{width:8px;height:8px;border-radius:2px;background:var(--c);grid-row:1/3;align-self:start;margin-top:4px}
+  .mt-ct > .mt-mk{grid-row:1/3;align-self:start;justify-self:center;margin-top:4px}
   .mt-ct .l1{display:flex;align-items:baseline;gap:6px;min-width:0;font-size:var(--fs-sm)}
   .mt-ct .l1 .mono{font-size:var(--fs-xs);color:var(--text2);flex:none}
   .mt-ct .l1 span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;color:var(--text)}
@@ -793,7 +794,7 @@
   .mt-ct .l2{grid-column:2/4;font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px;min-width:0}
   .mt-ct .l2 span{overflow:hidden;text-overflow:ellipsis;min-width:0}
   .mt-ct .l2 .fb{flex:none;width:44px;height:4px;border-radius:2px;background:var(--track);overflow:hidden}
-  .mt-ct .l2 .fb i{display:block;height:100%;background:var(--info)}
+  .mt-ct .l2 .fb i{display:block;height:100%;background:var(--mat)}
   .mt-ct .l2 .warn{color:color-mix(in srgb,var(--st-wait) 85%,var(--text))}
 
   /* ---------- Details (Drawer) */
@@ -867,14 +868,22 @@
   @media (max-width:700px){
     .mt-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
     .mt-bil{grid-template-columns:repeat(2,minmax(0,1fr))}
-    .mt-lg{flex:1 1 50%}
-    .mt-lg + .mt-lg{border-left:0}
-    .mt-lage{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
-    .mt-lg:nth-child(n+3){border-top:1px solid var(--line)}
-    .mt-lg:nth-child(2n){border-left:1px solid var(--line)}
-    .mt-lg small{max-width:none}
+    /* Lage-Leiste: waagrecht wischbar, jede Karte vollständig lesbar (2 Zeilen statt Abschneiden) */
+    .mt-lage{flex:1 1 100%;width:auto;margin:0 calc(-1 * max(18px, env(safe-area-inset-left, 0px))) 0;padding:0 max(18px, env(safe-area-inset-left, 0px)) 2px;flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x mandatory;scroll-padding:0 18px;gap:8px;background:transparent;border:0;border-radius:0;scrollbar-width:none}
+    .mt-lage::-webkit-scrollbar{display:none}
+    .mt-lage.fr{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 40px),transparent)}
+    .mt-kpis .kpi .viz{display:none}
+    .mt-kpis .kpi{min-height:0}
+    .mt-topwrap:not(.open) .mt-top{display:none}
+    .mt-toptg{display:inline-flex}
+    .mt-lg{flex:0 0 auto;width:min(264px,74vw);scroll-snap-align:start;align-items:flex-start;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px}
+    .mt-lg + .mt-lg{border-left:1px solid var(--line)}
+    .mt-lg .ico{margin-top:2px}
+    .mt-lg b,.mt-lg small{white-space:normal;max-width:none;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.35}
     .mt-topr{grid-template-columns:minmax(0,1fr) 70px 48px}
-    .mt-kpis .kpi .s{-webkit-line-clamp:3}
+    .mt-svc{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .mt-svc div:last-child{grid-column:1/-1}
+    .mt-ffoot .mt-topwrap .eyebrow .hint{display:none}
   }
   /* Tabellen → Karten, abhängig von der Kartenbreite (nicht vom Fenster): Tablet zweizeilig, Telefon gestapelt */
   .mt-trcard{container:mttr / inline-size}
@@ -898,9 +907,14 @@
     .mt-trt .mt-rel{max-width:100%;overflow:hidden;text-overflow:ellipsis}
   }
   @container mttr (max-width:640px){
-    .mt-trt tr{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"c s" "r r" "o t" "m w" "y y";column-gap:12px;row-gap:6px;padding:10px 14px 11px 16px}
+    /* Telefon: kompakte Karte – Inhalt · Status / Strecke · Wartezeit / Grund · Fahrzeug */
+    .mt-trt tr{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"c s" "r t" "y m";column-gap:12px;row-gap:5px;padding:10px 14px 11px 16px}
+    .mt-trt td:nth-child(2),.mt-trt td:nth-child(5),.mt-trt td:nth-child(4) .mt-s,.mt-trt td:nth-child(6) .mt-s{display:none}
+    .mt-trt td:nth-child(6){justify-self:end;align-self:center}
     .mt-trt td:nth-child(8){text-align:right}
-    .mt-trt .mt-why{-webkit-line-clamp:2}
+    .mt-trt td:nth-child(8) .mt-s{display:none}
+    .mt-trt td:nth-child(4),.mt-trt td:nth-child(8){align-self:center}
+    .mt-trt .mt-why{-webkit-line-clamp:2;font-size:var(--fs-xs);color:var(--muted)}
   }
   @container mtmat (max-width:1160px){
     .mt-mtt thead{display:none}
@@ -922,9 +936,69 @@
     .mt-mtt .mt-reo-h{display:none}
   }
   @container mtmat (max-width:640px){
-    .mt-mtt tr{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"m a" "b b" "r r" "w o" "l l";column-gap:12px;row-gap:8px;padding:11px 14px 12px 16px}
-    .mt-mtt td:nth-child(6){text-align:right}
+    /* Telefon: kompakte Zeile (Name, Bestandsbalken, Reichweite) – Lieferant, Verbrauch und Bestellungen per Tipp im Detail */
+    .mt-mtt tr{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"m a" "b b" "r r";column-gap:12px;row-gap:6px;padding:10px 14px 11px 16px}
+    .mt-mtt td:nth-child(5),.mt-mtt td:nth-child(6),.mt-mtt td:nth-child(7){display:none}
     .mt-mtt td:nth-child(9){align-self:start}
+    .mt-mtt .mt-mcell .mt-locinl{display:none}
+    .mt-matcard:not(.all) .mt-mtt tr.calm{display:none}
+    .mt-matcard .mt-matmore{display:flex}
+    .mt-matcard .mt-legend-mini{display:none}
+    .mt-matcard .mt-hs .x{display:none}
+  }
+  .mt-matmore{display:none}
+  /* ---------- Behälter: Markierung je Lebenszyklus (Material-Familie – Kontur, Fläche, Bewegung; extern = --ext) */
+  .mt-mk{display:inline-block;position:relative;width:10px;height:10px;border-radius:3px;flex:none;box-sizing:border-box;vertical-align:-1px}
+  .mt-mk.k-filling{border:1.6px solid var(--mat);background:transparent}
+  .mt-mk.k-ready{background:var(--mat)}
+  .mt-mk.k-transit{width:18px;border-radius:5px;background:color-mix(in srgb,var(--mat) 22%,transparent);overflow:hidden}
+  .mt-mk.k-transit::after{content:"";position:absolute;top:2px;left:2px;width:6px;height:6px;border-radius:50%;background:var(--mat);animation:mtMk 1.3s ease-in-out infinite alternate}
+  @keyframes mtMk{to{transform:translateX(8px)}}
+  .mt-mk.k-input{background:color-mix(in srgb,var(--text2) 55%,transparent)}
+  .mt-mk.k-external{background:var(--ext)}
+  .mt-mk.k-scrap{background:var(--st-fault)}
+  .mt-mk.k-shipped{background:var(--faint)}
+  .mt-ctleg{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:var(--fs-xs);color:var(--muted)}
+  .mt-ctleg span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+  .mt-cg-h .cnt.sm,.mt-cg-h .chev{display:none}
+  .mt-cg-h .chev{color:var(--muted);transition:transform .18s ease;flex:none}
+  .mt-ctcard{container:mtct / inline-size}
+  @container mtct (max-width:640px){
+    /* Telefon: je Ort eine Zusammenfassung; aufgeklappt nur, was Aufmerksamkeit braucht (Tippen klappt auf/zu) */
+    .mt-cgrid{columns:auto;display:flex;flex-direction:column;gap:6px;padding:10px 12px 12px}
+    .mt-cg{margin:0}
+    .mt-cg-h{min-height:44px;cursor:pointer;gap:8px;padding:8px 10px}
+    .mt-cg:not(.open) .mt-cg-h{border-bottom:0}
+    .mt-cg:not(.open) .mt-cg-b{display:none}
+    .mt-cg-h .cnt.lg{display:none}
+    .mt-cg-h{flex-wrap:wrap;row-gap:2px}
+    .mt-cg-h .cnt.sm{display:block;order:5;flex-basis:100%;padding-left:15px;white-space:normal}
+    .mt-cg-h .cnt.sm b.warn{font:inherit;font-weight:600;color:var(--st-wait)}
+    .mt-cg-h .chev{display:inline-grid}
+    .mt-cg.open .mt-cg-h .chev{transform:rotate(90deg)}
+    .mt-cg-h .mono{display:none}
+    .mt-ctcard:not(.all) .mt-cg.calm{display:none}
+    .mt-ctcard .mt-ctmore{display:flex}
+    .mt-ctcard .mt-hs .x{display:none}
+  }
+  .mt-ctmore{display:none}
+  /* Fahrzeuge: auf dem Telefon waagrecht wischen statt drei Karten untereinander */
+  @container mtfleet (max-width:540px){
+    .mt-fleet{display:flex;overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x mandatory;gap:10px;margin:0 calc(-1 * max(18px, env(safe-area-inset-left, 0px)));padding:0 max(18px, env(safe-area-inset-left, 0px)) 4px;scroll-padding:0 18px;scrollbar-width:none}
+    .mt-fleet::-webkit-scrollbar{display:none}
+    .mt-fleet > .mt-vc{flex:0 0 86%;scroll-snap-align:start}
+  }
+  /* Touch: Bedienflächen ≥ 40 px (UI_GUIDE Regel 17) */
+  @media (pointer:coarse){
+    .mt-legbar button{height:40px}
+    .mt-filt{height:40px}
+    .mt-filt button{width:32px;height:32px}
+    .mt-topr{min-height:40px}
+    .mt-ct{min-height:44px}
+    .mt-d-li.click{min-height:40px}
+    .mt-qty input{font-size:16px}
+    .mt-root .seg button{min-height:40px}
+    .mt-tbl .lnk{padding:6px 0;margin:-6px 0}
   }
   `, 'mt-css');
 
@@ -1072,17 +1146,17 @@
         </div></div>
         <div class="mt-lage" data-r="lage">
           <div class="mt-lg click" data-r="lgLog" title="Logistiker:in im Dienst (Stapler)">${ICO('forklift', 18)}<div><span class="eyebrow">Logistik</span><b data-r="lgLogB">–</b><small data-r="lgLogS">–</small></div></div>
-          <div class="mt-lg" data-r="lgExt" style="--c:var(--st-tool)">${ICO('flame', 18)}<div><span class="eyebrow">Fremdbearbeitung</span><b data-r="lgExtB">–</b><small data-r="lgExtS">–</small></div></div>
-          <div class="mt-lg" data-r="lgDel" style="--c:var(--info)">${ICO('inbox', 18)}<div><span class="eyebrow">Wareneingang</span><b data-r="lgDelB">–</b><small data-r="lgDelS">–</small></div></div>
+          <div class="mt-lg" data-r="lgExt" style="--c:var(--ext)">${ICO('flame', 18)}<div><span class="eyebrow">Fremdbearbeitung</span><b data-r="lgExtB">–</b><small data-r="lgExtS">–</small></div></div>
+          <div class="mt-lg" data-r="lgDel" style="--c:var(--mat)">${ICO('inbox', 18)}<div><span class="eyebrow">Wareneingang</span><b data-r="lgDelB">–</b><small data-r="lgDelS">–</small></div></div>
         </div>
       </div>
 
       <div class="mt-kpis" data-r="kpis">
-        ${['kOpen', 'kWait', 'kAgv', 'kWip', 'kMin', 'kPur'].map(k => `<div class="kpi" data-r="${k}"><div class="l" data-r="${k}L"></div><div class="mt-kvrow"><div class="v" data-r="${k}V">–</div><div class="mt-ksp" data-r="${k}Sp"></div></div><div class="s" data-r="${k}S"></div><div class="mt-kbar" data-r="${k}B"></div></div>`).join('')}
+        ${['kOpen', 'kWait', 'kAgv', 'kWip', 'kMin', 'kPur'].map(k => `<div class="kpi" data-r="${k}"><div class="l" data-r="${k}L"></div><div class="v" data-r="${k}V">–</div><div class="s" data-r="${k}S"></div><div class="viz" data-r="${k}Sp"></div></div>`).join('')}
       </div>
 
       <section class="card mt-flow" data-r="flowCard">
-        <div class="mt-card-h">
+        <div class="card-h mt-card-h">
           <div><h3>Materialfluss heute</h3>
             <div class="mt-hs">Stationen an ihrer Position in der Halle · Linienstärke = <b data-r="metricName">Fahrten</b> seit 00:00 · Punkte = Behälter, die gerade transportiert werden</div></div>
           <div class="row">
@@ -1104,11 +1178,11 @@
         <div class="mt-legbar"><button type="button" data-r="legBtn" aria-expanded="false">${ICO('chevron', 13)}Legende</button></div>
         <div class="mt-legend" data-r="legend"></div>
         <div class="mt-ffoot">
-          <div><div class="eyebrow"><span>Tagesbilanz Logistik</span><span class="spacer"></span><span data-r="bilSince">seit 00:00</span></div>
+          <div><div class="eyebrow"><span>Tagesbilanz Logistik</span><span class="spacer"></span><span class="hint" data-r="bilSince">seit 00:00</span></div>
             <div class="mt-bil" data-r="bil"></div>
             <div class="mt-modes" data-r="modesBar"></div><div class="mt-modes-l" data-r="modesL"></div>
             <div class="mt-svc" data-r="svc"></div></div>
-          <div><div class="eyebrow"><span>Stärkste Verbindungen</span><span class="spacer"></span><span>Klick filtert die Transportaufträge</span></div>
+          <div class="mt-topwrap" data-r="topWrap"><div class="eyebrow"><span>Stärkste Verbindungen</span><span class="spacer"></span><span class="hint">Auswahl filtert die Transportaufträge</span><button class="mt-toptg" type="button" data-r="topTg" aria-expanded="false">Anzeigen${ICO('chevron', 12)}</button></div>
             <div class="mt-top" data-r="top"></div></div>
         </div>
       </section>
@@ -1119,7 +1193,7 @@
       </section>
 
       <section class="card mt-trcard" data-r="trCard">
-        <div class="mt-card-h">
+        <div class="card-h mt-card-h">
           <div><h3>Transportaufträge</h3><div class="mt-hs" data-r="trSub">–</div></div>
           <div class="row">
             <span data-r="relChip"></span>
@@ -1135,10 +1209,10 @@
       </section>
 
       <section class="card mt-matcard" data-r="matCard">
-        <div class="mt-card-h">
+        <div class="card-h mt-card-h">
           <div><h3>Rohmaterial</h3><div class="mt-hs" data-r="matSub">–</div></div>
           <div class="row mt-legend-mini" style="font-size:var(--fs-xs);color:var(--muted);gap:12px">
-            <span style="display:inline-flex;align-items:center;gap:5px"><i style="width:14px;height:6px;border-radius:3px;background:var(--st-run);display:inline-block"></i>Bestand</span>
+            <span style="display:inline-flex;align-items:center;gap:5px"><i style="width:14px;height:6px;border-radius:3px;background:${STOCK_C};display:inline-block"></i>Bestand</span>
             <span style="display:inline-flex;align-items:center;gap:5px"><i style="width:14px;height:6px;border-radius:2px;display:inline-block;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--info) 60%,transparent) 0 3px,transparent 3px 6px);border:1px solid color-mix(in srgb,var(--info) 55%,transparent)"></i>bestellt</span>
             <span style="display:inline-flex;align-items:center;gap:5px"><i style="width:2px;height:11px;background:var(--text);display:inline-block"></i>Mindestbestand</span>
           </div>
@@ -1146,12 +1220,14 @@
         <div class="tbl-wrap"><table class="tbl mt-tbl mt-mtt"><thead><tr>
           <th style="width:4px;padding:0"></th><th>Material · Form</th><th>Bestand / Mindestbestand</th><th>Reichweite (offener Bedarf)</th><th class="r" title="Verbrauch an den Maschinen seit 00:00 (Säge, Stangenlader, Rohteile) · darunter: aus dem Lager entnommen">Verbrauch heute</th><th>Bestellt</th><th>Lieferant</th><th class="mt-loccol">Lagerort</th><th></th>
         </tr></thead><tbody data-r="matBody"></tbody></table></div>
+        <div class="mt-more mt-matmore"><button class="btn sm ghost" type="button" data-r="matMoreBtn">Alle Materialien anzeigen</button></div>
       </section>
 
-      <section class="card" data-r="ctCard">
-        <div class="mt-card-h"><div><h3>Behälter im Umlauf</h3><div class="mt-hs" data-r="ctSub">–</div></div>
-          <div class="row" style="font-size:var(--fs-xs);color:var(--muted);gap:10px" data-r="ctLegend"></div></div>
+      <section class="card mt-ctcard" data-r="ctCard">
+        <div class="card-h mt-card-h"><div><h3>Behälter im Umlauf</h3><div class="mt-hs" data-r="ctSub">–</div></div>
+          <div class="mt-ctleg" data-r="ctLegend"></div></div>
         <div class="mt-cgrid" data-r="ctGrid"></div>
+        <div class="mt-more mt-ctmore"><button class="btn sm ghost" type="button" data-r="ctMoreBtn">Alle Orte anzeigen</button></div>
       </section>
     </div>`;
     V.r = refs(root);
@@ -1187,12 +1263,26 @@
     });
     V.r.trSeg.querySelectorAll('[data-f]').forEach(b => b.onclick = () => setTrFilter(b.dataset.f));
     V.r.trMoreBtn.onclick = () => { V.showAllDone = !V.showAllDone; V.sig.tr = ''; update(); };
+    V.r.ctMoreBtn.onclick = () => { V.ctAll = !V.ctAll; setCls(V.r.ctCard, 'all', V.ctAll); V.sig.ct = ''; update(); if (!V.ctAll) V.r.ctCard.scrollIntoView({ block: 'nearest' }); };
+    V.r.topTg.onclick = () => { const on = !V.r.topWrap.classList.contains('open'); setCls(V.r.topWrap, 'open', on); V.r.topTg.setAttribute('aria-expanded', String(on)); setHTML(V.r.topTg, (on ? 'Ausblenden' : 'Anzeigen') + ICO('chevron', 12)); };
+    // Lage-Leiste (Telefon, wischbar): rechten Rand ausblenden, solange dort noch eine Karte liegt
+    const lgCue = () => { const lg = V.r.lage, max = lg.scrollWidth - lg.clientWidth; setCls(lg, 'fr', max > 4 && lg.scrollLeft < max - 4); };
+    V.r.lage.addEventListener('scroll', lgCue, { passive: true });
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(lgCue).observe(V.r.lage);
+    V.r.matMoreBtn.onclick = () => { V.matAll = !V.matAll; setCls(V.r.matCard, 'all', V.matAll); V.sig.mat = ''; update(); if (!V.matAll) V.r.matCard.scrollIntoView({ block: 'nearest' }); };
     V.r.lgLog.onclick = () => { const p = logistician(); if (p) WF.app.select('person', p.id); };
     buildFleet();
     // Delegation: Tabellen & Behälter
     V.r.trBody.addEventListener('click', onTableClick);
     V.r.matBody.addEventListener('click', onTableClick);
     V.r.ctGrid.addEventListener('click', onTableClick);
+    V.r.ctGrid.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const h = e.target.closest && e.target.closest('.mt-cg-h'); if (!h) return;
+      e.preventDefault();
+      if (V.r.ctCard.clientWidth <= 640) toggleCg(h.closest('.mt-cg'));
+      else if (h.dataset.sel) { const [k, id] = h.dataset.sel.split('|'); WF.app.select(k, id); }
+    });
     WF.bus.on('select', (sel) => { V.sel = sel && sel.kind ? sel : null; markSel(); });
     WF.bus.on('sim:reset', () => {
       V.sig = {}; V.edgeSig = ''; V.dotSig = ''; V.relFilter = null; V.trSeen = null; V._pulseT = null;
@@ -1209,12 +1299,21 @@
     V.sig.tr = ''; update();
   }
   function onTableClick(e) {
+    // Behälter-Orte auf dem Telefon: Kopf klappt auf/zu (auf breiten Karten öffnet er die Maschine)
+    const cgh = e.target.closest('.mt-cg-h');
+    if (cgh && V.r.ctCard.clientWidth <= 640) { e.stopPropagation(); toggleCg(cgh.closest('.mt-cg')); return; }
     const t = e.target.closest('[data-sel]');
     if (t) { e.stopPropagation(); const [k, id] = t.dataset.sel.split('|'); WF.app.select(k, id); return; }
     const ro = e.target.closest('[data-reorder]');
     if (ro) { e.stopPropagation(); openReorder(ro.dataset.reorder); return; }
     const row = e.target.closest('[data-row]');
     if (row) { const [k, id] = row.dataset.row.split('|'); WF.app.select(k, id); }
+  }
+  function toggleCg(g) {
+    if (!g) return;
+    const on = !g.classList.contains('open');
+    g.classList.toggle('open', on);
+    (V.ctOpen || (V.ctOpen = new Map())).set(g.dataset.k, on);
   }
   function markSel() {
     if (!V.mounted) return;
@@ -1269,7 +1368,7 @@
     V.areas = [];
     for (const a in AREA_POS) {
       const ax = PX(AREA_POS[a][0]), ay = PY(AREA_POS[a][1]);
-      V.areas.push({ name: a, x: ax, y: ay - 3, w: a.length * 7.8 + 6, h: 13 });
+      V.areas.push({ name: a, x: ax, y: ay - 3, w: a.length * 8.6 + 6, h: 14 });
       h += `<text class="mt-area" data-area="${esc(a)}" x="${f1(ax)}" y="${f1(ay)}" text-anchor="middle">${esc(a)}</text>`;
     }
     // Wände (vorne mit Toren)
@@ -1353,13 +1452,13 @@
     const items = [
       [sw('<path style="stroke:var(--mat)" d="M2,7 H24" stroke-width="2" stroke-linecap="round" opacity=".55"/><path style="stroke:var(--mat)" d="M2,7 H24" stroke-width="7" stroke-linecap="round" opacity=".18"/>'), 'Fluss heute (Stärke = Menge)'],
       [sw('<circle style="fill:var(--mat)" cx="13" cy="7" r="6.5" opacity=".22"/><circle style="fill:color-mix(in srgb,var(--mat) 55%,white);stroke:var(--mat)" cx="13" cy="7" r="3.6" stroke-width="1.6"/>'), 'Behälter wird transportiert'],
-      [sw('<circle style="fill:var(--st-wait)" cx="13" cy="7" r="6.5"/><text x="13" y="10" text-anchor="middle" style="font:700 var(--fs-2xs) var(--f-ui);fill:color-mix(in srgb,var(--st-wait) 14%,black)">2</text>'), 'Behälter abholbereit'],
-      [sw('<path style="stroke:var(--st-wait)" d="M2,7 H24" stroke-width="2" stroke-dasharray="3 4" opacity=".85"/>'), 'wartet, heute noch keine Fahrt'],
-      [sw('<path style="stroke:var(--mat)" d="M2,7 H24" stroke-width="2.2" stroke-dasharray="6 4" opacity=".7"/>'), 'Fremdbearbeitung (Spedition)'],
+      [sw('<circle style="fill:var(--mat)" cx="13" cy="7" r="6.5"/><text x="13" y="10.6" text-anchor="middle" style="font:700 var(--fs-2xs) var(--f-ui);fill:color-mix(in srgb,var(--mat) 14%,black)">2</text>'), 'Behälter abholbereit'],
+      [sw('<path style="stroke:var(--mat)" d="M2,7 H24" stroke-width="2" stroke-dasharray="3 4" opacity=".7"/>'), 'wartet, heute noch keine Fahrt'],
+      [sw('<path style="stroke:var(--ext)" d="M2,7 H24" stroke-width="2.2" stroke-dasharray="6 4" opacity=".8"/>'), 'Fremdbearbeitung (Spedition)'],
       [sw('<path style="stroke:var(--mat)" d="M2,7 H24" stroke-width="2.4" stroke-dasharray="1.5 4" stroke-linecap="round" opacity=".8"/>'), 'Direktentnahme Säge (ohne Transport)'],
       [sw('<g transform="translate(13,7)" class="mt-veh" style="--c:var(--mat)"><rect class="vb" x="-9" y="-5" width="18" height="10" rx="3"/><rect class="vl" x="-3" y="-3" width="6" height="6" rx="1.2"/></g>'), 'AGV (mit Ladung)'],
       [sw('<g transform="translate(11,7)" class="mt-veh" style="--c:var(--info)"><rect class="vb" x="-7.5" y="-5" width="12" height="10" rx="2.5"/><path class="vk" d="M4.5,-3 h5 M4.5,3 h5"/></g>'), 'Stapler'],
-      [sw('<rect style="fill:color-mix(in srgb,var(--text2) 70%,transparent)" x="1" y="4" width="5" height="5" rx="1"/><rect style="fill:var(--track);stroke:var(--line2)" x="8" y="4" width="5" height="5" rx="1" stroke-width=".8"/><path style="stroke:var(--line2)" d="M15.5,3.5 v6"/><rect style="fill:var(--mat)" x="18" y="4" width="5" height="5" rx="1"/>', 26), 'Puffer Eingang | Ausgang (orange = abholbereit)'],
+      [sw('<rect style="fill:color-mix(in srgb,var(--text2) 70%,transparent)" x="1" y="4" width="5" height="5" rx="1"/><rect style="fill:var(--track);stroke:var(--line2)" x="8" y="4" width="5" height="5" rx="1" stroke-width=".8"/><path style="stroke:var(--line2)" d="M15.5,3.5 v6"/><rect style="fill:none;stroke:var(--mat)" x="18.5" y="4.5" width="4" height="4" rx="1" stroke-width="1"/><rect style="fill:var(--mat)" x="25" y="4" width="5" height="5" rx="1"/>', 32), 'Puffer Eingang | Ausgang (Kontur = wird befüllt, voll = abholbereit)'],
     ];
     V.r.legend.innerHTML = items.map(([g, t]) => `<span>${g}${esc(t)}</span>`).join('');
   }
@@ -1616,14 +1715,14 @@
     const pts = vals.map((v, i) => X(i) + ',' + Y(v)).join(' L');
     return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><path d="M0,${H - 1} L${pts} L${W},${H - 1} Z" style="fill:${color}" opacity=".13"/><path d="M${pts}" style="fill:none;stroke:${color}" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
   }
-  function kpiSet(k, { v, unit, sub, sev, bars, dot }) {
+  /** Kennzahl-Kachel nach styles.css (.kpi .l/.v/.s/.viz): Hinweis nur über .kpi.warn/.crit und nie bei Wert 0 (UI_GUIDE Regel 14) */
+  function kpiSet(k, { v, unit, sub, sev, bars }) {
     const r = V.r;
     setHTML(r[k + 'V'], `${esc(v)}${unit ? `<small>${esc(unit)}</small>` : ''}`);
     setHTML(r[k + 'S'], sub || '');
-    setCls(r[k], 'warn', sev === 'warn'); setCls(r[k], 'crit', sev === 'crit');
-    setCls(r[k + 'V'], 'warn', sev === 'warn'); setCls(r[k + 'V'], 'crit', sev === 'crit');
-    setHTML(r[k + 'B'], bars ? bars.map(b => `<span title="${esc(b.t || '')}" style="--c:${b.c}"><i style="width:${(U.clamp(b.f, 0, 1) * 100).toFixed(1)}%"></i></span>`).join('') : '');
-    r[k + 'B'].hidden = !bars;
+    const zero = v == null || v === '–' || /^0([,.]0+)?$/.test(String(v).trim());
+    setCls(r[k], 'warn', !zero && sev === 'warn'); setCls(r[k], 'crit', !zero && sev === 'crit');
+    if (bars) setHTML(r[k + 'Sp'], `<div class="mt-kbar">${bars.map(b => `<span title="${esc(b.t || '')}" style="--c:${b.c}"><i style="width:${(U.clamp(b.f, 0, 1) * 100).toFixed(1)}%"></i></span>`).join('')}</div>`);
   }
   function updateKpis(s, flows) {
     const now = s.t, d0 = dayStart(now);
@@ -1635,7 +1734,7 @@
     if (!V._spT || performance.now() - V._spT > 3000) {
       V._spT = performance.now();
       const q = (L.samp._q || []).filter(x => x.t >= now - 4 * 3600).map(x => x.v);
-      setHTML(V.r.kOpenSp, sparkSvg(q.concat([act.length]), 'var(--st-wait)', 4));
+      setHTML(V.r.kOpenSp, sparkSvg(q.concat([act.length]), 'var(--text2)', 4));
       const cv = (L.samp._c || []).filter(x => x.t >= now - 8 * 3600).map(x => x.v);
       setHTML(V.r.kWipSp, sparkSvg(cv, 'var(--mat)'));
       V.r.kWipSp.title = 'Behälter im Umlauf – letzte 8 h'; V.r.kOpenSp.title = 'Offene Transporte – letzte 4 h';
@@ -1661,7 +1760,7 @@
     const avgU = valid.length ? valid.reduce((a, x) => a + x.u, 0) / valid.length : null;
     const win = shiftWindow();
     kpiSet('kAgv', { v: avgU == null ? '–' : U.fmtNum(avgU * 100, 0), unit: avgU == null ? '' : '%', sub: us.map(x => `${esc(x.name)} <b>${x.u == null ? '–' : U.fmtPct(x.u)}</b>`).join(' · ') + `<br>mit Auftrag seit ${U.fmtClock(win.start)}`,
-      bars: us.map(x => ({ f: x.u || 0, c: 'var(--accent)', t: x.name })) });
+      bars: us.map(x => ({ f: x.u || 0, c: 'color-mix(in srgb,var(--text2) 70%,transparent)', t: x.name + ' ' + (x.u == null ? '–' : U.fmtPct(x.u)) })) });
     // 4 Behälter im Umlauf (WIP)
     let cn = 0, cq = 0, ext = 0, tr = 0;
     for (const id in s.containers) { const c = s.containers[id]; if (c.state === 'shipped' || c.state === 'scrap') continue; cn++; cq += c.qty; if (c.state === 'external') ext++; if (c.state === 'transit') tr++; }
@@ -1747,7 +1846,7 @@
             if (po) {
               const c = s.containers[sto.out[i]];
               const full = sto.out.length >= co && co > 0 && m && m.state === 'blocked';
-              setAttr(po, 'class', 'pip' + (c ? (full ? ' full' : c.state === 'ready' ? ' rd' : ' on') : ''));
+              setAttr(po, 'class', 'pip' + (c ? (full ? ' full' : c.state === 'ready' ? ' rd' : c.state === 'filling' ? ' fl' : ' on') : ''));
             }
           }
         }
@@ -1791,7 +1890,7 @@
   let MCTX = null;
   function textW(txt) {
     try {
-      if (!MCTX) { MCTX = document.createElement('canvas').getContext('2d'); MCTX.font = `500 10.5px ${getComputedStyle(document.body).getPropertyValue('--f-ui') || 'sans-serif'}`; }
+      if (!MCTX) { MCTX = document.createElement('canvas').getContext('2d'); MCTX.font = `500 11.5px ${getComputedStyle(document.body).getPropertyValue('--f-ui') || 'sans-serif'}`; }
       return MCTX.measureText(txt).width;
     } catch (e) { return txt.length * 5.6; }
   }
@@ -1940,7 +2039,7 @@
     const sig = V.metric + '|' + (V.relFilter ? V.relFilter.key : '') + '|' + top.map(e => e.key + ':' + metricVal(e)).join(',');
     if (sig !== V.sig.top) {
       V.sig.top = sig;
-      setHTML(r.top, top.length ? top.map(e => `<button class="mt-topr${V.relFilter && V.relFilter.key === e.key ? ' on' : ''}" data-rel="${esc(e.key)}"><span class="rel"><span>${esc(stName(e.from))}</span>${ICO('arrowRight', 12)}<span>${esc(stName(e.to))}</span></span>${WF.ui.bar(metricVal(e) / vmax, { color: e.ext ? 'var(--st-tool)' : 'var(--mat)' })}<b>${esc(metricLabel(e))}</b></button>`).join('')
+      setHTML(r.top, top.length ? top.map(e => `<button class="mt-topr${V.relFilter && V.relFilter.key === e.key ? ' on' : ''}" data-rel="${esc(e.key)}"><span class="rel"><span>${esc(stName(e.from))}</span>${ICO('arrowRight', 12)}<span>${esc(stName(e.to))}</span></span>${WF.ui.bar(metricVal(e) / vmax, { color: e.ext ? 'var(--ext)' : 'var(--mat)' })}<b>${esc(metricLabel(e))}</b></button>`).join('')
         : '<div class="muted" style="font-size:var(--fs-sm);padding:6px 0">Heute noch keine Fahrten.</div>');
       r.top.querySelectorAll('[data-rel]').forEach(b => {
         b.onclick = () => { const k = b.dataset.rel; if (k.indexOf('HAERT') >= 0) { V.r.ctCard.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; } setRelFilter(V.relFilter && V.relFilter.key === k ? null : { key: k, from: k.split('>')[0], to: k.split('>')[1] }); };
@@ -1959,7 +2058,7 @@
     g.innerHTML = `<path class="pl" d=""/><circle class="pc" r="3.2"/><g class="pt"><rect rx="8" height="16" y="-8"/><text y="3.6" text-anchor="middle"></text></g>`;
     const label = 'Auftrag an ' + name;
     g.querySelector('text').textContent = label;
-    const tw = label.length * 5.9 + 14;
+    const tw = label.length * 6.4 + 14;
     const rc = g.querySelector('rect'); rc.setAttribute('width', tw.toFixed(0)); rc.setAttribute('x', (-tw / 2).toFixed(0));
     V.r.gDots.append(g);
     V.pulses.push({ g, path: g.querySelector('.pl'), dot: g.querySelector('.pc'), tag: g.querySelector('.pt'), n, vehId, age: 0 });
@@ -1995,7 +2094,7 @@
         if (p.age > LIFE) { p.g.remove(); return false; }
         const v = V.veh[p.vehId]; if (!v || v.x == null) return true;
         const ax = p.n.cx, ay = p.n.cy - p.n.h / 2, bx = v.x, by = v.y;
-        const mx = (ax + bx) / 2, my = Math.min(ay, by) - 30;
+        const mx = (ax + bx) / 2, my = Math.max(PADT + 4, Math.min(ay, by) - 30);   // Beschriftung bleibt im Bild
         p.path.setAttribute('d', `M${ax.toFixed(1)},${ay.toFixed(1)} Q${mx.toFixed(1)},${my.toFixed(1)} ${bx.toFixed(1)},${by.toFixed(1)}`);
         const k2 = Math.min(1, p.age / 0.9), u = 1 - k2;
         const px = u * u * ax + 2 * u * k2 * mx + k2 * k2 * bx, py = u * u * ay + 2 * u * k2 * my + k2 * k2 * by;
@@ -2174,7 +2273,9 @@
   function trRow(r, now) {
     const s = S();
     const done = r.status === 'done';
-    const c = r.cancelled ? 'var(--st-idle)' : TR_C[r.status] || 'var(--st-idle)';
+    const wOpen = r.status === 'open' ? waitOf(r, now) : 0;
+    // Farbe = Aussage: offen neutral, erst lange Wartezeit warnt; zugeteilt = Information, beladen = Material
+    const c = r.cancelled ? 'var(--faint)' : wOpen > WAIT_CRIT ? 'var(--st-fault)' : wOpen > WAIT_WARN ? 'var(--st-wait)' : TR_C[r.status] || 'var(--muted)';
     const o = r.orderId ? s.orders[r.orderId] : null;
     let content;
     if (r.kind === 'bars') {
@@ -2269,7 +2370,7 @@
   function stockBar(mt) {
     const scale = Math.max(mt.min * 2, mt.onHand + mt.onOrder, 1) * 1.04;
     const have = mt.onHand / scale, inc = mt.onOrder / scale, mn = mt.min / scale;
-    const c = mt.onHand < mt.min ? (mt.onHand + mt.onOrder < mt.min ? 'var(--st-wait)' : 'var(--info)') : 'var(--st-run)';
+    const c = mt.onHand < mt.min && mt.onHand + mt.onOrder < mt.min ? 'var(--st-wait)' : STOCK_C;
     return `<div class="mt-sbar" style="--c:${c}" title="Bestand ${amt(mt.onHand, mt.unit)} · bestellt ${amt(mt.onOrder, mt.unit)} · Mindestbestand ${amt(mt.min, mt.unit)}"><i class="hv" style="width:${(have * 100).toFixed(1)}%"></i>${inc > 0 ? `<i class="inc" style="left:${(have * 100).toFixed(1)}%;width:${(inc * 100).toFixed(1)}%"></i>` : ''}<span class="mn" style="left:${(mn * 100).toFixed(1)}%"></span></div>`;
   }
   function matSev(mt, s) {
@@ -2312,7 +2413,9 @@
         // Nachbestellen nur dort als Knopf, wo es etwas zu tun gibt (unter Minimum, Bedarf nicht gedeckt) – sonst dezent beim Überfahren
         const actionable = urgent || below || ri.cls === 'crit' || ri.cls === 'warn';
         const reoBtn = `<button class="btn sm${urgent || (below && uncovered) ? ' primary' : actionable ? '' : ' ghost mt-reo-h'}" data-reorder="${esc(mt.id)}" title="Bestellung vorbereiten (Bestellmenge ${esc(amt(mt.reorderQty, mt.unit))})">Nachbestellen</button>`;
-        return `<tr class="click" data-row="material|${esc(mt.id)}"><td class="st" style="--c:${sev.c}"></td>
+        // Telefon: ruhige Zeilen (kein Handlungsbedarf) sind eingeklappt – „Alle Materialien anzeigen“
+        const calm = !sev.k && ri.cls !== 'crit' && ri.cls !== 'warn';
+        return `<tr class="click${calm ? ' calm' : ''}" data-row="material|${esc(mt.id)}"><td class="st" style="--c:${sev.c}"></td>
           <td class="mt-mcell"><b class="nw">${esc(mt.name)}</b><span class="mt-s"><span class="mt-form">${ICO(mt.form === 'Stange' ? 'layers' : 'box', 12)}${esc(FORM[mt.form] || mt.form)}</span> · <span class="mono">${esc(mt.id)}</span><span class="mt-locinl"> · ${esc(locSub || locName)}</span></span></td>
           <td><div class="mt-stock"><div class="mt-stock-n"><b>${esc(U.fmtNum(mt.onHand, mt.unit === 'm' ? 1 : 0))}</b><span>${esc(mt.unit)} · Min ${esc(U.fmtNum(mt.min, mt.unit === 'm' ? 1 : 0))}${below ? (uncovered ? ' · <span style="color:var(--st-wait)">unter Minimum</span>' : ' · unter Min., bestellt') : ''}</span></div>${stockBar(mt)}</div></td>
           <td><div class="mt-rw"><b class="${ri.cls}">${esc(ri.main)}</b><span class="mt-s mt-wrap">${esc(ri.sub)}</span></div></td>
@@ -2326,8 +2429,10 @@
       markSel();
     }
     const low = mats.filter(m => m.onHand < m.min).length;
+    const nAtt = rows.filter(x => x.sev.k || x.ri.cls === 'crit' || x.ri.cls === 'warn').length;
+    setText(r.matMoreBtn, V.matAll ? 'Nur Materialien mit Handlungsbedarf' : nAtt ? `Alle ${mats.length} Materialien anzeigen` : `Alle ${mats.length} Materialien anzeigen – Bedarf überall gedeckt`);
     const val = mats.reduce((a, m) => a + m.onHand * m.pricePerUnit, 0);
-    setHTML(r.matSub, `${mats.length} Materialien · Lagerwert ca. <b>${U.fmtEur(val)}</b> · ${low ? `<b style="color:var(--st-wait)">${low} unter Mindestbestand</b>` : 'alle über Mindestbestand'} · Reichweite aus den offenen Aufträgen (noch nicht entnommene Teile × Bedarf je Teil, zeitlich nach Plantafel)`);
+    setHTML(r.matSub, `${mats.length} Materialien · Lagerwert ca. <b>${U.fmtEur(val)}</b> · ${low ? `<b style="color:var(--st-wait)">${low} unter Mindestbestand</b>` : 'alle über Mindestbestand'}<span class="x"> · Reichweite aus den offenen Aufträgen (noch nicht entnommene Teile × Bedarf je Teil, zeitlich nach Plantafel)</span>`);
   }
 
   // ------------------------------------------------------------------ Nachbestellen (Dialog)
@@ -2433,10 +2538,11 @@
     if (sig !== V.sig.ct) {
       V.sig.ct = sig;
       let h = '';
+      const openMap = V.ctOpen || (V.ctOpen = new Map());
       for (const k of keys) {
         const g = groups.get(k);
         let title, idTxt = '', icon = 'box', cls = '', c0 = 'var(--line2)', stateTxt = '';
-        if (k === 'ext') { title = 'Extern bei ' + haertName(); icon = 'flame'; cls = 'ext'; c0 = 'var(--st-tool)'; }
+        if (k === 'ext') { title = 'Extern bei ' + haertName(); icon = 'flame'; cls = 'ext'; c0 = 'var(--ext)'; }
         else if (k === 'transit') { title = 'Unterwegs'; icon = 'truck'; cls = 'transit'; c0 = 'var(--mat)'; }
         else if (k === 'other') { title = 'Sonstige'; }
         else {
@@ -2450,28 +2556,38 @@
         const q = g.items.reduce((a, c) => a + c.qty, 0);
         const rowHtml = (x) => {
           const c = x.c;
-          return `<button class="mt-ct" style="--c:${CT_C[c.state] || 'var(--muted)'}" data-row="container|${esc(c.id)}" title="${esc(lbl('container', c.state))} · ${esc(c.id)}"><i></i>
+          return `<button class="mt-ct" style="--c:${CT_C[c.state] || 'var(--muted)'}" data-row="container|${esc(c.id)}" title="${esc(lbl('container', c.state))} · ${esc(c.id)}">${ctMark(c.state)}
             <span class="l1"><span class="mono">${esc(c.orderId)}</span><span>${esc(c.partName)}</span></span><span class="q">${esc(stk(c.qty))}</span>
             <span class="l2">${x.ln.html}</span></button>`;
         };
-        let body = '';
+        let body = '', sm = '';
         const st = STN(k);
-        if (st && (st.kind === 'machine' || st.kind === 'qs' || st.kind === 'assembly')) {
-          const out = items.filter(x => x.slot === 'out').sort((a, b) => a.ln.sort - b.ln.sort), inn = items.filter(x => x.slot !== 'out').sort((a, b) => a.ln.sort - b.ln.sort);
+        const inn = items.filter(x => x.slot !== 'out').sort((a, b) => a.ln.sort - b.ln.sort), out = items.filter(x => x.slot === 'out').sort((a, b) => a.ln.sort - b.ln.sort);
+        const isMach = !!(st && (st.kind === 'machine' || st.kind === 'qs' || st.kind === 'assembly'));
+        if (isMach) {
           if (inn.length) body += `<div class="mt-cg-sl">Eingang · ${inn.length}${st.inCap ? ' / ' + st.inCap : ''}</div>` + inn.map(rowHtml).join('');
           if (out.length) body += `<div class="mt-cg-sl">Ausgang · ${out.length}${st.outCap ? ' / ' + st.outCap : ''}</div>` + out.map(rowHtml).join('');
         } else body += items.sort((a, b) => a.ln.sort - b.ln.sort || a.c.createdT - b.c.createdT).map(rowHtml).join('');
+        // Telefon: Zusammenfassung je Ort; aufgeklappt nur, was Aufmerksamkeit braucht (unterwegs, Ausgang voll, lange abholbereit)
+        const m = s.machines[k];
+        const outFull = isMach && st.outCap > 0 && out.length >= st.outCap;
+        const waitLong = g.items.some(c => c.state === 'ready' && c.readyT != null && now - c.readyT > WAIT_WARN);
+        const att = k === 'transit' || (m && m.state === 'blocked') || outFull || waitLong;
+        const isOpen = openMap.has(k) ? openMap.get(k) : att;
+        const attTxt = (m && m.state === 'blocked') || outFull ? 'Ausgang voll' : waitLong ? 'wartet auf Abholung' : '';
+        sm = (isMach ? `Eingang ${inn.length}${st.inCap ? '/' + st.inCap : ''} · Ausgang ${out.length}${st.outCap ? '/' + st.outCap : ''}` : `${g.items.length} Behälter`) + ` · ${stk(q)}`;
         const hdSel = s.machines[k] ? ` data-sel="machine|${esc(k)}" title="Maschinendetails öffnen"` : '';
-        h += `<div class="mt-cg ${cls}" style="--c:${c0}"><div class="mt-cg-h${hdSel ? ' lnkh' : ''}"${hdSel}>${icon ? ICO(icon, 15) : stateTxt}<b>${esc(title)}</b>${idTxt && idTxt !== title ? `<span class="mono">${esc(idTxt)}</span>` : ''}<span class="spacer"></span><span class="cnt"><b>${g.items.length}</b> ${g.items.length === 1 ? 'Behälter' : 'Behälter'} · ${esc(stk(q))}</span></div><div class="mt-cg-b">${body}</div></div>`;
+        h += `<div class="mt-cg ${cls}${isOpen ? ' open' : ''}${att ? '' : ' calm'}" data-k="${esc(k)}" style="--c:${c0}"><div class="mt-cg-h${hdSel ? ' lnkh' : ''}"${hdSel} role="button" tabindex="0">${icon ? ICO(icon, 15) : stateTxt}<b>${esc(title)}</b>${idTxt && idTxt !== title ? `<span class="mono">${esc(idTxt)}</span>` : ''}<span class="spacer"></span><span class="cnt lg"><b>${g.items.length}</b> Behälter · ${esc(stk(q))}</span><span class="chev">${ICO('chevron', 14)}</span><span class="cnt sm">${esc(sm)}${attTxt ? ` · <b class="warn">${esc(attTxt)}</b>` : ''}</span></div><div class="mt-cg-b">${body}</div></div>`;
       }
       setHTML(r.ctGrid, h || '<div class="empty">Keine Behälter im Umlauf.</div>');
       markSel();
     }
     const ext = groups.get('ext'), trn = groups.get('transit');
-    setHTML(r.ctSub, `<b>${total}</b> Behälter · <b>${U.fmtNum(qty)}</b> Teile · ${trn ? trn.items.length : 0} unterwegs · ${ext ? ext.items.length : 0} extern · gruppiert nach Ort in Flussrichtung`);
+    setText(r.ctMoreBtn, V.ctAll ? 'Nur Orte mit Handlungsbedarf' : `Alle ${keys.length} Orte anzeigen`);
+    setHTML(r.ctSub, `<b>${total}</b> Behälter · <b>${U.fmtNum(qty)}</b> Teile · ${trn ? trn.items.length : 0} unterwegs · ${ext ? ext.items.length : 0} extern<span class="x"> · gruppiert nach Ort in Flussrichtung</span>`);
     if (!r.ctLegend._done) {
       r.ctLegend._done = true;
-      r.ctLegend.innerHTML = ['filling', 'ready', 'transit', 'input', 'external'].map(k => `<span style="display:inline-flex;align-items:center;gap:5px"><i style="width:8px;height:8px;border-radius:2px;background:${CT_C[k]};display:inline-block"></i>${esc(lbl('container', k))}</span>`).join('');
+      r.ctLegend.innerHTML = ['filling', 'ready', 'transit', 'input', 'external'].map(k => `<span>${ctMark(k)}${esc(lbl('container', k))}</span>`).join('');
     }
   }
 
@@ -2493,8 +2609,9 @@
     return out;
   }
   /** kleines Liniendiagramm 0..100 mit Schwelle (Akku) */
-  function batteryChart(samples, now, low) {
-    const W = 420, H = 92, padL = 26, padR = 6, padT = 8, padB = 18;
+  function batteryChart(samples, now, low, w) {
+    // in echter Breite gezeichnet (keine verzerrte Skalierung), Achsen damit immer ≥ 10,5 px
+    const W = Math.max(260, Math.round(w || 420)), H = 92, padL = 28, padR = 6, padT = 8, padB = 18;
     const t1 = now, t0 = now - 4 * 3600;
     const pts = samples.filter(x => x.t >= t0);
     const X = (t) => padL + (t - t0) / (t1 - t0) * (W - padL - padR);
@@ -2509,7 +2626,7 @@
       const last = pts[pts.length - 1];
       g += `<path d="${area}" style="fill:var(--accent)" opacity=".1"/><path d="${d}" style="fill:none;stroke:var(--accent)" stroke-width="1.8" stroke-linejoin="round"/><circle cx="${X(last.t).toFixed(1)}" cy="${Y(last.v).toFixed(1)}" r="3" style="fill:var(--accent)"/>`;
     } else g += `<text class="ax" x="${W / 2}" y="${H / 2}" text-anchor="middle">Verlauf wird aufgezeichnet …</text>`;
-    return `<div class="mt-d-chart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px">${g}</svg></div>`;
+    return `<div class="mt-d-chart"><svg viewBox="0 0 ${W} ${H}" width="100%" style="height:${H}px">${g}</svg></div>`;
   }
   function stateBandAgv(samples, now) {
     const t0 = now - 4 * 3600;
@@ -2572,7 +2689,7 @@
           setHTML(X.bat, `<h4>Akku</h4><div class="mt-d-bat"><div class="mt-gauge${ag.state === 'charging' ? ' chg' : ''}" style="--gc:${gc}"><svg width="62" height="62" viewBox="0 0 62 62"><circle class="gt" cx="31" cy="31" r="26"/><circle class="gv" cx="31" cy="31" r="26" transform="rotate(-90 31 31)" stroke-dasharray="163.4" stroke-dashoffset="${(163.4 * (1 - b / 100)).toFixed(1)}"/></svg><div class="gl"><b>${U.fmtNum(b, 0)} %</b><span>${ag.state === 'charging' ? ICO('bolt', 9) + 'lädt' : 'Akku'}</span></div></div>
             <div style="font-size:var(--fs-sm);color:var(--text2);line-height:1.5">${ag.state === 'charging' ? `Lädt mit ${U.fmtNum((cfg().agvCharge || 0.12) * 60, 1)} %/min – ${ag.mustCharge ? `für Aufträge gesperrt bis ${cfg().batteryFull || 90} % (ca. ${U.fmtClock(now + Math.max(0, ((cfg().batteryFull || 90) - b) / (cfg().agvCharge || 0.12)))})` : `voll ca. ${U.fmtClock(now + Math.max(0, (100 - b) / (cfg().agvCharge || 0.12)))}, nimmt währenddessen Aufträge an`}.`
               : `Reicht für ca. <b>${trips}</b> weitere Fahrten bis zur Ladeschwelle von ${low} % (Ø Fahrt heute ${dur(drivePer)}).`} Unter ${low} % fährt ${esc(ag.name)} nach dem laufenden Auftrag selbstständig zur Ladestation.</div></div>
-            ${batteryChart(batteryHistory(id), now, low)}
+            ${batteryChart(batteryHistory(id), now, low, X.bat.clientWidth)}
             <div style="margin-top:8px"><div class="eyebrow" style="margin-bottom:5px">Zustand · letzte 4 h</div>${stateBandAgv(L.stlog[id] || [], now)}
             <div class="md-legend" style="display:flex;flex-wrap:wrap;gap:4px 12px;font-size:var(--fs-xs);color:var(--muted);margin-top:6px">${[['idle', 'Bereit'], ['toPickup', 'Anfahrt'], ['toDrop', 'beladen'], ['charging', 'Laden']].map(([k, l]) => `<span style="display:inline-flex;align-items:center;gap:5px"><i style="width:8px;height:8px;border-radius:2px;background:${AGV_C[k]}"></i>${l}</span>`).join('')}</div></div>`);
           setHTML(X.mission, `<h4>Aktueller Auftrag</h4>${missionBox(ag.task ? L.tr.get(ag.task) || null : null, ag.task ? s2.transports[ag.task] : null, now, ag.pos)}`);
@@ -2750,7 +2867,7 @@
           if (o) {
             const chain = o.routing.map((r, i) => {
               const isSrc = i === c.src, isDst = i === c.idx;
-              const cc = isDst ? col : isSrc ? 'var(--st-run)' : 'var(--line2)';
+              const cc = isDst ? col : isSrc ? 'var(--text2)' : 'var(--line2)';
               return `<div class="op${isDst ? ' cur' : ''}" style="--c:${cc}"><b>AG ${r.seq}</b><span>${esc(r.station === 'EXT' ? 'Härterei' : stName(r.station))}</span></div>`;
             }).join(`<span class="ar">${ICO('chevron', 12)}</span>`);
             setHTML(X.route, `<h4>Weg durch den Arbeitsplan</h4><div class="mt-chain">${chain}</div><div class="muted" style="font-size:var(--fs-xs);margin-top:6px">${c.src >= 0 ? 'Aus AG ' + esc(String(o.routing[c.src].seq)) + ' ' + esc(o.routing[c.src].op) : 'Aus dem Rohmaterial-Lager'} → ${c.idx < o.routing.length ? 'für AG ' + esc(String(o.routing[c.idx].seq)) + ' ' + esc(o.routing[c.idx].op) : 'Versand'}</div>`);

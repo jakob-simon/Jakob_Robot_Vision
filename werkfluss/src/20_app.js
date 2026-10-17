@@ -242,15 +242,16 @@
   const SEV_LABEL = { crit: 'Kritisch', warn: 'Warnung', info: 'Info', ok: 'Erledigt' };
   function notifCard(n) {
     const S = WF.SEV[n.sev] || WF.SEV.info;
-    const ent = n.entity && n.entity.id ? `<button class="link" data-ent="${esc(n.entity.kind)}|${esc(n.entity.id)}">${esc(app.entityLabel(n.entity))}</button>` : '';
+    // Kopfzeile kurz halten (wie im Leitstand): nur die ID, voller Name im Tooltip
+    const ent = n.entity && n.entity.id ? `<button class="link n-ent" data-ent="${esc(n.entity.kind)}|${esc(n.entity.id)}" title="${esc(app.entityLabel(n.entity))} öffnen">${esc(n.entity.id)}</button>` : '';
     const acts = (n.actions || []).map((a, i) => `<button class="btn sm${i === 0 && n.status !== 'resolved' ? ' primary' : ''}" data-act="${i}">${esc(a.label)}</button>`).join('');
     const status = n.status === 'ack' ? 'quittiert' + (n.ackBy ? ' von ' + esc(n.ackBy) : '') + ' · Ursache besteht noch' : n.status === 'resolved' ? 'erledigt' + (n.resolvedT ? ' ' + U.fmtClock(n.resolvedT) : '') : '';
     return `<div class="notif ${esc(n.status)}" style="--c:${S.color}" data-id="${esc(n.id)}">
-      <div class="n-top"><span class="n-sev" style="color:${S.color}">${SEV_LABEL[n.sev] || ''}</span><span>${WF.ui.notifTime(n)}</span><span>·</span><span>${esc(n.role || '')}</span><span class="spacer"></span>${ent}</div>
+      <div class="n-top"><span class="n-sev" style="color:${S.color}">${SEV_LABEL[n.sev] || ''}</span><span class="n-when">${WF.ui.notifTime(n)}${n.role ? ' · ' + esc(n.role) : ''}</span><span class="spacer"></span>${ent}</div>
       <div class="n-t">${esc(n.title)}</div>
       ${n.body ? `<div class="n-b">${esc(n.body)}</div>` : ''}
       ${n.suggestion ? `<div class="n-s"><b>Empfehlung</b> ${esc(n.suggestion)}</div>` : ''}
-      <div class="n-a">${acts}${n.status === 'open' ? '<button class="btn sm ghost" data-ack>Quittieren</button>' : ''}<span class="spacer"></span>${status ? `<span class="muted" style="font-size:11.5px;align-self:center">${status}</span>` : ''}${WF.ai && n.status !== 'resolved' ? `<button class="btn sm ghost" data-ai>${icon('sparkles', 14)} Ursache analysieren</button>` : ''}</div>
+      <div class="n-a">${acts}${n.status === 'open' ? '<button class="btn sm ghost" data-ack>Quittieren</button>' : ''}<span class="spacer"></span>${status ? `<span class="muted" style="font-size:var(--fs-xs);align-self:center">${status}</span>` : ''}${WF.ai && n.status !== 'resolved' ? `<button class="btn sm ghost" data-ai>${icon('sparkles', 14)} Ursache analysieren</button>` : ''}</div>
     </div>`;
   }
   const isImportant = (n) => n.sev === 'crit' || n.sev === 'warn';
@@ -375,7 +376,7 @@
       <label class="field" for="set-site">Standort<input class="input" id="set-site" value="${esc(c.site)}" maxlength="80"></label>
       <label class="field" for="set-speed">Simulationstempo
         <select class="input" id="set-speed">${WF.profile.sim.speeds.map(s => `<option value="${s}" ${s === app.speed ? 'selected' : ''}>${s}× Echtzeit${s === 30 ? ' (Standard)' : ''}</option>`).join('')}</select></label>
-      <div class="card"><div class="card-b" style="font-size:12.5px;color:var(--text2)">
+      <div class="card"><div class="card-b" style="font-size:var(--fs-sm);color:var(--text2)">
         <b>Über diese Demo.</b> ${esc(WF.profile.company.demoNote)} Profil: ${esc(WF.profile.company.description)}
         <br><span class="muted">werkfluss ${esc(WF.version)} · Simulation deterministisch (Seed ${WF.profile.sim.seed}).</span></div></div>`;
     app.modal({ title: 'Einstellungen', body, actions: [
@@ -396,15 +397,15 @@
     ] });
   }
 
-  css(`.nav-item .badge.ratio{color:var(--muted);font-size:11px}
-       .nav-item .badge.pill-warn,.nav-item .badge.pill-crit{min-width:18px;height:18px;padding:0 5px;border-radius:9px;font:700 10.5px/18px var(--f-ui);text-align:center;color:#1a1204;background:var(--st-wait)}
+  css(`.nav-item .badge.ratio{color:var(--muted);font-size:var(--fs-xs)}
+       .nav-item .badge.pill-warn,.nav-item .badge.pill-crit{min-width:18px;height:18px;padding:0 5px;border-radius:9px;font:700 var(--fs-2xs)/18px var(--f-ui);text-align:center;color:#1a1204;background:var(--st-wait)}
        .nav-item .badge.pill-crit{background:var(--st-fault);color:#1b0606}
        .t-tour{height:36px;padding:0 11px;gap:6px}
-       .notif .n-sev{font:700 10.5px/1 var(--f-ui);letter-spacing:.1em;text-transform:uppercase}
+       .notif .n-sev{font:700 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.1em;text-transform:uppercase}
        @media (max-width:1180px){.t-tour span{display:none}.t-tour{width:36px;padding:0}}
        @media (min-width:901px) and (max-width:1280px){.nav-item .badge.ratio{display:none!important}.nav-item .badge.pill-warn,.nav-item .badge.pill-crit{min-width:0;width:8px;height:8px;padding:0;font-size:0;top:7px;right:12px;box-shadow:0 0 0 2px var(--panel)}}
        @media (max-width:900px){.nav-item .badge.ratio{display:none!important}
-         .nav-item .badge.pill-warn,.nav-item .badge.pill-crit{position:static;min-width:16px;height:16px;padding:0 4px;font:700 10px/16px var(--f-ui);margin-left:2px;width:auto;border-radius:8px}}`, 'app-badges');
+         .nav-item .badge.pill-warn,.nav-item .badge.pill-crit{position:static;min-width:16px;height:16px;padding:0 4px;font:700 var(--fs-2xs)/16px var(--f-ui);margin-left:2px;width:auto;border-radius:8px}}`, 'app-badges');
 
   // ------------------------------------------------------------ TV-Modus (Leitstand an der Hallenwand)
   // Chrome und Typografie: styles.css (.app.tv). Beenden-Knopf in der Kopfzeile, sichtbar nur nach Maus-/Touch-Aktivität (3 s).

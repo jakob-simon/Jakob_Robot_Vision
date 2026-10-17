@@ -301,7 +301,8 @@ the delivery window 06–20 (event `shipOut`); delivered purchases are kept 72 h
 Render only `state !== 'offShift'`. Internal: `homeNode, idx, route, dlT, dlV, at`.
 
 ### 7.2 `state.agvs[id]` / `state.forklift`
-AGV: `{ id, name, maxKg, speed, battery (0..100), state ('idle'|'toPickup'|'loading'|'toDrop'|'unloading'|'toCharge'|'charging'), pos {x,z}, heading, node, load (containerId)|null, task (transportId)|null, taskLabel|null, waitRem, mustCharge, slot, distToday, transportsToday, freeSince }`
+AGV: `{ id, name, maxKg, speed, battery (0..100), state ('idle'|'toPickup'|'loading'|'toDrop'|'unloading'|'toCharge'|'charging'), pos {x,z}, heading, node, load (containerId)|null, loadKind ('container'|'empty'|null – 'empty' = Leergut stack, `loadN` bins, no container object), loadN, task (transportId)|null, taskLabel|null, waitRem, mustCharge, slot, distToday, transportsToday, freeSince }`
+Battery: drain 0.006 %/s while driving (≈ 4.6 h pure driving), charge 0.05 %/s; AGVs go to the charger when idle.
 Forklift: `{ id:'STP1', name, pos {x,z}, heading, node, driver (personId)|null, state ('parked'|'driving'), reservedBy|null, load (containerId|'Stangen')|null }`
 
 ### 7.3 `state.containers[id]`
@@ -317,12 +318,32 @@ Forklift: `{ id:'STP1', name, pos {x,z}, heading, node, driver (personId)|null, 
 
 ### 7.5 `state.transports[id]`
 ```
-{ id, containerId|null, kind ('container'|'bars'|'ext-out'|'ext-in'|'supply'), from {station}, to {station}, weightKg,
+{ id, containerId|null, kind ('container'|'bars'|'ext-out'|'ext-in'|'supply'|'empty'), from {station, slot?}, to {station, slot?}, weightKg,
   mode ('AGV'|'Stapler'), status ('open'|'assigned'|'toPickup'|'loaded'|'toDrop'|'done'), assignee (agvId|personId)|null,
-  createdT, pickupT|null, doneT|null, orderId|null, label, waitReason|null ('Zielpuffer … voll', 'kein AGV frei …'), taskId|null,
-  materialId?/meters? (bars), cancelled? }
+  phase ('geplant'|'wartend'|'unterwegs'|'erledigt' – LABELS.transportPhase),
+  waitCode|null ('destFull' → phase 'geplant' | 'noVehicle' | 'charging' | 'noDriver' | 'lowPrio' (Leergut) → phase 'wartend'),
+  waitReason|null ('Ziel voll (Zielpuffer INDEX G220 3/3)' | 'kein Fahrzeug frei (AGV 1 unterwegs, AGV 2 unterwegs)' |
+                   'Fahrzeug lädt (AGV 2 24 %)' | 'wartet auf Logistiker:in (Stapler)' | 'Leergut – fährt, sobald ein AGV frei ist'),
+  createdT, pickupT|null, doneT|null, orderId|null, label, taskId|null,
+  materialId?/meters? (bars), empties? (Leergut: number of stacked bins), finalTo? (rerouted to the Pufferlager), fromBuffer?, cancelled? }
 ```
-Done transports are kept 6 h.
+Done transports are kept 6 h. **Phase semantics for the hall**: 'geplant' = the target buffer is full, the container stays (planned)
+at the source output or in the Pufferlager – show it as planned, not as a waiting transport; 'wartend' = target has room, a vehicle /
+driver is missing (`waitReason` says which); 'unterwegs' = assigned/driving/loaded. Material flow:
+- **Pufferlager** (`PUF`, `profile.stations PUF.cap` = 12): when the target buffer is full and the source machine's output is full,
+  a free AGV takes the container to the Pufferlager (label '… → Pufferlager (Ziel INDEX G220 voll)', event `buffer`) and a new
+  transport Pufferlager → target is created ('geplant' until there is room). The saw keeps its cut-ahead in its own Zuschnitt-Ablage.
+  Containers in the Pufferlager: `location {kind:'station', id:'PUF', slot:'out'}`, state 'ready'; `containerView().pos` spreads them
+  in front of the rack.
+- **Leergut** (`kind:'empty'`, `containerId:null`, `mode:'AGV'`, `from.slot:'in'`, `to.slot:'out'`): every container emptied at a machine
+  input goes back to the output of the station that filled it (raw containers to RAW); open Leergut transports of the same route stack
+  (≤ 4 bins, `empties`); AGVs drive them only when no material transport waits. Counted in `state.today.emptyReturns`, not in
+  `today.transports`.
+- Transfer batches in the profile are sized so a container fills in ≈ ≤ 75 min (`transferBatch`), i.e. regular moves; in the
+  default run an AGV or the forklift is driving ≈ 40–45 % of staffed time (≈ 50 % in the first 40 min after 08:40), ≈ 60 % incl.
+  loading/unloading (test 15 requires ≥ 35 %).
+- Wash/measure programs stay set: a releasable op (no first piece, setup ≤ 10 min) re-activated for the next container of the
+  same order on the same machine needs no new setup ('Programm noch eingestellt – kein Rüsten').
 
 ### 7.6 `state.tools[id]`
 ```
@@ -384,7 +405,7 @@ orderDone, orderAdded, setupStart, setupDone, fpiReady, fpiOk, fpiNok, correctio
 remAfterPart, changeAt, wearPct, bundled, manual, afterPart, etaT} or {parked:true}), toolChanged (data {tools:[{typeId, name, oldToolId,
 newToolId, wearPct, rem, reason, disposal, bundled, manual}], cause, toolBreak, manual, partProgress:0, by, durSec, firstPieceAfter}),
 toolReturn, fault, repair, scrap, issue, return, extOut, extIn, delivery, reorder, priority, moveOp, connect, bars, barsOrder, barsFail,
-crib, shift, break, breakMakeup, partPause, partResume, reassign, taskDropped, reset, orderIntake (sev 'ok', msg 'Auftragseingang: FA-24142 · 40 Stk
+crib, shift, break, breakMakeup, partPause, partResume, reassign, taskDropped, reset, buffer (container to the Pufferlager, data {orderId, from, to}), orderIntake (sev 'ok', msg 'Auftragseingang: FA-24142 · 40 Stk
 Hydraulikkolben Ø60×220 für Hydrava Pumpen GmbH, Termin Do 14:00', data {orderId, template, qty, due, priority, why, source:'ERP'}),
 shipOut (data {orderId, qty, containers}), remake (data {orderId, remakeOf, qty})`.
 `toolChanged.data.tools[]` additionally carries `action ('index'|'replace'), edgeFrom, edgeTo, edges`; `data.index` = pure indexing.
@@ -412,7 +433,7 @@ ops[{ seq, station, received, good, scrap, passed, inProc, complete, startT, end
 ### 7.14 `state.measurements`
 `{ '<orderId>/<seq>': [{ t, v, ok, partNo, fpi }] }` – last 200 per op; limits via `WF.sim.charOf(orderId, seq)`.
 
-Other: `state.today {day, good, goodFinished, scrap, scrapBy, fpiOk, fpiNok, transports, shipped, toolChanges, faults, setups, energyKwh, lossEur}`,
+Other: `state.today {day, good, goodFinished, scrap, scrapBy, fpiOk, fpiNok, transports, emptyReturns, shipped, toolChanges, faults, setups, energyKwh, lossEur}`,
 `state.stations[id] = {id, inp:[containerId], out:[containerId]}` (order = stacking order), `state.lastShiftReport {t, from, to, good, scrap, oee, faults[], waiting[]}`,
 `state.engineErrors[]` (must stay empty – internal error log).
 
@@ -442,7 +463,7 @@ Other: `state.today {day, good, goodFinished, scrap, scrapBy, fpiOk, fpiNok, tra
 
 ## 9. `WF.sim.LABELS` (German)
 
-`person, agv, forklift, transport, transportKind, transportMode, container, containerKind, opState, orderStatus, priority, risk,
+`person, agv, forklift, transport, transportKind (incl. 'empty' = 'Leergut'), transportPhase, transportMode, container, containerKind, opState, orderStatus, priority, risk,
 task (task types), taskStatus, toolStatus, toolState (incl. 'indexed'), toolAction ('index' = 'Schneide wenden', 'replace' = 'Werkzeug tauschen'),
 toolKind, fpiStage, notifStatus, purchase, conn (level 0..3), loading, stackLight`
 – e.g. `LABELS.person.walking = 'Unterwegs'`, `LABELS.toolStatus.planned = 'Wechsel geplant'`, `LABELS.container.external = 'In Fremdbearbeitung'`.

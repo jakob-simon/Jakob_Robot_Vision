@@ -7,7 +7,8 @@
      mit Zustandsband, Zukunft = Prognose-Blöcke (WF.sim.forecast) je Auftragsfarbe, Rüstanteil schraffiert.
    - Detail „order“: Lage, Aktionen (Priorität, Arbeitsgang verlagern, Halle, Plantafel), Arbeitsgänge, Material, Ereignisse.
    Nur lesen (WF.sim.*), handeln über WF.sim.actions. Aktualisierung inkrementell (Felder patchen, SVG nur bei neuer
-   Prognose neu zeichnen). CSS-Präfix .or-  ·  Öffentlich: WF.ordersUi = { colorOf(orderId) }. */
+   Prognose neu zeichnen). CSS-Präfix .or-  ·  Öffentlich: WF.ordersUi = { colorOf(orderId), route(ops, opts) },
+   WF.ui.route(ops, {mode:'row'|'stack', current}) – eine Arbeitsplan-Darstellung für alle Ansichten. */
 (function () {
   const WF = window.WF;
   const { esc, icon } = WF.ui;
@@ -19,6 +20,8 @@
   // auch bei Rot-Grün-Sehschwäche klar unterscheidbar sind (geprüft: ΔE ≥ 14,9 deutan, ≥ 18,3 normal; Kontrast ≥ 3:1
   // auf --panel). Rot und Bernstein sind gemieden bzw. gedämpft (Zustandsfarben Störung/Warten bleiben eindeutig).
   // Identität nie nur über Farbe: Blöcke tragen die Auftragsnummer, Hover hebt den ganzen Auftrag hervor.
+  // Seit der ruhigen Plantafel nutzt diese Ansicht die Auftragsfarben nicht mehr (hervorgehoben = Akzent);
+  // colorOf bleibt als öffentliche Schnittstelle erhalten.
   const ORDER_HEX = ['#00a8bf', '#d27a44', '#0083ba', '#45ab70', '#7b68bf', '#00ad9e', '#4d77c5', '#7ca245', '#9c5ca6', '#c28621', '#b05584', '#a7951e'];
   const colorMemo = {};
   function colorOf(orderId) {
@@ -152,9 +155,14 @@
     const m = v.bottleneck && /AG\s*(\d+)/.exec(v.bottleneck); return m ? Number(m[1]) : null;
   }
   /** Engpass im Werk – eine Definition (Engine), sonst null */
+  let bnMemo = { k: null, v: null };
   function plantBottleneck() {
     if (!WF.sim || typeof WF.sim.bottleneck !== 'function') return null;
-    try { return WF.sim.bottleneck(); } catch (e) { return null; }
+    const k = S() ? S().t : null;   // je Simulationszeitpunkt einmal rechnen (Karten, Kette, Kopf fragen mehrfach)
+    if (bnMemo.k === k && k != null) return bnMemo.v;
+    try { bnMemo.v = WF.sim.bottleneck(); } catch (e) { bnMemo.v = null; }
+    bnMemo.k = k;
+    return bnMemo.v;
   }
   /** besondere Auftragsherkunft als Etikett (Profil-/ERP-Aufträge ohne Etikett) */
   function srcTag(v) {
@@ -361,7 +369,6 @@
   .or-top > *{min-width:0}
   .or-ident{min-width:0;overflow:hidden}
   .or-l1{display:flex;align-items:center;flex-wrap:wrap;gap:4px 7px;min-width:0}
-  .or-sw{width:10px;height:10px;border-radius:3px;background:var(--oc,var(--accent));flex:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--oc,var(--accent)) 22%,transparent)}
   .or-id{font:600 var(--fs-md)/1.2 var(--f-mono);color:var(--text);letter-spacing:.01em;white-space:nowrap}
   .or-tag{--c:var(--st-idle);display:inline-flex;align-items:center;gap:4px;font:600 10.5px/1 var(--f-ui);letter-spacing:.02em;padding:3px 6px;border-radius:5px;color:color-mix(in srgb,var(--c) 85%,white);background:color-mix(in srgb,var(--c) 13%,transparent);border:1px solid color-mix(in srgb,var(--c) 32%,transparent);white-space:nowrap;flex:none}
   .or-tag.eil{--c:var(--st-fault)}
@@ -454,6 +461,7 @@
   .or-foot{display:flex;align-items:center;gap:6px 16px;min-width:0;font-size:var(--fs-sm);color:var(--text2)}
   .or-now{--c:var(--muted);display:flex;align-items:center;gap:7px;min-width:0;flex:1}
   .or-now > span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .or-now > span:first-child{flex:none;overflow:visible;display:inline-flex}
   .or-now .ico{flex:none;color:var(--c)}
   .or-now b{font-weight:600;color:var(--text)}
   .or-now.warn{--c:var(--st-wait)} .or-now.crit{--c:var(--st-fault)} .or-now.ok{--c:var(--st-run)}
@@ -579,10 +587,9 @@
   .or-pm-lead b{color:var(--text);font-weight:600}
   .or-pm-h{display:flex;justify-content:space-between;gap:10px;margin-top:2px;font:600 var(--fs-2xs)/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
   .or-pm-t{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--r);background:var(--card);overflow:hidden}
-  .or-pm-r{--oc:var(--accent);display:grid;grid-template-columns:10px auto minmax(0,1fr) auto 64px auto;align-items:center;gap:4px 10px;padding:9px 12px;border-top:1px solid var(--line);font-size:var(--fs-sm);font-variant-numeric:tabular-nums}
+  .or-pm-r{display:grid;grid-template-columns:auto minmax(0,1fr) auto 64px auto;align-items:center;gap:4px 10px;padding:9px 12px;border-top:1px solid var(--line);font-size:var(--fs-sm);font-variant-numeric:tabular-nums}
   .or-pm-r:first-child{border-top:0}
   .or-pm-r.self{background:color-mix(in srgb,var(--accent) 8%,var(--card))}
-  .or-pm-r .or-sw{width:9px;height:9px}
   .or-pm-id{font:600 var(--fs-sm)/1.2 var(--f-mono);color:var(--text)}
   .or-pm-pt{min-width:0;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .or-pm-pt small{display:block;font-size:var(--fs-xs);color:var(--muted)}
@@ -599,10 +606,10 @@
   .or-pm-w .ico{flex:none;margin-top:1px;color:var(--st-wait)}
   .or-pm-w b{color:var(--text);font-weight:600}
   @media (max-width:560px){
-    .or-pm-r{grid-template-columns:10px auto minmax(0,1fr) auto;padding:9px 10px}
-    .or-pm-eta{grid-column:2/4;grid-row:2}
-    .or-pm-d{grid-column:4;grid-row:2}
-    .or-pm-r .or-rb{grid-column:4;grid-row:1}
+    .or-pm-r{grid-template-columns:auto minmax(0,1fr) auto;padding:9px 10px}
+    .or-pm-eta{grid-column:1/3;grid-row:2}
+    .or-pm-d{grid-column:3;grid-row:2}
+    .or-pm-r .or-rb{grid-column:3;grid-row:1}
   }
 
   /* Detail */
@@ -655,7 +662,7 @@
   .or-op.s-done .or-op-rail::before{background:color-mix(in srgb,var(--st-run) 40%,var(--line))}
   .or-op-node{position:relative;z-index:1;margin-top:3px;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;background:var(--panel);border:2px solid var(--c);color:var(--c)}
   .or-op.s-done .or-op-node{background:color-mix(in srgb,var(--st-run) 22%,var(--panel));border-color:color-mix(in srgb,var(--st-run) 70%,transparent)}
-  .or-op.s-active .or-op-node::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--c)}
+  .or-op.s-active .or-op-node::before,.or-op.s-wait .or-op-node::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--c)}
   .or-op.s-open .or-op-node{border-style:dashed}
   .or-op-b{display:flex;flex-direction:column;gap:6px;min-width:0;padding-bottom:16px}
   .or-op-h{display:flex;align-items:center;gap:8px;min-width:0}
@@ -740,11 +747,13 @@
   .or-wb{display:grid;grid-template-columns:minmax(0,1fr) 84px 64px;align-items:center;gap:3px 10px;font-size:var(--fs-sm)}
   .or-wb-l{display:flex;align-items:center;gap:7px;min-width:0;color:var(--text2)}
   .or-wb-l .ico{flex:none;color:var(--muted)}
-  .or-wb-l span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .or-wb-l span{min-width:0;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   .or-wb-b{height:6px;border-radius:3px;background:var(--track);overflow:hidden}
   .or-wb-b i{display:block;height:100%;border-radius:inherit;background:color-mix(in srgb,var(--text2) 42%,transparent)}
-  .or-wb.top .or-wb-b i{background:var(--rc)}
-  .or-wb.top .or-wb-l{color:var(--text)}
+  .or-wb.hi .or-wb-b i{background:var(--rc)}
+  .or-wb.hi .or-wb-l{color:var(--text)}
+  .or-wb.ns .or-wb-l{color:var(--muted)}
+  .or-wb.ns .or-wb-b i{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--text2) 35%,transparent) 0 3px,transparent 3px 6px)}
   .or-wb-v{font-weight:600;color:var(--text);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
   .or-wb-o{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;padding-left:22px;font-size:var(--fs-xs);color:var(--muted)}
   .or-wb-o .link{font-family:var(--f-mono);font-size:var(--fs-xs)}
@@ -766,6 +775,8 @@
   .or-route.or-chain{padding-right:20px;-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 24px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 24px),transparent)}
   .or-route .or-step{flex:1 1 0;min-width:104px;max-width:none}
   .or-route .or-step.cur{box-shadow:0 0 0 1px var(--c)}
+  .or-route.many .or-step.s-done{flex:0 0 auto;min-width:0;padding:6px 7px 9px}
+  .or-route.many .or-step.s-done .or-st-tx{display:none}
   .or-rs{display:flex;flex-direction:column;margin:0;padding:0;list-style:none}
   .or-rs li{--c:var(--line2);position:relative;display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:1px 10px;align-items:center;padding:0 0 12px}
   .or-rs li + li::before{content:'';position:absolute;left:8px;bottom:calc(100% - 3px);height:15px;width:2px;border-radius:1px;background:var(--line)}
@@ -874,6 +885,9 @@
     .or-done-h{min-height:44px}
     .or-acts .btn{height:auto}
     .or-gl{min-height:40px}
+    .or-mode button,.or-gbar .seg button{min-height:40px}
+    .or-op-m .link,.or-wb-o .link,.or-mt-st .link{position:relative}
+    .or-op-m .link::after,.or-wb-o .link::after,.or-mt-st .link::after{content:'';position:absolute;inset:-6px -2px}
   }
   `, 'or-css');
 
@@ -1080,7 +1094,7 @@
       const rk = riskK || riskOfEta(oo, cmp ? after : before), d = cmp ? after - before : 0;
       const cls = !cmp || Math.abs(d) < 60 ? '' : d < 0 ? ' up' : ' dn';
       const eta = cmp && Math.abs(d) >= 60 ? `<s>${esc(tShort(before, now))}</s>${icon('arrowRight', 12)}<b>${esc(tShort(after, now))}</b>` : `<b>${esc(tShort(cmp ? after : before, now))}</b>`;
-      return `<div class="or-pm-r${self ? ' self' : ''}" style="--oc:${colorOf(oid)}"><span class="or-sw"></span><span class="or-pm-id">${esc(oid)}</span><span class="or-pm-pt">${esc(oo.part.name)}<small>Termin ${esc(tShort(oo.due, now))}</small></span>` +
+      return `<div class="or-pm-r${self ? ' self' : ''}"><span class="or-pm-id">${esc(oid)}</span><span class="or-pm-pt">${esc(oo.part.name)}<small>Termin ${esc(tShort(oo.due, now))}</small></span>` +
         `<span class="or-pm-eta">${eta}</span><span class="or-pm-d${cls}">${cmp ? esc(fmtDelta(d)) : ''}</span>` +
         `<span class="or-rb" style="--c:${RISK_C[rk]}"><i></i>${esc(riskLabel(rk))}</span></div>`;
     };
@@ -1129,17 +1143,20 @@
     for (const v of open) cnt[v.risk] = (cnt[v.risk] || 0) + 1;
     const inWork = open.filter(v => v.status === 'in Arbeit').length;
     const eil = open.filter(v => v.priority === 'eil').length;
-    setHTML(R.kOpen, open.length < views.length ? `${nf(open.length)}<small>von ${nf(views.length)}</small>` : nf(open.length));
-    setHTML(R.kOpenS, `<b>${nf(inWork)}</b> in Arbeit · <b>${nf(open.length - inWork)}</b> freigegeben${eil ? ` · <b>${nf(eil)}</b> Eil` : ''}`);
-    setText(R.rOk, nf(cnt.ok)); setText(R.rKn, nf(cnt.knapp)); setText(R.rLt, nf(cnt['spät']));
-    const idsOf = (k) => { const l = open.filter(v => v.risk === k).sort((a, b) => a.due - b.due).map(v => numId(v.id)); return l.length > 3 ? l.slice(0, 2).join(' ') + ' +' + (l.length - 2) : l.join(' '); };
-    setText(R.rKnI, idsOf('knapp')); setText(R.rLtI, idsOf('spät'));
+    setHTML(R.kOpen, nf(open.length));
+    setHTML(R.kOpenS, `<b>${nf(inWork)}</b> in Arbeit · <b>${nf(open.length - inWork)}</b> freigegeben${eil ? ` · <b>${nf(eil)}</b> Eil` : ''}<br><b>${nf(cnt.ok)}</b> im Plan (mehr als 4 h Puffer)`);
     const tot = Math.max(1, open.length);
     setW(R.bOk, cnt.ok / tot); setW(R.bKn, cnt.knapp / tot); setW(R.bLt, cnt['spät'] / tot);
-    R.rk.querySelectorAll('[data-rf]').forEach(b => {
-      const k = b.dataset.rf; b.classList.toggle('zero', !cnt[k]);
-      b.classList.toggle('on', filter === 'risk' && (k === 'knapp' || k === 'spät') && mode === 'list');
-    });
+    // Verspätet / Knapp: je eine Kachel, Hinweis nur über .warn/.crit und nie bei 0 (UI_GUIDE Regel 14)
+    const byRisk = (k) => open.filter(v => v.risk === k).sort((a, b) => (a.slackSec == null ? 0 : a.slackSec) - (b.slackSec == null ? 0 : b.slackSec));
+    const idList = (l) => (l.length > 2 ? l.slice(0, 2).map(v => v.id).join(', ') + ' +' + (l.length - 2) : l.map(v => v.id).join(', '));
+    const late = byRisk('spät'), tight = byRisk('knapp');
+    setText(R.kLateV, nf(late.length));
+    setCls(R.kLate, 'kpi click' + (late.length ? ' crit' : ''));
+    setHTML(R.kLateS, late.length ? `<span class="mono">${esc(idList(late))}</span><br>${late[0].slackSec != null ? 'bis ' + esc(durLong(-late[0].slackSec)) + ' zu spät' : 'Prognose nach Termin'}` : 'keiner – alle Prognosen vor dem Liefertermin');
+    setText(R.kTightV, nf(tight.length));
+    setCls(R.kTight, 'kpi click' + (tight.length ? ' warn' : ''));
+    setHTML(R.kTightS, tight.length ? `<span class="mono">${esc(idList(tight))}</span><br>${tight[0].slackSec != null ? 'Puffer ab ' + esc(durLong(tight[0].slackSec)) : 'weniger als 4 h Puffer'}` : 'keiner mit weniger als 4 h Puffer');
     const k = WF.sim.kpis();
     const day0 = dayOf(now) * DAY;
     const doneToday = views.filter(v => v.status === 'fertig' && v.doneT != null && v.doneT >= day0).length;
@@ -1178,7 +1195,7 @@
     el.innerHTML = `
       <div class="or-top">
         <div class="or-ident">
-          <div class="or-l1"><span class="or-sw"></span><span class="or-id" data-r="id"></span><span class="or-tag eil" data-r="eil" hidden>${icon('bolt', 11)}Eilauftrag</span><span class="or-tag rel" data-r="stat" hidden>Freigegeben</span><span class="or-tag src" data-r="src" hidden></span></div>
+          <div class="or-l1"><span class="or-id" data-r="id"></span><span class="or-tag eil" data-r="eil" hidden>${icon('bolt', 11)}Eilauftrag</span><span class="or-tag rel" data-r="stat" hidden>Freigegeben</span><span class="or-tag src" data-r="src" hidden></span></div>
           <div class="or-cust"><b data-r="cust"></b><span data-r="sect"></span></div>
           <div class="or-part-alt" data-r="partAlt"></div>
         </div>
@@ -1221,8 +1238,8 @@
       if (ct.state === 'transit' && ct.seq != null) (transit[ct.seq] = transit[ct.seq] || []).push(ct);
       else if (ct.state === 'ready' && ct.srcSeq != null) (ready[ct.srcSeq] = ready[ct.srcSeq] || []).push(ct);
     }
-    const bn = atRisk(v) ? bnSeq(v) : null;
-    const pbw = bn != null ? plantBottleneck() : null, bnPlant = !!(pbw && pbw.stationId && v.bottleneckStation === pbw.stationId);
+    const lim = atRisk(v) ? limitOf(v) : null;
+    const bn = lim ? lim.seq : null, bnPlant = !!(lim && lim.plant);
     ops.forEach((op, i) => {
       const ch = c.chips[i]; const vis = opVis(op);
       setCls(ch.el, 'or-step s-' + vis.k + (bn === op.seq && op.state !== 'done' ? (bnPlant ? ' bn plant' : ' bn') : ''));
@@ -1256,7 +1273,7 @@
     const vis = opVis(op);
     const st = op.state === 'active' ? WF.ui.pill(op.machineState) : `<span class="pill" style="--c:${op.state === 'open' ? 'var(--faint)' : vis.c}"><i></i>${esc(vis.label)}</span>`;
     const where = op.station === 'EXT' ? (op.ext ? `${op.ext.partner} · ${op.ext.process}` : 'Fremdbearbeitung') : op.station === 'VERSAND' ? 'Fertigteillager & Versand' : `${op.stationName} (${op.station})`;
-    let h = `<div class="or-tip-h" style="--oc:${colorOf(v.id)}"><i></i><b>${esc(v.id)}</b><span>AG ${op.seq} · ${esc(op.op)}</span></div><div style="display:flex;align-items:center;gap:8px;justify-content:space-between;margin:2px 0 5px"><span class="muted">${esc(where)}</span>${st}</div>`;
+    let h = `<div class="or-tip-h"><b>${esc(v.id)}</b><span>AG ${op.seq} · ${esc(op.op)}</span></div><div style="display:flex;align-items:center;gap:8px;justify-content:space-between;margin:2px 0 5px"><span class="muted">${esc(where)}</span>${st}</div>`;
     if (op.state === 'active' && op.cause) h += `<div style="color:var(--text);margin-bottom:4px">${esc(cleanCause(op.cause, v.id))}</div>`;
     if (op.station === 'EXT') { const t = extText(v, op, now); if (t) h += `<div style="color:var(--text);margin-bottom:4px">${esc(t)}</div>`; }
     const row = (l, val) => `<div class="or-tip-r"><span>${esc(l)}</span><b>${esc(val)}</b></div>`;
@@ -1271,7 +1288,8 @@
       else if (op.plannedStart != null) h += row('Start ca.', tShort(op.plannedStart, now));
       if (op.plannedEnd != null) h += row(op.station === 'VERSAND' ? 'Komplett ca.' : 'Fertig ca.', tShort(op.station === 'VERSAND' && v.eta != null ? v.eta : op.plannedEnd, now));
     }
-    if (bnSeq(v) === op.seq && v.status !== 'fertig') h += `<div class="or-tip-n">Begrenzt den Durchlauf: längster Arbeitsgang dieses Auftrags</div>`;
+    const lim = v.status !== 'fertig' ? limitOf(v) : null;
+    if (lim && lim.seq === op.seq) h += `<div class="or-tip-n">${esc(lim.plant ? 'Werks-Engpass – begrenzt den Durchlauf dieses Auftrags' : 'Begrenzt den Durchlauf dieses Auftrags')}${v.delayCause ? ' · ' + esc(v.delayCause) : ''}</div>`;
     return h;
   }
   let listTipNode = null;
@@ -1296,7 +1314,6 @@
     const rb = riskBadge(v);
     const late = v.status !== 'fertig' && v.risk === 'spät', tight = v.status !== 'fertig' && v.risk === 'knapp';
     setCls(c.el, 'or-card' + (late ? ' r-late' : tight ? ' r-tight' : '') + (v.status === 'fertig' ? ' done' : '') + (selectedOrder === v.id ? ' sel' : ''));
-    setVar(c.el, '--oc', colorOf(v.id));
     setVar(c.el, '--rc', rb.c);
     setText(r.id, v.id);
     setHidden(r.eil, v.priority !== 'eil');
@@ -1321,9 +1338,11 @@
     setHTML(r.pS, pg.sub);
     setAttr(r.pS.parentNode, 'title', pg.title);
     // Termine
-    setText(r.due, fmtDue(v.due, now));
-    if (v.status === 'fertig') { setText(r.etaL, 'Fertig'); setText(r.eta, fmtDue(v.doneT, now)); }
-    else { setText(r.etaL, 'Prognose'); setText(r.eta, v.eta != null ? fmtDue(v.eta, now) : '–'); }
+    // kompaktes Format, damit nichts abgeschnitten wird; volle Angabe im Tooltip
+    setText(r.due, dueShort(v.due, now)); setAttr(r.due, 'title', 'Liefertermin ' + fmtDue(v.due, now));
+    const t2 = v.status === 'fertig' ? v.doneT : v.eta;
+    setText(r.etaL, v.status === 'fertig' ? 'Fertig' : 'Prognose');
+    setText(r.eta, dueShort(t2, now)); setAttr(r.eta, 'title', t2 != null ? (v.status === 'fertig' ? 'Fertig ' : 'Prognose ') + fmtDue(t2, now) : null);
     const pend = v.status !== 'fertig' && v.etaPending != null && v.eta != null && Math.abs(v.etaPending - v.eta) > 900;
     setHidden(r.etaS, !pend);
     if (pend) { setText(r.etaS, 'neu ' + tShort(v.etaPending, now) + ' – wird geprüft'); setAttr(r.etaS, 'title', 'Die letzte Planrechnung ergibt einen deutlich anderen Termin; er wird übernommen, sobald die nächste Rechnung ihn bestätigt.'); }
@@ -1356,13 +1375,12 @@
       setText(r.msgT, nts.length === 1 ? top.title.replace(/\s*\(.*\)\s*$/, '').replace(': ' + v.id, '') : nts.length + ' Meldungen');
       setAttr(r.msg, 'title', nts.map(n => n.title + (n.status === 'ack' ? ' (quittiert)' : '')).join('\n'));
     }
-    const showBn = atRisk(v) && !!v.bottleneck;
-    setHidden(r.bn, !showBn);
-    if (showBn) {
-      // „Engpass“ nur für den Werks-Engpass (Engine: bottleneck()); sonst begrenzt der Arbeitsgang nur diesen Auftrag
-      const bw = plantBottleneck(), plant = bw && bw.stationId && (v.bottleneckStation || '').toString() === bw.stationId;
-      setHTML(r.bnT, `${plant ? 'Werks-Engpass' : 'begrenzt durch'} <b>${esc(v.bottleneck.replace(/\s*\(.*$/, ''))}</b>${bnSeq(v) ? ' · AG ' + bnSeq(v) : ''}`);
-      setAttr(r.bn, 'title', (plant ? 'Werks-Engpass – begrenzt auch diesen Auftrag: ' : 'Längster Arbeitsgang dieses Auftrags laut Prognose: ') + v.bottleneck);
+    const lim = atRisk(v) ? limitOf(v) : null;
+    setHidden(r.bn, !lim);
+    if (lim) {
+      // „Engpass“ nur für den Werks-Engpass (Engine: bottleneck()); sonst begrenzt der Schritt nur diesen Auftrag (Regel 18)
+      setHTML(r.bnT, `${lim.plant ? 'Werks-Engpass' : 'begrenzt durch'} <b>${esc(lim.name)}</b>${lim.seq != null ? ' · AG ' + lim.seq : ''}`);
+      setAttr(r.bn, 'title', v.delayCause ? lim.text + ' – ' + v.delayCause : lim.text);
     }
   }
   function placeCards(box, list, prevSig) {
@@ -1426,26 +1444,32 @@
 
   // ------------------------------------------------------------------ Plantafel (Gantt)
   const G = { ready: false, zoom: null, sig: '', last: 0, pin: null, hov: null, needScroll: true, geo: null, tips: [], d0: null, dragging: false, moved: false };
-  const AXIS_H = 46, LANE_H = 35, BLK_Y = 5, BLK_H = 20, EXT_ROW = 24;
+  const AXIS_H = 46, LANE_H = 40, BLK_Y = 7, BLK_H = 22, EXT_ROW = 26;
   function ganttMount(pane) {
     pane.innerHTML = `
       <div class="or-gbar">
         <div class="seg" role="group" aria-label="Zeitraum" data-r="zoomSeg"><button data-z="8">8 h</button><button data-z="24">24 h</button><button data-z="48">48 h</button></div>
         <button type="button" class="btn sm" data-r="nowBtn" title="Zur aktuellen Uhrzeit springen">${icon('clock', 14)}Jetzt</button>
-        <div class="or-gleg" data-r="gleg" aria-label="Aufträge hervorheben"></div>
+        <div class="or-glw"><span class="or-gl-l" data-r="glegL">Hervorheben</span><div class="or-gleg" data-r="gleg" aria-label="Aufträge hervorheben"></div></div>
       </div>
-      <div class="or-gsel" data-r="gsel" aria-live="polite"></div>
-      <div class="card or-gcard" data-r="gcard">
-        <div class="or-glabels" data-r="glabels"></div>
-        <div class="or-gscroll" data-r="gscroll" tabindex="0" aria-label="Zeitachse – mit Pfeiltasten oder Ziehen verschieben"><svg class="or-gsvg" data-r="gsvg" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Plantafel: Belegung und Prognose je Arbeitsplatz"></svg></div>
-      </div>
+      <section class="card or-gwrap" aria-label="Belegung je Arbeitsplatz">
+        <div class="card-h or-gh"><h3>Belegung je Arbeitsplatz</h3><div class="or-gsel" data-r="gsel" aria-live="polite"></div></div>
+        <div class="or-gcard" data-r="gcard">
+          <div class="or-glabels" data-r="glabels"></div>
+          <div class="or-gscroll" data-r="gscroll" tabindex="0" aria-label="Zeitachse – verschieben zum Blättern"><svg class="or-gsvg" data-r="gsvg" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Plantafel: Belegung und Prognose je Arbeitsplatz"></svg></div>
+        </div>
+      </section>
       <div class="or-gkey" style="margin-top:10px">
         <span><span class="k-ist"></span>Ist-Belegung</span>
-        <span><span class="k-fc"></span>Prognose (Farbe = Auftrag)</span>
+        <span><span class="k-fc"></span>Prognose</span>
         <span><span class="k-su"></span>Rüsten</span>
         <span><span class="k-ext"></span>Weitere Lose geplant</span>
+        <span><span class="k-hl"></span>Hervorgehobener Auftrag</span>
+        <span><span class="k-rl"></span>Verspätet</span>
+        <span><span class="k-rk"></span>Knapp</span>
+        <span><span class="k-eil"></span>Eilauftrag</span>
         <span><span class="k-st">${['running', 'setup', 'toolchange', 'starved', 'fault', 'idle'].map(k => `<i style="--c:${WF.STATE[k].color}"></i>`).join('')}</span>Zustandsband (Ist)</span>
-        <span><span class="k-lk"></span>Materialfluss des hervorgehobenen Auftrags</span>
+        <span><span class="k-lk"></span>Materialfluss</span>
         <span><span class="k-now"></span>Jetzt</span>
       </div>`;
     Object.assign(R, refs(pane));
@@ -1480,6 +1504,12 @@
       setHL(G.pin);
       if (G.pin) scrollToOrder(G.pin);
     });
+    // Auftragsleiste: waagrecht verschiebbar (Mausrad wirkt waagrecht), Randverlauf zeigt weitere Aufträge an
+    R.gleg.addEventListener('scroll', glegMask, { passive: true });
+    R.gleg.addEventListener('wheel', (e) => {
+      const g = R.gleg; if (g.scrollWidth <= g.clientWidth + 2 || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      g.scrollLeft += e.deltaY; e.preventDefault();
+    }, { passive: false });
     R.glabels.addEventListener('click', (e) => { const b = e.target.closest('[data-m]'); if (b) WF.app.select('machine', b.dataset.m); });
     const sc = R.gscroll, svg = R.gsvg;
     svg.addEventListener('mousemove', (e) => {
@@ -1660,10 +1690,15 @@
     if (cur < b) out.push([cur, b]);
     return out;
   }
-  const labelFits = (txt, w) => txt.length * 6.1 + 12 <= w;
+  // Beschriftung 11,5 px: ca. 6,4 px je Zeichen; Blöcke unter 28 px bleiben unbeschriftet
+  const CW = 6.4;
+  const labelFits = (txt, w) => w >= 28 && txt.length * CW + 14 <= w;
   /** Blockbeschriftung, die beim horizontalen Scrollen am linken Rand „kleben“ bleibt (solange der Block sichtbar ist) */
-  const stickyText = (txt, x0, x1, y, attrs, variants) => `<text class="bl" data-a="${(x0 + 7).toFixed(1)}" data-b="${x1.toFixed(1)}" data-w="${(txt.length * 6.1).toFixed(0)}" data-v="${esc((variants || [txt]).filter(Boolean).join('|'))}" x="${(x0 + 7).toFixed(1)}" y="${y}" font-size="11" ${attrs}>${esc(txt)}</text>`;
+  const stickyText = (txt, x0, x1, y, cls, variants) => `<text class="bl tl${cls ? ' ' + cls : ''}" data-a="${(x0 + 8).toFixed(1)}" data-b="${x1.toFixed(1)}" data-w="${(txt.length * CW).toFixed(0)}" data-v="${esc((variants || [txt]).filter(Boolean).join('|'))}" x="${(x0 + 8).toFixed(1)}" y="${y}">${esc(txt)}</text>`;
   function pickLabel(variants, w) { for (const t of variants) if (t && labelFits(t, w)) return t; return ''; }
+  /** ein Beschriftungsformat für alle Blöcke: „FA-24119 · AG 20“, sonst „24119“ */
+  const blkLabels = (oid, seq) => [seq != null ? `${oid} · AG ${seq}` : oid, numId(oid)];
+  const riskCls = (v) => (v && v.status !== 'fertig' && (v.risk === 'spät' || v.risk === 'knapp') ? ' r-' + v.risk : '');
   const numId = (id) => String(id).replace(/^[A-Za-z]+-/, '');
 
   function ganttRender(force) {
@@ -1701,7 +1736,7 @@
     const laneBy = {}; for (const l of lanes) laneBy[l.id] = l;
     const tips = [];
     const out = [];
-    out.push(`<defs><pattern id="or-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2.2" height="6" style="fill:var(--text)" fill-opacity=".36"/></pattern>` +
+    out.push(`<defs><pattern id="or-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="6" style="fill:var(--text)" fill-opacity=".2"/></pattern>` +
       `<marker id="or-arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" style="fill:var(--mat)"/></marker></defs>`);
     // Schichten / Nacht
     const pxH = pps * HOUR;
@@ -1741,6 +1776,7 @@
     out.push('</g>');
     // Ist-Belegung + Zustandsband
     const past = pastOccupancy(now);
+    const rr = (x, yy, w, h, cls, extra) => `<rect class="${cls}" x="${x.toFixed(1)}" y="${yy}" width="${Math.max(1, w).toFixed(1)}" height="${h}" rx="4"${extra || ''}/>`;
     out.push('<g class="past">');
     for (const l of lanes) {
       if (l.id === 'EXT') continue;
@@ -1749,12 +1785,12 @@
         const a = Math.max(b.t0, d0), e = Math.min(b.t1, now);
         if (e <= a) continue;
         const x0 = X(a), x1 = X(e), w = x1 - x0; if (w < 1) continue;
-        const col = colorOf(b.o), i = tips.length;
+        const i = tips.length;
         tips.push({ kind: 'past', o: b.o, seq: b.seq, mid: l.id, t0: b.t0, t1: b.t1, live: b.live, pre: b.pre, shares: stateShares(m.segments, a, e) });
-        const pv = [`${b.o} · AG ${b.seq}`, b.o, numId(b.o)];
+        const pv = blkLabels(b.o, b.seq);
         const lbl = pickLabel(pv, w);
-        out.push(`<g class="blk" data-i="${i}" data-o="${esc(b.o)}" data-x="${x0.toFixed(0)}"><rect class="bf" x="${(x0 + 0.5).toFixed(1)}" y="${l.y + BLK_Y}" width="${Math.max(1, w - 1).toFixed(1)}" height="${BLK_H}" rx="4" fill="${col}" fill-opacity=".13" stroke="${col}" stroke-opacity=".45"/>` +
-          (lbl ? stickyText(lbl, x0, x1, l.y + BLK_Y + 14.5, 'style="fill:var(--muted)"', pv) : '') + '</g>');
+        out.push(`<g class="blk" data-i="${i}" data-o="${esc(b.o)}" data-x="${x0.toFixed(0)}">${rr(x0 + 0.5, l.y + BLK_Y, w - 1, BLK_H, 'bf ps')}` +
+          (lbl ? stickyText(lbl, x0, x1, l.y + BLK_Y + 15, 'ps', pv) : '') + '</g>');
       }
       // Zustandsband
       const by = l.y + l.h - 7;
@@ -1765,41 +1801,45 @@
       }
     }
     out.push('</g>');
-    // Prognose-Blöcke
+    // Prognose-Blöcke: neutral; laufender Arbeitsgang mit Kante in der Farbe des Maschinenzustands,
+    // gefährdete Aufträge mit Kontur in Zustandsfarbe, Eilauftrag mit roter Ecke
     out.push('<g class="fc">');
     for (const l of lanes) {
       if (l.id === 'EXT') continue;
+      const mst = WF.STATE[s.machines[l.id].state] || WF.STATE.idle;
       for (const b of fc.machines[l.id] || []) {
         const a = Math.max(b.start, now), e = b.end;
         if (e - a < 30) continue;
         const x0 = X(a), x1 = X(e), w = x1 - x0; if (w < 0.8) continue;
-        const col = colorOf(b.orderId), i = tips.length;
+        const i = tips.length;
         tips.push({ kind: 'fc', o: b.orderId, seq: b.seq, op: b.op, mid: l.id, start: b.start, end: b.end, opEnd: b.opEnd, setupEnd: b.setupEnd, active: b.active });
         const v = vById[b.orderId];
-        const fv = [`${b.orderId} · AG ${b.seq} ${b.op}`, `${b.orderId} · AG ${b.seq}`, b.orderId, numId(b.orderId)];
+        const fv = blkLabels(b.orderId, b.seq);
         const lbl = pickLabel(fv, w);
+        const yy = l.y + BLK_Y;
         let su = '';
-        if (b.setupEnd != null && b.setupEnd > a + 30) { const sw = Math.min(X(b.setupEnd), x1) - x0; if (sw > 1) su = `<rect x="${(x0 + 0.5).toFixed(1)}" y="${l.y + BLK_Y}" width="${Math.max(1, sw - 0.5).toFixed(1)}" height="${BLK_H}" rx="4" fill="url(#or-hatch)"/>`; }
+        if (b.setupEnd != null && b.setupEnd > a + 30) { const sw = Math.min(X(b.setupEnd), x1) - x0; if (sw > 1) su = rr(x0 + 0.5, yy, sw - 0.5, BLK_H, 'su'); }
         const eil = v && v.priority === 'eil';
         // Bediener-gebundene Arbeitsplätze arbeiten nur in der Schichtzeit: Nacht/Pausen im Block abgedunkelt
         let off = '';
         if (s.machines[l.id].loading !== 'auto') {
           for (const [p, q] of offWork(Math.max(a, b.setupEnd || a), e)) {
             const ox = X(p), ow = X(q) - ox; if (ow < 1.5) continue;
-            off += `<rect x="${ox.toFixed(1)}" y="${l.y + BLK_Y + 1}" width="${ow.toFixed(1)}" height="${BLK_H - 2}" style="fill:var(--panel)" fill-opacity=".82"/>`;
+            off += `<rect class="off" x="${ox.toFixed(1)}" y="${yy + 1}" width="${ow.toFixed(1)}" height="${BLK_H - 2}"/>`;
           }
           if (off) tips[i].staffed = true;
         }
         // Arbeitsplätze, die je Behälter freigeben (Messraum, Waschen, Montage): Arbeitsgang bleibt bis opEnd offen
         let tail = '';
         if (b.opEnd != null && b.opEnd > e + 600) {
-          const tx1 = X(b.opEnd), ty = l.y + BLK_Y + BLK_H / 2;
-          tail = `<line x1="${(x1 + 2).toFixed(1)}" x2="${tx1.toFixed(1)}" y1="${ty}" y2="${ty}" stroke="${col}" stroke-opacity=".7" stroke-width="1.2" stroke-dasharray="2 3"/><line x1="${tx1.toFixed(1)}" x2="${tx1.toFixed(1)}" y1="${ty - 4}" y2="${ty + 4}" stroke="${col}" stroke-opacity=".8" stroke-width="1.4"/>` +
-            `<rect x="${x1.toFixed(1)}" y="${l.y + BLK_Y}" width="${Math.max(0, tx1 - x1).toFixed(1)}" height="${BLK_H}" fill="transparent"/>`;
+          const tx1 = X(b.opEnd), ty = yy + BLK_H / 2;
+          tail = `<line class="tail" x1="${(x1 + 2).toFixed(1)}" x2="${tx1.toFixed(1)}" y1="${ty}" y2="${ty}"/><line class="tailx" x1="${tx1.toFixed(1)}" x2="${tx1.toFixed(1)}" y1="${ty - 4}" y2="${ty + 4}"/>` +
+            `<rect x="${x1.toFixed(1)}" y="${yy}" width="${Math.max(0, tx1 - x1).toFixed(1)}" height="${BLK_H}" fill="transparent"/>`;
         }
-        out.push(`<g class="blk" data-i="${i}" data-o="${esc(b.orderId)}" data-x="${x0.toFixed(0)}">${tail}<rect class="bf" x="${(x0 + 0.5).toFixed(1)}" y="${l.y + BLK_Y}" width="${Math.max(1, w - 1).toFixed(1)}" height="${BLK_H}" rx="4" fill="${col}" fill-opacity="${b.active ? 0.5 : 0.32}" stroke="${col}" stroke-width="${b.active ? 1.4 : 1}"/>` + off + su +
-          (eil && w > 14 ? `<rect x="${(x0 + 0.5).toFixed(1)}" y="${l.y + BLK_Y}" width="3" height="${BLK_H}" rx="1.5" style="fill:var(--st-fault)"/>` : '') +
-          (lbl ? stickyText(lbl, x0, x1, l.y + BLK_Y + 14.5, `font-weight="${b.active ? 600 : 500}" style="fill:var(--text)"`, fv) : '') + '</g>');
+        const edge = b.active && w > 6 ? `<rect x="${(x0 + 0.5).toFixed(1)}" y="${yy}" width="3" height="${BLK_H}" rx="1.5" style="fill:${mst.color}"/>` : '';
+        const eilMk = eil && w > 10 ? `<path class="eil" d="M${(x0 + 0.5).toFixed(1)} ${yy + 4}a4 4 0 0 1 4-4h5l-9 9z"/>` : '';
+        out.push(`<g class="blk" data-i="${i}" data-o="${esc(b.orderId)}" data-x="${x0.toFixed(0)}">${tail}${rr(x0 + 0.5, yy, w - 1, BLK_H, 'bf' + (b.active ? ' act' : '') + riskCls(v))}` + off + su + edge + eilMk +
+          (lbl ? stickyText(lbl, x0 + (edge ? 3 : 0), x1, yy + 15, b.active ? 'act' : '', fv) : '') + '</g>');
       }
     }
     out.push('</g>');
@@ -1809,20 +1849,20 @@
     for (const it of ext) {
       const a = Math.max(it.t0, d0), e = it.t1; if (e <= a) continue;
       const x0 = X(a), x1 = X(e), w = x1 - x0; if (w < 1) continue;
-      const yy = extLane.y + 6 + it.row * EXT_ROW, hh = EXT_ROW - 5;
-      const col = colorOf(it.o), i = tips.length;
+      const yy = extLane.y + 7 + it.row * EXT_ROW, hh = EXT_ROW - 5;
+      const i = tips.length, v = vById[it.o];
       tips.push(Object.assign({ mid: 'EXT' }, it));
       if (extRowOf[it.o] == null || it.kind !== 'past') extRowOf[it.o] = yy + hh / 2;
       let rect;
-      if (it.kind === 'plan') rect = `<rect class="bf" x="${(x0 + 0.5).toFixed(1)}" y="${yy}" width="${Math.max(1, w - 1).toFixed(1)}" height="${hh}" rx="4" fill="${col}" fill-opacity=".08" stroke="${col}" stroke-opacity=".8" stroke-dasharray="4 3"/>`;
-      else if (it.kind === 'past') rect = `<rect class="bf" x="${(x0 + 0.5).toFixed(1)}" y="${yy}" width="${Math.max(1, w - 1).toFixed(1)}" height="${hh}" rx="4" fill="${col}" fill-opacity=".13" stroke="${col}" stroke-opacity=".45"/>`;
-      else rect = `<rect class="bf" x="${(x0 + 0.5).toFixed(1)}" y="${yy}" width="${Math.max(1, w - 1).toFixed(1)}" height="${hh}" rx="4" fill="${col}" fill-opacity=".42" stroke="${col}" stroke-width="1.2"/>`;
+      if (it.kind === 'plan') rect = rr(x0 + 0.5, yy, w - 1, hh, 'bf pl' + riskCls(v));
+      else if (it.kind === 'past') rect = rr(x0 + 0.5, yy, w - 1, hh, 'bf ps');
+      else rect = rr(x0 + 0.5, yy, w - 1, hh, 'bf' + riskCls(v)) + (w > 6 ? `<rect x="${(x0 + 0.5).toFixed(1)}" y="${yy}" width="3" height="${hh}" rx="1.5" style="fill:var(--ext)"/>` : '');
       const ev = it.kind === 'plan'
-        ? [`${it.o} · weitere Lose à ${it.lotQty} Stk`, `${it.o} · Lose à ${it.lotQty}`, it.o, numId(it.o)]
-        : [`${it.o} · ${it.qty} Stk · zurück ${tShort(it.t1, now)}`, `${it.o} · ${it.qty} Stk`, it.o, numId(it.o)];
+        ? [`${it.o} · weitere Lose à ${it.lotQty} Stk`, `${it.o} · Lose à ${it.lotQty}`, numId(it.o)]
+        : [`${it.o} · ${it.qty} Stk · zurück ${tShort(it.t1, now)}`, `${it.o} · ${it.qty} Stk`, numId(it.o)];
       const lbl = pickLabel(ev, w);
       out.push(`<g class="blk" data-i="${i}" data-o="${esc(it.o)}" data-x="${x0.toFixed(0)}">${rect}` +
-        (lbl ? stickyText(lbl, x0, x1, yy + hh / 2 + 4, `font-weight="${it.kind === 'at' ? 600 : 500}" style="fill:var(--${it.kind === 'at' ? 'text' : it.kind === 'past' ? 'muted' : 'text2'})"`, ev) : '') + '</g>');
+        (lbl ? stickyText(lbl, x0 + (it.kind === 'at' ? 3 : 0), x1, yy + hh / 2 + 4, it.kind === 'at' ? 'act' : it.kind === 'past' ? 'ps' : '', ev) : '') + '</g>');
     }
     if (!ext.length) out.push(`<text x="${(Math.max(0, X(now)) + 10).toFixed(1)}" y="${extLane.y + extLane.h / 2 + 4}" font-size="11.5" style="fill:var(--faint)">Keine Lose beim Härtepartner und keine weiteren geplant</text>`);
     out.push('</g>');
@@ -1830,7 +1870,7 @@
     // Jetzt-Linie
     const nx = X(now);
     out.push(`<g class="now" data-r="nowG" transform="translate(${nx.toFixed(1)},0)"><line x1="0" x2="0" y1="${AXIS_H - 20}" y2="${H}" style="stroke:var(--accent)" stroke-width="1.5"/>` +
-      `<rect x="-22" y="${AXIS_H - 25}" width="44" height="17" rx="8.5" style="fill:var(--accent)"/><text data-r="nowTxt" x="0" y="${AXIS_H - 12.5}" text-anchor="middle" font-size="11" font-weight="700" style="fill:var(--accent-ink)" font-variant-numeric="tabular-nums">${U.fmtClock(now)}</text></g>`);
+      `<rect x="-22" y="${AXIS_H - 25}" width="44" height="17" rx="8.5" style="fill:var(--accent)"/><text data-r="nowTxt" x="0" y="${AXIS_H - 12.5}" text-anchor="middle" font-size="11.5" font-weight="700" style="fill:var(--accent-ink)" font-variant-numeric="tabular-nums">${U.fmtClock(now)}</text></g>`);
     const svg = R.gsvg;
     svg.setAttribute('width', width); svg.setAttribute('height', H); svg.setAttribute('viewBox', `0 0 ${width} ${H}`);
     svg.innerHTML = out.join('');
@@ -1843,11 +1883,11 @@
     for (const l of lanes) {
       if (l.id === 'EXT') {
         const nAt = ext.filter(x => x.kind === 'at').reduce((a, x) => a + x.qty, 0);
-        lh.push(`<div class="or-gl ext" style="height:${l.h}px" title="Fremdbearbeitung beim Härtepartner (Lose mit Hin- und Rücktransport)"><i></i><div><b>Härterei</b><small><em>EXT</em>${nAt ? nf(nAt) + ' Stk beim Partner' : 'extern'}</small></div></div>`);
+        lh.push(`<div class="or-gl ext" style="height:${l.h}px" title="Fremdbearbeitung beim Härtepartner (Lose mit Hin- und Rücktransport)"><i></i><b>Härterei</b><small><em>EXT</em>${nAt ? nf(nAt) + ' Stk beim Partner' : 'Fremdbearbeitung'}</small></div>`);
         continue;
       }
       const m = s.machines[l.id], st = WF.STATE[m.state] || WF.STATE.idle;
-      lh.push(`<button type="button" class="or-gl" data-m="${esc(l.id)}" style="height:${l.h}px;--c:${st.color}" title="${esc(m.name)} (${esc(l.id)}) – ${esc(st.label)}: ${esc(m.cause || '')}"><i></i><div><b>${esc(m.short)}</b><small><em>${esc(l.id)}</em>${esc(st.label)}</small></div></button>`);
+      lh.push(`<button type="button" class="or-gl" data-m="${esc(l.id)}" style="height:${l.h}px;--c:${st.color}" title="${esc(m.name)} (${esc(l.id)}) – ${esc(st.label)}: ${esc(m.cause || '')}"><i></i><b>${esc(m.short)}</b><small><em>${esc(l.id)}</em>${esc(st.label)}</small></button>`);
     }
     setHTML(R.glabels, lh.join(''));
     R.glabels.style.height = H + 'px';
@@ -1908,8 +1948,17 @@
     if (R.gleg._sig === sig) return;
     R.gleg._sig = sig;
     if (G.pin && !open.some(v => v.id === G.pin)) G.pin = null;
-    R.gleg.innerHTML = (open.length ? '<span class="or-gl-l">Hervorheben</span>' : '') + open.map(v => `<button type="button" data-o="${esc(v.id)}" class="risk-${esc(v.risk)}${v.id === G.pin ? ' on' : ''}" style="--oc:${colorOf(v.id)}" title="${esc(v.id)} · ${esc(v.part.name)} · ${esc(v.customer)} – Termin ${esc(U.fmtDayClock(v.due))}, ${esc(v.riskLabel || '')}. Klick hebt den Auftrag hervor.">` +
-      `<i></i>${esc(numId(v.id))}</button>`).join('');
+    setHidden(R.glegL, !open.length);
+    // neutrale Chips; Punkt nur bei gefährdetem Termin, Blitz bei Eilauftrag
+    R.gleg.innerHTML = open.map(v => `<button type="button" data-o="${esc(v.id)}" class="risk-${esc(v.risk)}${v.id === G.pin ? ' on' : ''}" aria-pressed="${v.id === G.pin}" title="${esc(v.id)} · ${esc(v.part.name)} · ${esc(v.customer)} – Termin ${esc(U.fmtDayClock(v.due))}, ${esc(v.riskLabel || '')}${v.priority === 'eil' ? ' · Eilauftrag' : ''}">` +
+      `${v.risk === 'spät' || v.risk === 'knapp' ? '<i></i>' : ''}${v.priority === 'eil' ? icon('bolt', 12) : ''}${esc(numId(v.id))}</button>`).join('');
+    glegMask();
+  }
+  function glegMask() {
+    const g = R && R.gleg; if (!g) return;
+    const sl = g.scrollLeft;
+    g.classList.toggle('scl', sl > 2);
+    g.classList.toggle('end', sl + g.clientWidth >= g.scrollWidth - 2);
   }
   function selStrip(oid) {
     const box = R && R.gsel; if (!box) return;
@@ -1918,19 +1967,18 @@
     let html, cls = 'or-gsel';
     if (!v) {
       const anyOpen = lastViews && lastViews.some(x => x.status !== 'fertig');
-      html = `<span class="or-gs-t">${icon('info', 15)}<span>${anyOpen ? 'Block antippen oder Auftrag oben wählen – dann zeigt die Tafel seinen Materialfluss von Station zu Station und den Liefertermin.' : 'Keine offenen Aufträge eingeplant – die Tafel zeigt die Ist-Belegung des Tages. Neue Aufträge erscheinen hier, sobald sie freigegeben sind.'}</span></span>`;
+      html = `<span class="or-gs-hint">${anyOpen ? 'Block oder Auftrag oben wählen – zeigt Materialfluss und Liefertermin' : 'Keine offenen Aufträge eingeplant – Ist-Belegung des Tages'}</span>`;
     } else {
       const rb = riskBadge(v);
       cls += ' on';
       const pinned = G.pin === oid;
-      html = `<span class="or-gs-t"><span class="or-sw"></span><span class="mono">${esc(v.id)}</span><span><b>${esc(v.part.name)}</b> · ${esc(custShort(v.customer))}</span>
+      html = `<span class="or-gs-t"><span class="or-gs-id"><i></i><span class="mono">${esc(v.id)}</span></span><span><b>${esc(v.part.name)}</b> · ${esc(custShort(v.customer))}</span>
         <span class="or-rb" style="--c:${rb.c}"><i></i>${esc(rb.label)}</span>
         <span>Termin <b>${esc(tShort(v.due, now))}</b></span><span>${v.status === 'fertig' ? 'Fertig' : 'Prognose'} <b>${esc(tShort(v.status === 'fertig' ? v.doneT : v.eta, now))}</b></span></span>
         <span class="or-gs-a"><button type="button" class="btn sm ghost" data-gs="due">${icon('target', 14)}Zum Termin</button><button type="button" class="btn sm" data-gs="open">Details</button>${pinned ? `<button type="button" class="btn sm ghost" data-gs="unpin" title="Hervorhebung aufheben" aria-label="Hervorhebung aufheben">${icon('x', 14)}</button>` : ''}</span>`;
     }
     if (box._h !== html) { box._h = html; box.innerHTML = html; }
     if (box._c !== cls) { box._c = cls; box.className = cls; }
-    setVar(box, '--oc', v ? colorOf(v.id) : 'var(--line2)');
     box.dataset.o = v ? v.id : '';
   }
   /** hervorgehobenen Auftrag in der (waagrecht scrollbaren) Auftragsleiste sichtbar halten */
@@ -1978,12 +2026,13 @@
       });
     }
     // Liefertermin + Prognose
-    const col = colorOf(oid), dx = g.X(o.due);
+    const dx = g.X(o.due), v = lastViews && lastViews.find(x => x.id === oid);
+    const dc = v && v.risk === 'spät' ? 'var(--st-fault)' : v && v.risk === 'knapp' ? 'var(--st-wait)' : 'var(--accent)';
     if (dx >= 0 && dx <= g.width) {
-      out.push(`<line x1="${dx.toFixed(1)}" x2="${dx.toFixed(1)}" y1="${AXIS_H}" y2="${g.H}" stroke="${col}" stroke-width="1.5" stroke-dasharray="6 4"/>`);
+      out.push(`<line x1="${dx.toFixed(1)}" x2="${dx.toFixed(1)}" y1="${AXIS_H}" y2="${g.H}" style="stroke:${dc}" stroke-width="1.5" stroke-dasharray="6 4"/>`);
       const lbl = `Termin ${numId(oid)} · ${tShort(o.due, now)}`;
-      const lw = lbl.length * 6 + 14;
-      out.push(`<rect x="${(dx - lw / 2).toFixed(1)}" y="${AXIS_H + 3}" width="${lw.toFixed(1)}" height="17" rx="5" fill="${col}"/><text x="${dx.toFixed(1)}" y="${AXIS_H + 15.5}" text-anchor="middle" font-size="10.5" font-weight="700" style="fill:var(--accent-ink)">${esc(lbl)}</text>`);
+      const lw = lbl.length * 6.2 + 16;
+      out.push(`<rect x="${(dx - lw / 2).toFixed(1)}" y="${AXIS_H + 3}" width="${lw.toFixed(1)}" height="18" rx="6" style="fill:${dc}"/><text x="${dx.toFixed(1)}" y="${AXIS_H + 16}" text-anchor="middle" font-size="11.5" font-weight="700" style="fill:var(--accent-ink)">${esc(lbl)}</text>`);
     }
     G.links.innerHTML = out.join('');
   }
@@ -1993,7 +2042,7 @@
     if (!tip) { tip = R.tip = document.createElement('div'); tip.className = 'or-tip or-ltip'; tip.hidden = true; document.body.append(tip); }
     const o = s.orders[info.o];
     const v = lastViews && lastViews.find(x => x.id === info.o);
-    const head = `<div class="or-tip-h" style="--oc:${colorOf(info.o)}"><i></i><b>${esc(info.o)}</b><span>${esc(o ? o.part.name : '')}</span></div>`;
+    const head = `<div class="or-tip-h"><b>${esc(info.o)}</b><span>${esc(o ? o.part.name : '')}</span></div>`;
     const row = (l, val) => `<div class="or-tip-r"><span>${esc(l)}</span><b>${esc(val)}</b></div>`;
     let body = '';
     const cust = o ? `<div class="muted" style="margin-bottom:5px">${esc(o.customer)}</div>` : '';
@@ -2076,6 +2125,43 @@
     },
   });
 
+  // ------------------------------------------------------------------ Gemeinsame Arbeitsplan-Darstellung
+  /** Eine Darstellung des Arbeitsplans für alle Ansichten (Auftragsliste, Maschinen- und Behälter-Drawer, Copilot):
+      WF.ui.route(orderIdOrOps, { mode:'row'|'stack', current: AG-Nr., orderId })
+      - 'row'  : Kette wie in der Auftragsliste – Schritte gleich breit, Verbinder zwischen den Schritten, bricht nie um
+                 (schmaler Platz: waagrecht verschiebbar), Materialfluss am Verbinder
+      - 'stack': senkrechte Schrittfolge für Drawer ≤ 480 px – AG, Arbeitsplatz, Status je Zeile
+      Ohne mode: 'row' ab 640 px Fensterbreite, sonst 'stack'. Liefert HTML (Klassen .or-…, CSS aus diesem Modul). */
+  function route(src, opts = {}) {
+    const s = S(); if (!s) return '';
+    let v = null, ops = src;
+    if (typeof src === 'string') { v = WF.sim.orderView(src); ops = v ? v.ops : []; }
+    else if (opts.orderId) { try { v = WF.sim.orderView(opts.orderId); } catch (e) { v = null; } }
+    ops = (ops || []).filter(Boolean);
+    if (!ops.length) return '';
+    const vv = v || { id: opts.orderId || '', qty: opts.qty || 0, containers: [], eta: null };
+    const now = s.t, cur = opts.current;
+    const mode = opts.mode === 'stack' || opts.mode === 'row' ? opts.mode : (window.matchMedia('(max-width: 640px)').matches ? 'stack' : 'row');
+    if (mode === 'stack') {
+      return `<ol class="or-rs" aria-label="Arbeitsplan">` + ops.map(op => {
+        const vis = opVis(op);
+        return `<li class="s-${vis.k}${op.seq === cur ? ' cur' : ''}" style="--c:${vis.c}" title="${esc(chipTitle(op, vv, now))}"><span class="n">${vis.k === 'done' ? icon('check', 11) : vis.k === 'ext' ? icon('truck', 10) : ''}</span>` +
+          `<span class="t"><em>AG ${op.seq}</em><b>${esc(stLabel(op))}</b></span><span class="s">${esc(chipSub(op, vv, now))}</span></li>`;
+      }).join('') + `</ol>`;
+    }
+    const transit = {};
+    for (const ct of vv.containers || []) if (ct.state === 'transit' && ct.seq != null) transit[ct.seq] = true;
+    return `<div class="or-chain or-route${ops.length >= 6 ? ' many' : ''}" aria-label="Arbeitsplan">` + ops.map((op, i) => {
+      const vis = opVis(op);
+      const lk = i === 0 ? '' : `<span class="or-lk${transit[op.seq] ? ' flow' : op.received > 0 || op.state === 'done' ? ' pass' : ''}"></span>`;
+      return lk + `<div class="or-step s-${vis.k}${op.seq === cur ? ' cur' : ''}" style="--c:${vis.c}" title="${esc(chipTitle(op, vv, now))}"><span class="or-st-ic">${vis.k === 'done' ? ICON_DONE : vis.k === 'ext' ? ICON_EXT : ''}</span>` +
+        `<span class="or-st-tx"><span class="or-st-l"><em>${op.seq}</em><span>${esc(stLabel(op))}</span></span><span class="or-st-s">${esc(chipSub(op, vv, now))}</span></span>` +
+        (vis.k === 'done' || vis.k === 'open' ? '' : `<i class="or-st-bt"><i class="or-st-bar" style="width:${(chipFrac(op, vv) * 100).toFixed(1)}%"></i></i>`) + `</div>`;
+    }).join('') + `</div>`;
+  }
+  WF.ordersUi.route = route;
+  if (!WF.ui.route) WF.ui.route = route;
+
   // ------------------------------------------------------------------ Detail „order“
   function compatMachines(stationId) {
     const s = S(), P = WF.profile, from = s.machines[stationId];
@@ -2144,19 +2230,56 @@
     modal = WF.app.modal({ title: 'Arbeitsgang verlagern · ' + id, body, width: 620, actions: [{ label: 'Schließen' }] });
   }
 
-  function opRowHtml(op, v, now) {
+  /** Zeile der senkrechten Schrittfolge im Drawer. Erledigte und noch nicht begonnene Schritte einzeilig,
+      laufende/wartende/externe ausführlich mit Mengen; zufließende Behälter als Materialfluss-Hinweis über dem Schritt. */
+  function opRowHtml(op, v, now, ctx) {
     const vis = opVis(op);
     const isMachine = !!(S().machines[op.station]);
+    const lim = ctx && ctx.lim;
+    const isLim = !!(lim && lim.seq === op.seq && op.state !== 'done');
+    const kBadge = isLim ? `<span class="or-op-k${lim.plant ? ' plant' : ''}" title="${esc(lim.text)}">${lim.plant ? 'Engpass' : 'Kritisch'}</span>` : '';
+    const noParts = op.state === 'open' && !op.received && !op.good && !(op.ext && (op.ext.sentQty || op.ext.waitingPickupQty));
+    const compact = op.state === 'done' || noParts;
+    const where = op.station === 'EXT' ? (op.ext ? esc(op.ext.partner) : 'Fremdbearbeitung') : op.station === 'VERSAND' ? 'Fertigteillager &amp; Versand'
+      : isMachine ? `<button class="link" data-ent="machine|${esc(op.station)}">${esc(op.stationName)} (${esc(op.station)})</button>` : esc(op.stationName);
+    // Materialfluss in diesen Schritt (Behälter unterwegs / abholbereit beim Vorgänger)
+    let inflow = '';
+    if (ctx && op.state !== 'done') {
+      const tr = ctx.transit[op.seq], rd = ctx.ready[ctx.prevSeq];
+      if (tr && tr.length) inflow = `<div class="or-op-in">${icon('truck', 13)}<span>${nf(tr.length)} ${tr.length === 1 ? 'Behälter' : 'Behälter'} mit ${nf(tr.reduce((a, c) => a + c.qty, 0))} Stk unterwegs hierher</span></div>`;
+      else if (rd && rd.length) inflow = `<div class="or-op-in rdy">${icon('box', 13)}<span>${nf(rd.reduce((a, c) => a + c.qty, 0))} Stk abholbereit beim Vorgänger</span></div>`;
+    }
+    if (compact) {
+      let right = '';
+      const meta = [where];
+      if (op.state === 'done') {
+        right = op.endT != null && op.endT <= simStartT() ? 'vor ' + U.fmtDayClock(simStartT()) : op.endT != null ? 'fertig ' + tShort(op.endT, now) : 'fertig';
+        if (op.station === 'VERSAND') meta.push(nf(op.good) + ' Stk versandt');
+        else if (op.station !== 'EXT') { meta.push(nf(op.good) + ' gut'); if (op.scrap) meta.push(`<span style="color:var(--st-fault)">${nf(op.scrap)} Ausschuss</span>`); }
+        else if (op.ext) meta.push(esc(op.ext.process));
+        if (op.startT != null && op.endT != null && op.startT > simStartT()) meta.push('Durchlauf ' + esc(U.fmtDur(op.endT - op.startT)));
+      } else {
+        right = op.station === 'VERSAND' ? (v.eta != null ? 'ca. ' + tShort(v.eta, now) : '') : op.plannedStart != null ? 'ab ca. ' + tShort(op.plannedStart, now) : 'offen';
+        if (op.station === 'EXT' && op.ext) { meta.push(esc(op.ext.process)); meta.push('Durchlauf ca. ' + U.fmtDur((op.ext.leadMin || 0) * 60)); }
+        else if (op.station !== 'VERSAND') {
+          if (op.setupMin) meta.push('Rüsten ' + nf(op.setupMin) + ' min');
+          if (op.cycleMin) meta.push(U.fmtNum(op.cycleMin, op.cycleMin < 1 ? 2 : op.cycleMin < 10 ? 1 : 0) + ' min/Stk');
+          if (op.plannedEnd != null) meta.push('fertig ca. ' + esc(tShort(op.plannedEnd, now)));
+        }
+      }
+      return `<div class="or-op-rail"><span class="or-op-node">${vis.k === 'done' ? icon('check', 11) : ''}</span></div>
+        <div class="or-op-b">${inflow}
+          <div class="or-op-h"><em>AG ${op.seq}</em><b title="${esc(op.op)}">${esc(op.op)}</b>${kBadge}<span class="or-op-r">${esc(right)}</span></div>
+          <div class="or-op-m">${meta.join(' · ')}</div>
+        </div>`;
+    }
     let pill;
     if (op.state === 'active') pill = WF.ui.pill(op.machineState);
-    else pill = `<span class="pill" style="--c:${op.state === 'open' ? 'var(--faint)' : vis.c}"><i></i>${esc(vis.label)}</span>`;
-    const meta = [];
+    else pill = `<span class="pill" style="--c:${vis.c}"><i></i>${esc(vis.label)}</span>`;
+    const meta = [where];
     if (op.station === 'EXT') {
-      if (op.ext) { meta.push(esc(op.ext.partner)); meta.push(esc(op.ext.process)); meta.push('Durchlauf ca. ' + U.fmtDur((op.ext.leadMin || 0) * 60)); meta.push('Los ' + nf(op.ext.lotQty) + ' Stk'); }
-    } else if (op.station === 'VERSAND') {
-      meta.push('Fertigteillager &amp; Versand');
-    } else {
-      meta.push(isMachine ? `<button class="link" data-ent="machine|${esc(op.station)}">${esc(op.stationName)} (${esc(op.station)})</button>` : esc(op.stationName));
+      if (op.ext) { meta.push(esc(op.ext.process)); meta.push('Durchlauf ca. ' + U.fmtDur((op.ext.leadMin || 0) * 60)); meta.push('Los ' + nf(op.ext.lotQty) + ' Stk'); }
+    } else if (op.station !== 'VERSAND') {
       if (op.setupMin) meta.push('Rüsten ' + nf(op.setupMin) + ' min');
       if (op.cycleMin) meta.push(U.fmtNum(op.cycleMin, op.cycleMin < 1 ? 2 : op.cycleMin < 10 ? 1 : 0) + ' min/Stk');
       if (op.transferBatch) meta.push('Weitergabe je ' + nf(op.transferBatch) + ' Stk');
@@ -2170,7 +2293,7 @@
     if (op.station === 'EXT' && op.ext) {
       const e = op.ext;
       q = `<div class="or-op-q">${cell('Gesendet', e.sentQty)}${cell('Beim Partner', e.atPartnerQty)}${cell('Abholbereit', e.waitingPickupQty)}${cell('Zurück', e.returnedQty)}</div>`;
-      bar = WF.ui.bar((op.targetIn ? e.returnedQty / op.targetIn : 0), { thin: true, color: op.complete ? 'var(--st-run)' : 'var(--st-wait)' });
+      bar = WF.ui.bar((op.targetIn ? e.returnedQty / op.targetIn : 0), { thin: true, color: op.complete ? 'var(--st-run)' : 'var(--ext)' });
     } else if (op.station === 'VERSAND') {
       q = `<div class="or-op-q" style="grid-template-columns:repeat(2,minmax(0,1fr))">${cell('Versandt', op.good, null, '/ ' + nf(v.qty))}${cell('Offen', Math.max(0, v.qty - op.good))}</div>`;
       bar = WF.ui.bar(v.qty ? op.good / v.qty : 0, { thin: true, color: 'var(--st-run)' });
@@ -2179,15 +2302,8 @@
       q = `<div class="or-op-q">${cell('Eingang', op.received)}<div class="${op.good ? '' : 'z'}"><span>Gut</span><b>${nf(op.good)}<small>/ ${nf(op.target)}</small></b></div>${cell('Ausschuss', op.scrap, op.scrap ? 'bad' : 'z')}<div class="${op.waiting || op.inProc ? '' : 'z'}"><span>Wartet</span><b>${nf(op.waiting)}${extra}</b></div></div>`;
       bar = WF.ui.bar(op.target ? op.good / op.target : 0, { thin: true, color: op.complete ? 'var(--st-run)' : vis.k === 'active' ? vis.c : 'var(--st-idle)' });
     }
-    // noch nicht begonnene Schritte ohne Teile: keine Nullen-Tabelle, nur Plan
-    if (op.state === 'open' && !op.received && !op.good && !(op.ext && (op.ext.sentQty || op.ext.waitingPickupQty))) { q = ''; bar = ''; }
     const times = [];
-    if (op.state === 'done' && op.endT != null && op.endT <= simStartT()) {
-      times.push(`Abgeschlossen <b>vor ${esc(U.fmtDayClock(simStartT()))}</b>`);
-    } else if (op.state === 'done') {
-      times.push(`Ist <b>${esc(tAct(op.startT, now))}</b> – <b>${esc(tAct(op.endT, now))}</b>`);
-      if (op.startT != null && op.endT != null && op.startT > simStartT()) times.push('Durchlauf ' + esc(U.fmtDur(op.endT - op.startT)));
-    } else if (op.station === 'EXT' && op.ext) {
+    if (op.station === 'EXT' && op.ext) {
       const e = op.ext;
       if (e.pickupT != null && (e.waitingPickupQty > 0 || e.sentQty < (op.targetIn || v.qty))) times.push(`Nächste Abholung ca. <b>${esc(tShort(e.pickupT, now))}</b>`);
       if (e.returnT != null) times.push(`${e.atPartnerQty > 0 ? 'Rückkehr' : 'Erste Rückkehr'} ca. <b>${esc(tShort(e.returnT, now))}</b>`);
@@ -2199,9 +2315,9 @@
       else if (op.plannedStart != null) times.push(`Start ca. <b>${esc(tShort(op.plannedStart, now))}</b>`);
       if (op.plannedEnd != null) times.push(`Fertig ca. <b>${esc(tShort(op.plannedEnd, now))}</b>`);
     }
-    return `<div class="or-op-rail"><span class="or-op-node">${vis.k === 'done' ? icon('check', 11) : vis.k === 'ext' ? icon('truck', 10) : ''}</span></div>
-      <div class="or-op-b">
-        <div class="or-op-h"><em>AG ${op.seq}</em><b title="${esc(op.op)}">${esc(op.op)}</b>${pill}</div>
+    return `<div class="or-op-rail"><span class="or-op-node">${vis.k === 'ext' ? icon('truck', 10) : ''}</span></div>
+      <div class="or-op-b">${inflow}
+        <div class="or-op-h"><em>AG ${op.seq}</em><b title="${esc(op.op)}">${esc(op.op)}</b>${kBadge}${pill}</div>
         <div class="or-op-m">${meta.join(' · ')}</div>
         ${cause}${q}${bar}
         ${times.length ? `<div class="or-op-t">${times.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
@@ -2236,16 +2352,67 @@
       <div><span class="eyebrow">${v.status === 'fertig' ? 'Fertig' : 'Prognose fertig'}</span><b>${esc(v.status === 'fertig' ? fmtDue(v.doneT, now) : fmtDue(v.eta, now))}</b><small>${pend ? 'neu gerechnet ' + esc(tShort(v.etaPending, now)) + ' – wird geprüft' : v.status === 'fertig' ? (v.onTime ? 'termingerecht und vollständig' : 'nicht termingerecht') : 'aus Live-Daten, inkl. Fremdbearbeitung'}</small></div>
       <div title="${esc(pg.title)}"><span class="eyebrow">${v.status === 'fertig' ? 'Versandt' : 'Fertig bearbeitet'}</span><b>${nf(pg.n)}/${nf(v.qty)} Stk</b><small>${pg.sub}</small></div>
     </div>`;
-    const bar = `<span class="or-pbar" style="--oc:${colorOf(v.id)}" title="${esc(pg.title)}"><i class="w" style="width:${(pg.work * 100).toFixed(1)}%"></i><i style="width:${(U.clamp(pg.frac, 0, 1) * 100).toFixed(1)}%"></i></span>`;
+    const bar = `<span class="or-pbar" title="${esc(pg.title)}"><i class="w" style="width:${(pg.work * 100).toFixed(1)}%"></i><i style="width:${(U.clamp(pg.frac, 0, 1) * 100).toFixed(1)}%"></i></span>`;
     const nl = nowLine(v, now);
     let notes = nl.parts ? nl.parts.map(p => `<div class="or-hero-n or-hero-a"><span>${p}</span></div>`).join('')
       : `<div class="or-hero-n ${nl.cls}">${icon(nl.ic || 'arrowRight', 15)}<span>${nl.html}</span></div>`;
-    if (v.status !== 'fertig' && v.bottleneck) {
-      const bw = plantBottleneck(), bst = v.bottleneckStation || f.bottleneckStation;
-      const plant = bw && bst && bw.stationId === bst;
-      notes += `<div class="or-hero-n${plant && atRisk(v) ? ' warn' : ''}">${icon('gauge', 15)}<span>Durchlauf begrenzt durch <b>${esc(v.bottleneck)}</b>${f.bottleneckSec ? ' – längster Arbeitsgang mit ca. ' + esc(durLong(f.bottleneckSec)) + ' Durchlauf' : ''}${plant ? ' · zugleich <b>Werks-Engpass</b>' : ''}</span></div>`;
-    }
+    // begrenzender Schritt: bei gefährdetem Termin erklärt „Warum spät/knapp“ darunter ausführlich
+    const lim = v.status !== 'fertig' && !atRisk(v) ? limitOf(v) : null;
+    if (lim) notes += `<div class="or-hero-n">${icon('gauge', 15)}<span>Durchlauf ${lim.plant ? 'begrenzt durch den <b>Werks-Engpass ' + esc(lim.name) + '</b>' : 'begrenzt durch <b>' + esc(lim.name) + '</b>'}${lim.seq != null ? ' (AG ' + lim.seq + ')' : ''}${!v.limit && f.bottleneckSec ? ' – längster Arbeitsgang mit ca. ' + esc(durLong(f.bottleneckSec)) + ' Durchlauf' : ''}</span></div>`;
     return `<div class="or-hero" style="--rc:${rb.c}">${top}${d}${bar}${notes}</div>`;
+  }
+  // ------------------------------------------------------------------ „Warum spät / knapp“ (Engine: delayBreakdown, orderAdvice)
+  const DELAY_IC = { queue: 'clock', ext: 'truck', noShift: 'pause', fault: 'alert', tool: 'wrench', material: 'box', process: 'settings' };
+  function delayLabel(e, v) {
+    // Engine-Text ohne Dauer-Klammer: „Warten an M09 Studer S33“, „Einsatzhärten 58–62 HRC bei Härterei Wolf“
+    let t = String(e.text || '').replace(/\s*\([^()]*\)\s*$/, '').trim();
+    if (!t) {
+      const st = e.stationId, op = v.ops.find(o => o.seq === e.seq);
+      const stN = st === 'EXT' ? (op && op.ext ? op.ext.partner : 'Fremdbearbeitung') : (op ? op.stationName : st);
+      t = ({ queue: 'Warten an ', ext: 'Fremdbearbeitung bei ', noShift: 'Außerhalb der Schicht an ', fault: 'Störung an ', tool: 'Werkzeugwechsel an ', material: 'Material fehlt an ' }[e.kind] || 'Bearbeitung ') + stN;
+    }
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+  function whyHtml(v, adv, now) {
+    const db = Array.isArray(v.delayBreakdown) ? v.delayBreakdown.filter(e => e && e.sec > 0) : [];
+    const late = v.risk === 'spät';
+    const cause = (adv && adv.cause) || v.delayCause || (limitOf(v) || {}).text || '';
+    let h = cause ? `<div class="or-why-c"><span class="or-why-l">Ursache</span><b>${esc(cause)}</b></div>` : '';
+    if (db.length) {
+      // Reihenfolge wie die Ursache der Engine: echte Verzögerungen (Warten, Fremdbearbeitung, Störung, Werkzeug, Material)
+      // zuerst, Zeiten außerhalb der Schicht danach; reine Bearbeitung nur, wenn sonst nichts bremst
+      const CAUSE = { queue: 1, ext: 1, fault: 1, tool: 1, material: 1 };
+      const byS = (a, b) => b.sec - a.sec;
+      const main = db.filter(e => CAUSE[e.kind]).sort(byS), shift = db.filter(e => e.kind === 'noShift').sort(byS);
+      let list = main.concat(shift);
+      if (!list.length) list = db.slice().sort(byS);
+      list = list.slice(0, 4);
+      const L = v.limit, isLim = (e) => !!(L && e.kind === L.kind && e.stationId === L.stationId && e.seq === L.seq);
+      const hi = list.some(isLim) ? list.findIndex(isLim) : (main.length ? 0 : -1);
+      const max = Math.max(1, ...list.map(e => e.sec));
+      const total = db.reduce((a, e) => a + e.sec, 0), proc = db.filter(e => e.kind === 'process').reduce((a, e) => a + e.sec, 0);
+      h += `<div class="or-why-bars"><span class="or-why-l">Größte Verzögerungen bis zur Fertigstellung</span>` + list.map((e, i) => {
+        const blk = (e.blockingOrders || []).filter(Boolean);
+        return `<div class="or-wb${i === hi ? ' hi' : ''}${e.kind === 'noShift' ? ' ns' : ''}" title="${esc(e.text || '')}"><span class="or-wb-l">${icon(DELAY_IC[e.kind] || 'dot', 14)}<span>${esc(delayLabel(e, v))}</span></span>` +
+          `<span class="or-wb-b"><i style="width:${(e.sec / max * 100).toFixed(1)}%"></i></span><span class="or-wb-v">${esc(durLong(e.sec))}</span>` +
+          (blk.length ? `<span class="or-wb-o">hinter ${blk.slice(0, 4).map(x => `<button type="button" class="link" data-ent="order|${esc(x)}">${esc(x)}</button>`).join(', ')}${blk.length > 4 ? ' …' : ''}</span>` : '') + '</div>';
+      }).join('') + `</div>` +
+        (total > 0 ? `<div class="or-pm-n">Bis zur Fertigstellung noch ca. <b>${esc(durLong(total))}</b> – davon ${esc(durLong(proc))} Bearbeitung, ${esc(durLong(Math.max(0, total - proc)))} Warte-, Liege- und Fremdzeiten.</div>` : '');
+    }
+    if (adv) {
+      const m = /Empfehlung:\s*(.+?)\.?\s*$/.exec(adv.text || '');
+      const rec = m ? m[1] : null;
+      const act = adv.action && adv.actionLabel ? `<button type="button" class="btn sm primary" data-wact="1">${esc(adv.actionLabel)}</button>` : '';
+      if (rec) h += `<div class="or-why-rec">${icon('arrowRight', 14)}<span><b>Empfehlung:</b> ${esc(rec)}</span></div>`;
+      const alts = (adv.alternatives || []).filter(a => a && a.kind !== adv.primaryKind);
+      if (alts.length) {
+        h += `<ul class="or-why-opts">` + alts.slice(0, 4).map(a => a.ok
+          ? `<li>${icon('check', 14)}<span>${esc(a.text || a.label)}${a.gainSec > 60 ? ` <b>(−${esc(durLong(a.gainSec))})</b>` : ''}</span></li>`
+          : `<li class="no">${icon('x', 14)}<span>${esc(a.note || a.text || a.label)}</span></li>`).join('') + `</ul>`;
+      }
+      if (act) h += `<div class="or-why-a">${act}</div>`;
+    }
+    return h ? `<div class="or-why" style="--rc:${late ? 'var(--st-fault)' : 'var(--st-wait)'}">${h}</div>` : '';
   }
   function factsHtml(v, now) {
     const scrap = v.ops.reduce((a, o) => a + (o.scrap || 0), 0);
@@ -2299,7 +2466,7 @@
     const parts = [];
     if (shipped.length) parts.push(`Versandt: <b>${nf(shipped.reduce((a, c) => a + c.qty, 0))} Stk</b> in ${nf(shipped.length)} ${shipped.length === 1 ? 'Behälter' : 'Behältern'}`);
     if (scrap.length) parts.push(`Sperrlager: <b>${nf(scrap.reduce((a, c) => a + c.qty, 0))} Stk</b> Ausschuss`);
-    return parts.join('<span class="or-sep">·</span>');
+    return parts.map(x => `<span>${x}</span>`).join('');
   }
   function orderEvents(id) {
     const s = S(), out = [];
@@ -2314,20 +2481,30 @@
   WF.registerDetail('order', (id) => {
     const v0 = WF.sim.orderView(id);
     if (!v0) return null;
-    const st = { built: false, evAll: false, chain: null };
-    const subtitle = `<span class="or-d-sub"><span class="or-sw" style="--oc:${colorOf(id)}"></span><span>${esc(v0.customer)}</span><span class="faint">·</span><span>${esc(v0.sector || '')}</span><span class="faint">·</span><span class="mono">${esc(v0.part.no || '')}</span></span>`;
+    const st = { evAll: false, adv: null, advKey: null, advAt: 0 };
+    const subtitle = `<span class="or-d-sub"><span>${esc(v0.customer)}</span><span class="faint">·</span><span>${esc(v0.sector || '')}</span><span class="faint">·</span><span class="mono">${esc(v0.part.no || '')}</span></span>`;
     let N = null;
+    /** Empfehlung der Engine (eine Wahrheit mit Meldung, Leitstand, Copilot) – teuer (Was-wäre-wenn), daher je Planstand und höchstens alle 3 s */
+    function advice(v) {
+      if (!atRisk(v) || typeof WF.sim.orderAdvice !== 'function') { st.adv = null; st.advKey = null; return null; }
+      const fc = WF.sim.forecast(), key = fc.t + '|' + v.risk, tn = performance.now();
+      if (st.advKey !== key && (st.advKey == null || tn - st.advAt > 3000)) {
+        try { st.adv = WF.sim.orderAdvice(id); } catch (e) { console.warn('[orderAdvice]', e); st.adv = null; }
+        st.advKey = key; st.advAt = tn;
+      }
+      return st.adv;
+    }
     function render(el) {
       el.innerHTML = `
         <section data-n="hero"></section>
+        <section class="or-sec" data-n="whySec" hidden><h4><span data-n="whyT">Warum verspätet</span></h4><div data-n="why"></div></section>
         <section class="or-sec" data-n="ntSec" hidden><h4><span>Meldungen zu diesem Auftrag</span></h4><div class="or-nts" data-n="nts"></div></section>
         <section class="or-sec"><div class="or-acts" data-n="acts"></div></section>
-        <section class="or-sec"><h4><span>Arbeitsplan</span><span class="spacer"></span><small data-n="opsSub"></small></h4><div class="or-chain or-dchain" data-n="chain"></div><div class="or-ops" data-n="ops"></div></section>
+        <section class="or-sec"><h4><span>Arbeitsplan</span><span class="spacer"></span><small data-n="opsSub"></small></h4><div class="or-ops" data-n="ops"></div></section>
         <section class="or-sec"><h4><span>Wo ist das Material?</span><span class="spacer"></span><small data-n="matSub"></small></h4><div class="or-mat" data-n="mat"></div><div class="or-msum" data-n="msum"></div></section>
         <section class="or-sec"><h4><span>Auftragsdaten</span></h4><div data-n="facts"></div></section>
         <section class="or-sec"><h4><span>Ereignisse</span><span class="spacer"></span><small data-n="evSub"></small></h4><div data-n="ev"></div><button type="button" class="btn sm ghost or-more" data-n="evMore" hidden></button></section>`;
       N = {}; el.querySelectorAll('[data-n]').forEach(n => { N[n.dataset.n] = n; });
-      st.chain = { box: N.chain, chips: [], links: [], nOps: -1, compact: true };
       el.addEventListener('click', (e) => onClick(e));
       N.evMore.onclick = () => { st.evAll = !st.evAll; N.ev._h = null; update(el); };
       update(el);
@@ -2341,10 +2518,15 @@
         else if (k === 'run' && n.actions && n.actions[Number(idx)]) WF.app.runAction(n.actions[Number(idx)].action);
         N.nts._h = null; update(); return;
       }
+      const wa = e.target.closest('[data-wact]');
+      if (wa && st.adv && st.adv.action) {
+        const a = st.adv.action;
+        if (a.type === 'setPriority') togglePriority(id);
+        else { WF.app.runAction(a); st.advKey = null; update(); }
+        return;
+      }
       const ent = e.target.closest('[data-ent]');
       if (ent) { const [k, i] = ent.dataset.ent.split('|'); WF.app.select(k, i); return; }
-      const step = e.target.closest('.or-dchain .or-step');
-      if (step && N) { const idx = Array.prototype.indexOf.call(N.chain.querySelectorAll('.or-step'), step); const row = N.ops.children[idx]; if (row) row.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
       const act = e.target.closest('[data-act]'); if (!act || act.disabled) return;
       switch (act.dataset.act) {
         case 'prio': togglePriority(id); break;
@@ -2364,14 +2546,22 @@
       const v = WF.sim.orderView(id); if (!v) return;
       const now = S().t;
       setHTML(N.hero, heroHtml(v, now));
+      // Warum spät / knapp
+      const adv = advice(v);
+      const why = atRisk(v) ? whyHtml(v, adv, now) : '';
+      setHidden(N.whySec, !why);
+      setText(N.whyT, v.risk === 'spät' ? 'Warum verspätet' : 'Warum knapp');
+      setHTML(N.why, why);
       const nts = orderNotifs(id, false);
       setHidden(N.ntSec, !nts.length);
       setHTML(N.nts, nts.map(n => {
         const sv = WF.SEV[n.sev] || WF.SEV.info;
-        const acts = (n.actions || []).map((a, i) => ({ a, i })).filter(x => !(x.a.action && x.a.action.type === 'select' && x.a.action.id === id));
+        // Terminmeldung: Empfehlung und Aktion stehen schon unter „Warum …“ – hier nicht doppelt
+        const dup = !!why && /^late:/.test(n.key || '');
+        const acts = dup ? [] : (n.actions || []).map((a, i) => ({ a, i })).filter(x => !(x.a.action && x.a.action.type === 'select' && x.a.action.id === id));
         return `<div class="or-nt${n.status === 'ack' ? ' ack' : ''}" style="--c:${sv.color}">
-          <div class="or-nt-h"><span>${esc(tShort(n.t, now))} · ${esc(n.role || '')}</span>${n.status === 'ack' ? `<span>quittiert${n.ackBy ? ' von ' + esc(n.ackBy) : ''}</span>` : `<span class="or-nt-sev">${esc(sv.label)}</span>`}</div>
-          <b>${esc(n.title)}</b>${n.body ? `<p>${esc(n.body)}</p>` : ''}${n.suggestion ? `<div class="or-nt-s"><b>Empfehlung:</b> ${esc(n.suggestion)}</div>` : ''}
+          <div class="or-nt-h"><span>${WF.ui.notifTime ? WF.ui.notifTime(n) : esc(tShort(n.t, now))} · ${esc(n.role || '')}</span>${n.status === 'ack' ? `<span>quittiert${n.ackBy ? ' von ' + esc(n.ackBy) : ''}</span>` : `<span class="or-nt-sev">${esc(sv.label)}</span>`}</div>
+          <b>${esc(n.title)}</b>${n.body ? `<p>${esc(n.body)}</p>` : ''}${n.suggestion && !dup ? `<div class="or-nt-s"><b>Empfehlung:</b> ${esc(n.suggestion)}</div>` : ''}
           <div class="or-nt-a">${acts.map(x => `<button type="button" class="btn sm" data-nact="run|${esc(n.id)}|${x.i}">${esc(x.a.label)}</button>`).join('')}${n.status === 'open' ? `<button type="button" class="btn sm ghost" data-nact="ack|${esc(n.id)}">Quittieren</button>` : ''}</div></div>`;
       }).join(''));
       const fin = v.status === 'fertig';
@@ -2383,8 +2573,20 @@
         `<button type="button" class="btn ghost" data-act="plan">${icon('layers', 15)}Plantafel</button>`);
       const doneN = v.ops.filter(o => o.state === 'done').length;
       setText(N.opsSub, `${nf(doneN)} von ${nf(v.ops.length)} Schritten fertig`);
-      patchChain(st.chain, v, now);
-      patchKeyed(N.ops, v.ops.map(op => { const vis = opVis(op); return { k: 'op' + op.seq, cls: 'or-op s-' + vis.k, style: '--c:' + vis.c, html: opRowHtml(op, v, now) }; }));
+      // senkrechte Schrittfolge (bricht nie um): Materialfluss zwischen den Schritten als Hinweis am Folgeschritt
+      const transit = {}, ready = {};
+      for (const ct of v.containers) {
+        if (ct.state === 'transit' && ct.seq != null) (transit[ct.seq] = transit[ct.seq] || []).push(ct);
+        else if (ct.state === 'ready' && ct.srcSeq != null) (ready[ct.srcSeq] = ready[ct.srcSeq] || []).push(ct);
+      }
+      const lim = !fin ? limitOf(v) : null;
+      const cur = v.ops.find(o => o.state === 'active' || o.state === 'external' || o.state === 'waiting');
+      patchKeyed(N.ops, v.ops.map((op, i) => {
+        const vis = opVis(op);
+        const ctx = { lim: atRisk(v) ? lim : null, transit, ready, prevSeq: i > 0 ? v.ops[i - 1].seq : null };
+        const cmp = op.state === 'done' || (op.state === 'open' && !op.received && !op.good && !(op.ext && (op.ext.sentQty || op.ext.waitingPickupQty)));
+        return { k: 'op' + op.seq, cls: 'or-op s-' + vis.k + (cmp ? ' cmp' : '') + (cur && cur.seq === op.seq ? ' cur' : ''), style: '--c:' + vis.c, html: opRowHtml(op, v, now, ctx) };
+      }));
       const mi = matItems(v, now);
       setText(N.matSub, mi.length ? `${nf(mi.length)} ${mi.length === 1 ? 'Ort' : 'Orte'}` : '');
       if (!mi.length) mi.push({ k: 'none', cls: 'empty', ent: null, html: fin ? 'Alle Teile sind versandt.' : 'Noch kein Material im Umlauf – der erste Arbeitsgang entnimmt das Rohmaterial beim Start.' });
@@ -2405,7 +2607,7 @@
       subtitle,
       render,
       update: (el) => update(el),
-      askPrompt: `Gib mir eine kurze Lageeinschätzung zu Auftrag ${id} (${v0.part.name}, ${v0.qty} Stk für ${v0.customer}): Wo steht er gerade, hält der Liefertermin ${U.fmtDayClock(v0.due)}, was ist der Engpass, und was empfiehlst du (Priorität, Verlagerung, Fremdbearbeitung)?`,
+      askPrompt: `Gib mir eine kurze Lageeinschätzung zu Auftrag ${id} (${v0.part.name}, ${v0.qty} Stk für ${v0.customer}): Wo steht er gerade, hält der Liefertermin ${U.fmtDayClock(v0.due)}, was begrenzt den Durchlauf, und was empfiehlst du (Priorität, Verlagerung, Fremdbearbeitung)?`,
     };
   });
 })();

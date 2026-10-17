@@ -309,14 +309,66 @@
       else if (cur.state === 'waiting') now = `AG ${cur.seq} „${cur.op}“ wartet an ${cur.station}${cur.waiting ? ' · ' + stk(cur.waiting) + ' im Eingang' : ''}${fe && fe.start > c.t + 300 ? ' · Start ca. ' + tc(fe.start) : ''}`;
       else now = `nächster Schritt AG ${cur.seq} „${cur.op}“ an ${cur.station === 'EXT' ? 'Fremdbearbeitung' : cur.station}${fe ? ' ab ca. ' + tc(Math.max(c.t, fe.start)) : ''}`;
     }
+    const ew = engineWhy(c, o);
+    if (ew) return { now, bn: ew.cause };
     const dc = delayCauses(c, o);
-    return { now, bn: dc && dc.main ? dc.main.text : o.bottleneck || '' };
+    return { now, bn: dc && dc.main ? dc.main.text : o.bottleneck ? 'begrenzt durch ' + o.bottleneck : '' };
   }
-  /** Ursachenkette als Satz (für Klartext, Übergabe, Claude) */
+  /** Ursachenkette als Satz (für Klartext, Übergabe, Claude) – Engine-Ursache zuerst (gleicher Wortlaut wie die Meldung) */
   function orderWhy(c, o) {
+    const ew = engineWhy(c, o);
+    if (ew) return `Ursache: ${ew.cause}.`;
     const dc = delayCauses(c, o);
-    if (!dc || !dc.items.length) return o.bottleneck ? `Längster Arbeitsgang im Plan: ${o.bottleneck}.` : '';
+    if (!dc || !dc.items.length) return o.bottleneck ? `Begrenzt durch ${o.bottleneck}.` : '';
     return 'Ursache laut Plantafel: ' + dc.items.map(x => x.text).join('; ') + '.';
+  }
+  /** kurze Ursache für Listen (Briefing, Übergabe): Engine-Ursache, sonst Hauptbeitrag der eigenen Kette */
+  function whyShort(c, o) {
+    const ew = engineWhy(c, o);
+    if (ew) return ew.cause;
+    const dc = delayCauses(c, o);
+    return dc && dc.main ? dc.main.short : '';
+  }
+  /** Arbeitsplatz, an dem der Termin hängt (für „im Blick behalten“) – Engine (limit/bottleneckStation), sonst eigene Kette */
+  function watchStation(c, o) {
+    const ew = engineWhy(c, o);
+    if (ew && ew.station) return ew.station;
+    const dc = delayCauses(c, o);
+    return dc && dc.main && dc.main.station ? dc.main.station : bnMachine(o);
+  }
+  // ================================================================== Ursache aus der Engine (eine Wahrheit)
+  /** orderAdvice(id).cause / limit / delayBreakdown – derselbe Wortlaut wie die Meldung „Termin gefährdet“, die
+      Leitstand-Karte und der Auftrags-Drawer. null, wenn die Engine (noch) keine Ursache liefert → eigene Kette. */
+  const DLY = {
+    queue: { l: 'Warten', c: 'var(--st-wait)' }, process: { l: 'Bearbeitung', c: 'var(--st-run)' }, ext: { l: 'Fremdbearbeitung', c: 'var(--ext)' },
+    noShift: { l: 'außerhalb der Schicht', c: 'var(--st-idle)' }, fault: { l: 'Störung', c: 'var(--st-fault)' }, tool: { l: 'Werkzeug', c: 'var(--st-tool)' },
+    material: { l: 'Material', c: 'var(--mat)' },
+  };
+  const DLY_ORDER = { queue: 0, noShift: 1, fault: 2, tool: 3, material: 4, process: 5, ext: 6 };
+  function engineWhy(c, o) {
+    if (!o || o.status === 'fertig' || !(WF.sim && typeof WF.sim.orderAdvice === 'function')) return null;
+    const adv = simAdvice(o.id);
+    if (!adv || adv.local || !adv.cause || adv.causeKind === 'done') return null;
+    const bd = Array.isArray(adv.delayBreakdown) ? adv.delayBreakdown : Array.isArray(o.delayBreakdown) ? o.delayBreakdown : null;
+    const all = (bd || []).filter(e => e && e.sec > 0);
+    const lim = adv.limit || o.limit || null;
+    const station = lim && lim.stationId && S().machines[lim.stationId] ? lim.stationId : adv.bottleneckStation || bnMachine(o);
+    return { adv, cause: String(adv.cause).replace(/\.$/, ''), causeKind: adv.causeKind, all, total: all.reduce((x, e) => x + e.sec, 0), limit: lim, station };
+  }
+  /** Bezeichnung eines Verzugs-Beitrags ohne Dauer („Warten an M08 Liebherr LC 180 – hinter FA-24125, FA-24130“) */
+  function dlyLabel(o, e) {
+    const st = e.stationId && S().machines[e.stationId] ? mName(e.stationId) : null;
+    const blk = (e.blockingOrders || []).slice(0, 2);
+    switch (e.kind) {
+      case 'queue': return `Warten an ${st || e.stationId}${blk.length ? ' – hinter ' + listJoin(blk) : ''}`;
+      case 'process': return `Bearbeitung an ${st || e.stationId} (AG ${e.seq})`;
+      case 'noShift': return `außerhalb der Schicht an ${st || e.stationId}`;
+      case 'fault': return `Störung an ${st || e.stationId}`;
+      case 'tool': return `Werkzeug an ${st || e.stationId}`;
+      case 'material': return `Material für ${st || e.stationId}`;
+      case 'ext': return String(e.text || 'Fremdbearbeitung').replace(/\s*\([^()]*\)\s*$/, '');
+      default: return String(e.text || e.kind || '').replace(/\s*\([^()]*\)\s*$/, '');
+    }
   }
 
   // ================================================================== Terminberatung (eine Regel für Meldung, Auftragsliste und Copilot)
@@ -348,7 +400,7 @@
     }
     const dc = delayCauses(c, o), main = dc && dc.main;
     const action = wi && wi.recommend ? { type: 'setPriority', orderId: o.id, priority: 'eil' } : null;
-    const r = Object.assign(base, { cause: main ? main.text : slackTxt(o.slackSec), causeKind: main ? ({ wait: 'queue', run: 'bottleneck' }[main.kind] || main.kind) : null,
+    const r = Object.assign(base, { local: true, cause: main ? main.text : slackTxt(o.slackSec), causeKind: main ? ({ wait: 'queue', run: 'bottleneck' }[main.kind] || main.kind) : null,
       action, actionLabel: action ? 'Als Eilauftrag' : null, actions: action ? [{ label: 'Als Eilauftrag', action }, open] : [open], alternatives: [],
       sideEffects: wi ? wi.side : [], whatIf: wi ? { recommend: wi.recommend, gainSec: wi.gainSec, newlyLate: wi.newlyLate, laterLate: wi.laterLate } : null });
     r.text = adviceText(c, o, r).text.replace(/\*\*/g, '');
@@ -385,6 +437,7 @@
       → { text (Markdown), actions: [Aktionskarten], eilOk, main (Hauptursache), causes } */
   function adviceText(c, o, adv) {
     adv = adv || simAdvice(o.id) || {};
+    if (!adv.local && adv.cause && adv.causeKind !== 'done') return engineAdviceText(c, o, adv);
     const dc = delayCauses(c, o), main = dc && dc.main;
     const late = o.slackSec != null && o.slackSec < 0, need = late ? -o.slackSec : 0;
     const wi = adv.whatIf, acts = [];
@@ -440,6 +493,40 @@
     }
     const eilWhy = !eilOk && eil ? eil + (o.slackSec >= 0 ? ` Der Termin hält ohnehin (${slackTxt(o.slackSec)}).` : '') : '';
     return { text: text.replace(/\s+/g, ' ').trim(), eilWhy, actions: acts, eilOk, main, causes: dc };
+  }
+  /** Empfehlung aus orderAdvice der Engine – dieselbe Hauptmaßnahme wie Meldung und Auftrags-Drawer, ergänzt um die
+      Begründung zum Eilauftrag (Was-wäre-wenn) und die übrigen tragfähigen Optionen. Aktionen: Eilauftrag bzw. Verlagern. */
+  function engineAdviceText(c, o, adv) {
+    const ew = engineWhy(c, o);
+    const late = o.slackSec != null && o.slackSec < 0;
+    const wi = adv.whatIf, acts = [];
+    const sideFx = (adv.sideEffects || []).filter(x => x.orderId !== o.id && Math.abs(x.afterT - x.beforeT) >= 300);
+    const eilOk = !!(adv.action && adv.action.type === 'setPriority');
+    const pm = /Empfehlung:\s*(.*?)\.(?=\s+Weitere Optionen:|\s*$)/.exec(adv.detail || '') || /Empfehlung:\s*(.*?)\.?\s*$/.exec(adv.text || '');
+    const primary = pm ? pm[1].trim() : '';
+    const pa = (adv.alternatives || []).find(x => x.kind === 'priority');
+    const why = o.priority === 'eil' ? `${o.id} ist bereits Eilauftrag.` : pa && pa.note ? pa.note : '';
+    const others = (adv.alternatives || []).filter(x => x.ok && x.kind !== 'priority' && x.kind !== adv.primaryKind).map(x => x.text).slice(0, 2);
+    let eil = '';
+    if (eilOk) {
+      const g = wi && wi.gainSec ? wi.gainSec : 0;
+      eil = `**${o.id} als Eilauftrag kennzeichnen:** fertig ca. ${tc(o.eta - g)} statt ${tc(o.eta)} (${deltaTxt(-g)}); kein anderer Auftrag wird dadurch spät${sideFx.length ? ' – später fertig werden ' + listJoin(sideFx.slice(0, 3).map(x => `${x.orderId} (${deltaTxt(x.afterT - x.beforeT)})`)) : ''}.`;
+      acts.push({ label: `${o.id} als Eilauftrag`, desc: `Fertig ca. ${dueTxt(o.eta - g)} statt ${dueTxt(o.eta)} · Maschinen ziehen ihn beim nächsten Auftragswechsel vor`, action: adv.action, icon: 'bolt' });
+    }
+    if (adv.action && adv.action.type === 'moveOp') {
+      const ac = adv.action, alt = (adv.alternatives || []).find(x => x.kind === 'moveOp' && x.action && x.action.stationId === ac.stationId);
+      acts.push({ label: `${o.id} AG ${ac.seq} auf ${ac.stationId} verlagern`, desc: `Dort wird neu gerüstet${alt && alt.gainSec >= 60 ? ' · ' + durR(alt.gainSec) + ' früher fertig' : ''}`, action: ac, icon: 'route' });
+    }
+    let text;
+    if (!late && o.slackSec != null) {
+      text = `${o.slackSec < 2 * 3600 ? 'Termin hält, aber nur mit ' + slackTxt(o.slackSec) + '.' : 'Kein Eingriff nötig – ' + slackTxt(o.slackSec) + ' reicht.'}${eilOk && o.slackSec < 2 * 3600 ? ' Zur Absicherung: ' + eil : primary ? ' Im Blick: ' + uc1(primary) + '.' : ''}`;
+      if (!(eilOk && o.slackSec < 2 * 3600)) { const k = acts.findIndex(x => x.action && x.action.type === 'setPriority'); if (k >= 0) acts.splice(k, 1); }
+    } else {
+      text = [eilOk ? eil : primary ? `**${uc1(primary)}.**` : '', !eilOk && why ? why : '', others.length ? 'Weitere Optionen: ' + others.join('; ') + '.' : ''].filter(Boolean).join(' ') || 'Optionen im Copilot prüfen.';
+    }
+    const eilWhy = !eilOk && why ? why + (o.slackSec >= 0 ? ` Der Termin hält ohnehin (${slackTxt(o.slackSec)}).` : '') : '';
+    const causes = ew ? { items: ew.all.filter(e => e.sec >= 900).sort((x, y) => y.sec - x.sec).slice(0, 4).map(e => ({ text: dlyLabel(o, e) + ' (' + durR(e.sec) + ')', station: e.stationId, kind: e.kind })), main: null } : null;
+    return { text: text.replace(/\s+/g, ' ').trim(), eilWhy, actions: acts, eilOk, main: null, causes, engine: true, primary };
   }
   /** Rohmaterialbedarf der offenen Aufträge (noch nicht ausgebucht) je Material */
   function materialNeeds() {
@@ -864,7 +951,7 @@
     const open = c.open().filter(o => o.eta != null);
     for (const o of open.filter(x => x.risk === 'spät').sort((x, y) => x.slackSec - y.slackSec).slice(0, 2)) {
       const adv = adviceText(c, o);
-      push({ key: 'late:' + o.id, rank: 2, sev: 'warn', entity: { kind: 'order', id: o.id }, text: `${o.id} (${durR(-o.slackSec)} Verzug): ${adv.text}`, short: `${o.id}: ${adv.eilOk ? 'als Eilauftrag kennzeichnen' : /Teillieferung/.test(adv.text) ? 'Teillieferung mit ' + custShort(o.customer) + ' klären' : 'Hebel prüfen'}.`, actions: adv.actions });
+      push({ key: 'late:' + o.id, rank: 2, sev: 'warn', entity: { kind: 'order', id: o.id }, text: `${o.id} (${durR(-o.slackSec)} Verzug): ${adv.text}`, short: `${o.id}: ${adv.eilOk ? 'als Eilauftrag kennzeichnen' : adv.primary ? adv.primary.replace(/\s*\([^()]*\)$/, '') : /Teillieferung/.test(adv.text) ? 'Teillieferung mit ' + custShort(o.customer) + ' klären' : 'Hebel prüfen'}.`, actions: adv.actions });
     }
     if (sh.id) {
       for (const g of plannedChanges(c, c.t + 3600).filter(x => !x.by && x.stage !== 'später').slice(0, 1)) {
@@ -920,7 +1007,7 @@
       const recs = [];
       if (late.length) { const adv = adviceText(c, late[0]); recs.push(`${late[0].id}: ${adv.text}`); for (const x of adv.actions) addAction(a, x); }
       if (tight.length) {
-        const watch = tight.map(o => { const dc = delayCauses(c, o); return dc && dc.main && dc.main.station ? dc.main.station : bnMachine(o); }).filter(Boolean);
+        const watch = tight.map(o => watchStation(c, o)).filter(Boolean);
         const bms = [...new Set(watch)];
         recs.push(`${listJoin(tight.map(o => o.id))}: ${tight.length === 1 ? 'Termin hält' : 'Termine halten'} knapp – ${bms.length ? listJoin(bms) + ' ohne Unterbrechung laufen lassen und Störungen dort zuerst beheben' : 'Engpass ohne Unterbrechung laufen lassen'}.`);
       }
@@ -1247,7 +1334,11 @@
       if (r.active) {
         const cov = successorCover(c, r.o, r.seq);
         if (cov && cov.sec > 0 && (r.dEta == null || Math.abs(r.dEta) < 60)) why.push(`${cov.station} hat noch ca. ${durR(cov.sec)} Arbeit im Eingang – erst wenn ${mid} länger steht, fehlt dort Nachschub`);
-        else if (r.dEta != null && Math.abs(r.dEta) < 60) { const dc = delayCauses(c, r.o); if (dc && dc.main && dc.main.station !== mid) why.push(`der Termin hängt an ${dc.main.short}, nicht an ${mid}`); }
+        else if (r.dEta != null && Math.abs(r.dEta) < 60) {
+          const ew = engineWhy(c, r.o), dc = ew ? null : delayCauses(c, r.o);
+          if (ew && ew.limit && ew.limit.stationId && ew.limit.stationId !== mid) why.push(`der Termin hängt an ${ew.limit.name || (S().machines[ew.limit.stationId] ? mName(ew.limit.stationId) : ew.limit.stationId)}, nicht an ${mid}`);
+          else if (dc && dc.main && dc.main.station !== mid) why.push(`der Termin hängt an ${dc.main.short}, nicht an ${mid}`);
+        }
       }
       a.md.push(`- **${r.o.id}** ${r.o.part.name} (${custShort(r.o.customer)}), AG ${r.seq}: ${r.active ? `fertig ca. ${tc(r.opA)}${r.opB != null && Math.abs(r.opA - r.opB) >= 60 ? ' statt ' + tc(r.opB) + ' (' + deltaTxt(r.opA - r.opB) + ')' : ''}` : `Start an ${mid} ca. ${tc(Math.max(c.t, r.start))}`}; ${etaLine(r)}${why.length ? ' – ' + why.join('; ') : ''}.`);
     }
@@ -1313,11 +1404,12 @@
     a.head = focus === 'eta' ? `${o.id} fertig ca. ${dueTxt(o.eta)} – ${late ? durR(-o.slackSec) + ' nach dem Termin' : slackTxt(o.slackSec)}`
       : late ? `${o.id} ist ${durR(-o.slackSec)} zu spät` : o.risk === 'knapp' ? `${o.id} hält knapp – ${slackTxt(o.slackSec)}` : `${o.id} liegt im Plan – fertig ca. ${dueTxt(o.eta)}`;
     a.md.push(`${o.part.name} (${o.part.no}) für ${o.customer} – ${stk(o.qty)}, Termin ${dueTxt(o.due)}${o.priority === 'eil' ? ', **Eilauftrag**' : ''}; Prognose ${dueTxt(o.eta)}.${o.etaPending ? ` Eine Neuberechnung (${dueTxt(o.etaPending)}) wird gerade bestätigt.` : ''}`);
-    const nDone = o.ops.filter(op => op.complete && op.station !== 'VERSAND').length, nAll = o.ops.filter(op => op.station !== 'VERSAND').length;
+    // Schritte wie im Auftrags-Drawer gezählt (alle Arbeitsgänge inkl. Versand, fertig = abgeschlossen)
+    const nDone = o.ops.filter(op => op.state === 'done' || op.complete).length, nAll = o.ops.length;
     a.stats = [
       { l: 'Prognose', v: tc(o.eta), s: 'Termin ' + tc(o.due) + (o.priority === 'eil' ? ' · Eil' : ''), c: late ? 'crit' : o.risk === 'knapp' ? 'warn' : 'ok' },
       { l: late ? 'Verzug' : 'Puffer', v: o.slackSec == null ? '–' : o.slackSec < 60 && o.slackSec >= 0 ? '0 min' : durR(Math.abs(o.slackSec)), s: o.riskLabel, c: late ? 'crit' : o.risk === 'knapp' ? 'warn' : 'ok' },
-      { l: 'Fortschritt', v: pct(o.progress), s: `${nDone} von ${nAll} Arbeitsgängen${o.shippedQty ? ' · ' + stk(o.shippedQty) + ' versandt' : ''}` },
+      { l: 'Fortschritt', v: pct(o.progress), s: `${nDone} von ${nAll} Schritten${o.shippedQty ? ' · ' + stk(o.shippedQty) + ' versandt' : ''}` },
     ];
     // Störung auf dem Weg des Auftrags: zuerst nennen (Reparatur, vorher/nachher)
     for (const op of o.ops) {
@@ -1327,9 +1419,34 @@
       a.md.push('', `**Störung an ${op.station} (${fx.f.code} ${fx.f.text})** – ${fx.fi.working ? 'Reparatur ' + sn(fx.fi.person.name) : fx.fi.person ? sn(fx.fi.person.name) + ' unterwegs' : 'noch niemand zugeteilt'}, Ende ca. ${clk(fx.fi.endT)}.${r ? ` AG ${op.seq} fertig ca. ${tc(r.opA)}${r.opB != null && Math.abs(r.opA - r.opB) >= 60 ? ' statt ' + tc(r.opB) : ''}; ${etaLine(r)}.` : ''}`);
       if (r && r.etaB != null && Math.abs(r.dEta) >= 60) a.impact = { title: 'Liefertermin vor / nach der Störung', rows: [{ id: o.id, label: 'AG ' + op.seq, before: r.etaB, after: r.etaA, due: o.due }] };
     }
-    // Warum knapp/spät: Ursachen aus der Kette (Warten, Bearbeitung, Fremdbearbeitung, Stopp)
-    const dc = o.risk !== 'ok' || focus === 'why' ? delayCauses(c, o) : null;
-    if (dc && dc.items.length) {
+    // Warum knapp/spät: Ursache der Engine (gleicher Wortlaut wie Meldung und Auftrags-Drawer) + Zerlegung der Restlaufzeit;
+    // ohne Engine-Ursache die eigene Kette (Warten, Bearbeitung, Fremdbearbeitung, Stopp)
+    const want = o.risk !== 'ok' || focus === 'why';
+    const ew = want ? engineWhy(c, o) : null;
+    const dc = want && !ew ? delayCauses(c, o) : null;
+    if (ew) {
+      a.md.push('', late ? '### Warum verspätet' : o.risk === 'knapp' ? '### Warum knapp' : '### Was den Termin bestimmt');
+      a.md.push(`**Ursache: ${uc1(ew.cause)}.**`);
+      const rows = ew.all.filter(e => e.sec >= 60);
+      if (rows.length) {
+        const isLim = (e) => !!(ew.limit && e.kind === ew.limit.kind && e.stationId === ew.limit.stationId);
+        // Zeilen: zuerst die Verzugs-Beiträge (Warten, Fremdbearbeitung, Störung, Werkzeug, Material) einzeln – daraus
+        // stammt die Ursache –, danach Bearbeitung und Zeit außerhalb der Schicht zusammengefasst
+        const delays = rows.filter(e => e.kind !== 'process' && e.kind !== 'noShift' && e.sec >= 900).sort((x, y) => y.sec - x.sec).slice(0, 4)
+          .map(e => ({ kind: e.kind, sec: e.sec, label: dlyLabel(o, e), lim: isLim(e) }));
+        const sum = (k) => rows.filter(e => e.kind === k).reduce((x, e) => x + e.sec, 0);
+        const nProc = new Set(rows.filter(e => e.kind === 'process').map(e => e.seq)).size;
+        const agg = [];
+        if (sum('process') >= 60) agg.push({ kind: 'process', sec: sum('process'), label: `Bearbeitung (${pl(nProc, 'Arbeitsgang', 'Arbeitsgänge')})`, lim: !delays.some(x => x.lim) && !!(ew.limit && ew.limit.kind === 'process') });
+        if (sum('noShift') >= 60) agg.push({ kind: 'noShift', sec: sum('noShift'), label: 'außerhalb der Schicht (Nacht, Wochenende, Pausen)', lim: false });
+        const list = delays.concat(agg);
+        SLOT(a, 'delay', list.map(e => `- ${uc1(e.label)}: ${durR(e.sec)}`).join('\n'), {
+          total: ew.total, eta: o.eta,
+          segs: rows.slice().sort((x, y) => (x.seq - y.seq) || ((DLY_ORDER[x.kind] ?? 9) - (DLY_ORDER[y.kind] ?? 9))).map(e => ({ kind: e.kind, sec: e.sec, label: dlyLabel(o, e), lim: isLim(e) })),
+          top: list,
+        });
+      }
+    } else if (dc && dc.items.length) {
       a.md.push('', late ? '### Warum verspätet' : o.risk === 'knapp' ? '### Warum knapp' : '### Was den Termin bestimmt');
       for (const x of dc.items) a.md.push(`- ${x === dc.main ? '**' + uc1(x.text) + '**' : uc1(x.text)}`);
     }
@@ -1358,7 +1475,7 @@
           sub: `${nm(op.good + op.scrap)}/${nm(op.target)}${stopTxt ? ' · ' + stopTxt : ''}${mv && mv.etaOpEnd ? ' · fertig ca. ' + tc(mv.etaOpEnd) : ''}` });
       } else if (op.state === 'external') {
         s = `**in Fremdbearbeitung** – ${op.ext ? op.ext.returnText : ''}`;
-        Object.assign(r, { st: 'ext', pill: 'extern', c: 'var(--info)', sub: op.ext ? op.ext.returnText : 'in Fremdbearbeitung' });
+        Object.assign(r, { st: 'ext', pill: 'extern', c: 'var(--ext)', sub: op.ext ? op.ext.returnText : 'in Fremdbearbeitung' });
       } else if (op.state === 'waiting') {
         const b = isM ? blockerOn(c, op.station, o.id, op.seq) : null;
         const bl = b ? (b.running.length ? `nach ${b.running[0].orderId} AG ${b.running[0].seq} (läuft bis ${tc(b.running[0].end)})` : `nach ${listJoin(b.before.slice(0, 2).map(e => e.orderId + ' AG ' + e.seq))}`) : '';
@@ -1381,7 +1498,7 @@
       for (const x of cont) { const g = byW.find(y => y.w === x.where); if (g) { g.q += x.qty; g.n++; } else byW.push({ w: x.where, q: x.qty, n: 1 }); }
       a.md.push('', `Behälter: ${byW.slice(0, 4).map(g => `${g.w} ${stk(g.q)}${g.n > 1 ? ' (' + g.n + ' Behälter)' : ''}`).join('; ')}${byW.length > 4 ? ' (+' + (byW.length - 4) + ' Orte)' : ''}.`);
     }
-    if (!dc && o.bottleneck) a.md.push('', `Längster Arbeitsgang im Plan: ${o.bottleneck}.`);
+    if (!dc && !ew && o.bottleneck) a.md.push('', `Begrenzt durch ${o.bottleneck}.`);
     let eilOk = false;
     if (o.risk !== 'ok') {
       const adv = adviceText(c, o); eilOk = adv.eilOk;
@@ -1389,7 +1506,7 @@
       for (const x of adv.actions) addAction(a, x);
     } else a.md.push('', `> **Einschätzung:** Termin hält nach aktueller Prognose – keine Maßnahme nötig.`);
     a.sources = ['Auftrag ' + id + ' (Arbeitsgang-Kette)', 'Prognose / Plantafel', 'Was-wäre-wenn Eilauftrag', srcStand()];
-    const cur = curOp(o), bm = dc && dc.main && dc.main.station ? dc.main.station : bnMachine(o);
+    const cur = curOp(o), bm = ew && ew.station ? ew.station : dc && dc.main && dc.main.station ? dc.main.station : bnMachine(o);
     a.followups = [cur && S().machines[cur.station] ? `Was macht ${cur.station} gerade?` : 'Welche Aufträge sind gefährdet und warum?', bm && S().machines[bm] ? `Was passiert, wenn ${bm} 2 h ausfällt?` : 'Was ist der Engpass?'];
     if (focus !== 'why' && o.risk !== 'ok') a.followups.unshift(`Warum ist ${o.id} ${late ? 'verspätet' : 'knapp'}?`);
     if (eilOk) a.followups.unshift(`${o.id} als Eilauftrag kennzeichnen`);
@@ -1976,7 +2093,7 @@
     // Termine
     const ord = c.open().filter(o => o.risk !== 'ok' && o.eta != null).sort((x, y) => x.slackSec - y.slackSec);
     a.md.push('', '### Termine');
-    if (ord.length) for (const o of ord.slice(0, 5)) a.md.push(`- **${o.id}** ${o.part.name} (${custShort(o.customer)}): Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)} – ${o.slackSec >= 0 ? 'Puffer ' + dur0(o.slackSec) : dur0(o.slackSec) + ' Verzug'}${o.bottleneck ? '; Engpass ' + o.bottleneck.split(' (')[0] : ''}.`);
+    if (ord.length) for (const o of ord.slice(0, 5)) { const w = o.risk !== 'ok' ? whyShort(c, o) : ''; a.md.push(`- **${o.id}** ${o.part.name} (${custShort(o.customer)}): Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)} – ${o.slackSec >= 0 ? 'Puffer ' + dur0(o.slackSec) : dur0(o.slackSec) + ' Verzug'}${w ? '; Ursache: ' + w : o.bottleneck ? '; begrenzt durch ' + o.bottleneck.split(' (')[0] : ''}.`); }
     else a.md.push('- Alle offenen Aufträge im Plan.');
     const fin = c.open().filter(o => o.eta != null).sort((x, y) => x.eta - y.eta);
     const nowFin = sh.id ? fin.filter(o => o.eta < sh.endsAt) : [], nextFin = fin.filter(o => o.eta >= (sh.id ? sh.endsAt : t) && o.eta <= W.to);
@@ -2046,7 +2163,7 @@
     const late = open.filter(o => o.risk === 'spät').sort((x, y) => x.slackSec - y.slackSec), tight = open.filter(o => o.risk === 'knapp').sort((x, y) => x.slackSec - y.slackSec);
     a.md.push('### Termine');
     if (!late.length && !tight.length) a.md.push(`- Alle ${open.length} offenen Aufträge im Plan.`);
-    for (const o of late.concat(tight).slice(0, 4)) { const dc = delayCauses(c, o); a.md.push(`- **${o.id}** ${o.part.name} (${custShort(o.customer)}): ${o.slackSec < 0 ? '**' + durR(-o.slackSec) + ' Verzug**' : 'nur ' + slackTxt(o.slackSec)} – Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)}${dc && dc.main ? '; Ursache: ' + dc.main.short : ''}.`); }
+    for (const o of late.concat(tight).slice(0, 4)) { const w = whyShort(c, o); a.md.push(`- **${o.id}** ${o.part.name} (${custShort(o.customer)}): ${o.slackSec < 0 ? '**' + durR(-o.slackSec) + ' Verzug**' : 'nur ' + slackTxt(o.slackSec)} – Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)}${w ? '; Ursache: ' + w : ''}.`); }
     const fin = open.filter(o => o.eta <= until).sort((x, y) => x.eta - y.eta);
     if (fin.length) a.md.push(`- Fertig in den nächsten 2 h: ${fin.map(o => `${o.id} ca. ${clk(o.eta)}`).join(', ')}.`);
     // Nächste 2 Stunden
@@ -2072,7 +2189,7 @@
     if (!sh.id && morningPlan(c)) recs.push(morningPlan(c));
     const todo = todoList(c);
     for (const x of todo.slice(0, 4)) { recs.push(x.text); for (const ac of x.actions || []) addAction(a, ac); }
-    const bms = [...new Set(tight.map(o => { const dc = delayCauses(c, o); return dc && dc.main && dc.main.station ? dc.main.station : bnMachine(o); }).filter(Boolean))];
+    const bms = [...new Set(tight.map(o => watchStation(c, o)).filter(Boolean))];
     if (tight.length && bms.length && recs.length < 4) recs.push(`${listJoin(tight.slice(0, 3).map(o => o.id))}: knappe Termine absichern – ${listJoin(bms)} ohne Unterbrechung laufen lassen.`);
     if (!recs.length) recs.push('Keine akuten Eingriffe nötig – Fokus auf die anstehenden Werkzeugwechsel und den Engpass.');
     a.md.push('', '### Jetzt tun');
@@ -2090,7 +2207,7 @@
     if (!n) { a.head = 'Diese Benachrichtigung ist nicht mehr vorhanden'; return done(a); }
     const sev = (WF.SEV[n.sev] || WF.SEV.info).label;
     const st = n.status === 'resolved' ? 'erledigt' + (n.resolveNote ? ' – ' + n.resolveNote : '') : n.status === 'ack' ? 'quittiert' + (n.ackBy ? ' von ' + n.ackBy : '') : 'offen';
-    a.eyebrow = `Meldung · ${sev} · ${n.role} · ${tc(n.t)} · ${st}`;
+    a.eyebrow = `${sev} · ${WF.ui && WF.ui.notifTime ? WF.ui.notifTime(n, { text: true }) : tc(n.t)} · ${n.role} · ${st}`;
     a.head = n.title;
     a.sev = n.sev === 'crit' ? 'crit' : n.sev === 'warn' ? 'warn' : n.sev === 'ok' ? 'ok' : 'info';
     if (n.body) a.md.push(n.body);
@@ -2721,8 +2838,8 @@
     // Termine
     if (late.length) {
       const o = late[0];
-      const dc = delayCauses(c, o);
-      B.push({ cat: 'termine', sev: 'warn', entity: ent('order', o.id), text: `Termin: ${o.id} (${custShort(o.customer)}) ${durR(-o.slackSec)} zu spät – Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)}${dc && dc.main ? '; Ursache: ' + dc.main.short : ''}${late.length > 1 ? `; außerdem verspätet: ${late.slice(1, 3).map(x => x.id).join(', ')}` : ''}${tight.length ? `; knapp: ${tight.slice(0, 2).map(x => x.id + ' (' + durR(x.slackSec) + ')').join(', ')}` : ''}.` });
+      const w = whyShort(c, o);
+      B.push({ cat: 'termine', sev: 'warn', entity: ent('order', o.id), text: `Termin: ${o.id} (${custShort(o.customer)}) ${durR(-o.slackSec)} zu spät – Prognose ${dueTxt(o.eta)}, Termin ${dueTxt(o.due)}${w ? '; Ursache: ' + w : ''}${late.length > 1 ? `; außerdem verspätet: ${late.slice(1, 3).map(x => x.id).join(', ')}` : ''}${tight.length ? `; knapp: ${tight.slice(0, 2).map(x => x.id + ' (' + durR(x.slackSec) + ')').join(', ')}` : ''}.` });
     } else if (tight.length) {
       const o = tight[0];
       B.push({ cat: 'termine', sev: 'info', entity: ent('order', o.id), text: `Termine halten; am knappsten ${o.id} (${custShort(o.customer)}) mit ${slackTxt(o.slackSec)} bis ${dueTxt(o.due)}${tight.length > 1 ? `, außerdem knapp: ${tight.slice(1, 3).map(x => x.id).join(', ')}` : ''}.` });
@@ -2860,7 +2977,7 @@
     if (!o) return null;
     return {
       id: o.id, kunde: o.customer, teil: o.part.name, teilNr: o.part.no, werkstoff: o.part.material, menge: o.qty, termin: U.fmtDayClock(o.due), prio: o.priority, status: o.status,
-      versandt: o.shippedQty, fortschrittPct: Math.round(o.progress * 100), prognose: o.eta ? U.fmtDayClock(o.eta) : null, pufferMin: minOf(o.slackSec), risiko: o.riskLabel, engpass: o.bottleneck,
+      versandt: o.shippedQty, fortschrittPct: Math.round(o.progress * 100), prognose: o.eta ? U.fmtDayClock(o.eta) : null, pufferMin: minOf(o.slackSec), risiko: o.riskLabel, begrenztDurch: o.bottleneck, verzugUrsache: o.delayCause || undefined,
       arbeitsgaenge: o.ops.map((op, i) => { const fe = ((WF.sim.forecast().orders[o.id] || {}).ops || [])[i]; return { ag: op.seq, op: op.op, platz: op.station, status: op.stateLabel, gut: op.good, ausschuss: op.scrap, soll: op.target, wartend: op.waiting, ursache: op.cause ? trimTxt(op.cause, 90) : undefined, plan: op.complete ? null : fe ? 'Start ' + tc(Math.max(NOW(), fe.start)) + ', fertig ' + tc(Math.max(NOW(), fe.lastReturn != null ? fe.lastReturn : fe.end)) : null, extern: op.ext ? op.ext.returnText : undefined }; }),
       behaelter: o.containers.filter(x => x.state !== 'shipped').slice(0, 6).map(x => x.qty + ' Stk ' + x.where),
     };
@@ -2871,17 +2988,17 @@
     { name: 'get_machine', label: (i) => 'Liest Maschinenstatus ' + (i.id || ''), description: 'Details eines Arbeitsplatzes (id z. B. "M05", "QS", "M13"): Zustand mit Ursache, Auftrag, Teilefortschritt, Werkzeuge mit Verschleiß und geplantem Wechsel, Personen, Puffer, Warteschlange, Tageswerte.',
       inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Maschinen-ID, z. B. M05' } }, required: ['id'] },
       run: (i) => { const id = normMachineId(i.id); const mv = id && WF.sim.machineView(id); if (!mv) throw new Error('Unbekannte Maschine: ' + i.id + ' (gültig: ' + PROF().machines.join(', ') + ')'); return fit(trimMachine(mv)); } },
-    { name: 'get_order', label: (i) => 'Liest Auftrag ' + (i.id || ''), description: 'Details eines Fertigungsauftrags (id z. B. "FA-24118"): Prognose, Puffer, Risiko, Engpass, Arbeitsgang-Kette mit Status und Plan, Behälterorte.',
+    { name: 'get_order', label: (i) => 'Liest Auftrag ' + (i.id || ''), description: 'Details eines Fertigungsauftrags (id z. B. "FA-24118"): Prognose, Puffer, Risiko, Ursache und begrenzender Arbeitsgang, Arbeitsgang-Kette mit Status und Plan, Behälterorte.',
       inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Auftrags-ID, z. B. FA-24118' } }, required: ['id'] },
       run: (i) => { const id = String(i.id || '').toUpperCase().replace(/^FA(\d)/, 'FA-$1').replace(/^(\d{5})$/, 'FA-$1'); const o = WF.sim.orderView(id); if (!o) throw new Error('Unbekannter Auftrag: ' + i.id);
         const r = trimOrder(o);
         // Vorab-Abwägung der Regel-Engine (hilft ein Eilauftrag? wer würde überholt? Alternativen) – Claude prüft und nutzt sie
         if (o.status !== 'fertig' && o.risk !== 'ok') {
-          try { const c = data(), adv = adviceText(c, o), dc = adv.causes; r.ursachen = dc ? dc.items.map(x => x.text) : []; r.regelEinschaetzung = trimTxt(adv.text.replace(/\*\*/g, ''), 600); r.eilauftragEmpfohlen = adv.eilOk; } catch (e) { /* ohne Einschätzung */ }
+          try { const c = data(), adv = adviceText(c, o), dc = adv.causes, ew = engineWhy(c, o); if (ew) r.ursache = ew.cause; r.ursachen = dc ? dc.items.map(x => x.text) : []; r.regelEinschaetzung = trimTxt(adv.text.replace(/\*\*/g, ''), 600); r.eilauftragEmpfohlen = adv.eilOk; } catch (e) { /* ohne Einschätzung */ }
         }
         return fit(r); } },
-    { name: 'get_forecast', label: () => 'Liest Prognose und Plantafel', description: 'Prognose: je offenem Auftrag Liefertermin-Prognose, Puffer (min) und Engpass; je Maschine die nächsten eingeplanten Arbeitsgänge (Start–Ende).',
-      run: () => { const f = WF.sim.forecast(), o = {}, m = {}; for (const id in f.orders) { const x = f.orders[id]; if (x.done) continue; o[id] = { prognose: U.fmtDayClock(x.eta), pufferMin: minOf(x.slackSec), spaet: x.late, engpass: x.bottleneck }; } for (const id in f.machines) m[id] = f.machines[id].slice(0, 4).map(e => e.orderId + ' AG' + e.seq + ' ' + tc(e.start) + '–' + tc(e.end)); return fit({ auftraege: o, plantafel: m }); } },
+    { name: 'get_forecast', label: () => 'Liest Prognose und Plantafel', description: 'Prognose: je offenem Auftrag Liefertermin-Prognose, Puffer (min) und begrenzender Arbeitsgang; je Maschine die nächsten eingeplanten Arbeitsgänge (Start–Ende).',
+      run: () => { const f = WF.sim.forecast(), o = {}, m = {}; for (const id in f.orders) { const x = f.orders[id]; if (x.done) continue; o[id] = { prognose: U.fmtDayClock(x.eta), pufferMin: minOf(x.slackSec), spaet: x.late, begrenztDurch: x.bottleneck }; } for (const id in f.machines) m[id] = f.machines[id].slice(0, 4).map(e => e.orderId + ' AG' + e.seq + ' ' + tc(e.start) + '–' + tc(e.end)); return fit({ auftraege: o, plantafel: m }); } },
     { name: 'get_notifications', label: () => 'Liest Meldungen', description: 'Offene und quittierte Benachrichtigungen (neueste zuerst) mit Titel, Text, Empfehlung, Rolle und möglichen Aktionen.',
       run: () => fit((S().notifications || []).filter(n => n.status !== 'resolved').slice(0, 14).map(n => ({ id: n.id, schwere: n.sev, status: n.status, rolle: n.role, zeit: tc(n.t), titel: n.title, text: trimTxt(n.body, 200), empfehlung: trimTxt(n.suggestion, 200), aktionen: (n.actions || []).filter(x => x.action.type !== 'select').map(x => x.label) }))) },
     { name: 'get_materials', label: () => 'Liest Materialbestände', description: 'Rohmaterial: Bestand, Mindestbestand, bestellt, Bedarf der offenen Aufträge, Lieferant und Lieferzeit; offene Bestellungen.',
@@ -2950,7 +3067,7 @@
       '- Grafiken: Eine eigene Zeile [[route FA-24118]] zeigt die Arbeitsgang-Kette eines Auftrags, [[werkzeuge M05]] die Werkzeug-Standzeiten, [[maschine M05]] die Kennzahlen einer Maschine, [[termine]] Prognose gegen Termin der gefährdeten Aufträge, [[risiko]] die Risiko-Karten, [[engpass]] den Arbeitsinhalt je Arbeitsplatz, [[verluste]] die Stillstandskosten je Arbeitsplatz, [[ursachen]] die Stillstandskosten je Ursache, [[material]] die Bestände, [[personal]] das Personal im Dienst. Höchstens zwei pro Antwort und nur, wenn sie die Aussage stützen; die gezeigten Zahlen dann nicht noch einmal als Liste wiederholen.',
       '- Eilauftrag nur empfehlen, wenn er wirklich Zeit gewinnt: er wirkt erst beim nächsten Auftragswechsel und nur, wenn die Teile schon da sind; überholte Aufträge rutschen um die Belegzeit nach hinten. Das Feld regelEinschaetzung in get_order enthält diese Abwägung bereits.',
       (() => { const acts = (tools || []).filter(t => t.act).map(t => ACT_LABEL[t.name] || t.name); return acts.length ? `- Aktionen (${acts.join(', ')}) nur auf ausdrücklichen Wunsch; der Nutzer bestätigt jede Aktion im Panel. Abgelehnt = nicht erneut versuchen. Nach einer Aktion das Ergebnis kurz berichten.` : '- Aktionen kannst du in dieser Ansicht nicht ausführen – nenne die passende Aktion als Empfehlung; der Nutzer führt sie in der Oberfläche aus.'; })(),
-      '- Fachbegriffe: Zustände Produktion, Rüsten, Erstteilprüfung, Werkzeugwechsel, Wartet auf Werkzeug/Bediener/Material, Ausgang voll, Störung, Bereit. Werkzeuge werden nur zwischen zwei Teilen gewechselt, angekündigt mit Uhrzeit und Einrichter. Prognose = Plantafel; Engpass = längster Arbeitsgang im Plan; Stillstandskosten = Maschinenstundensatz × Zeit mit eingeplantem Auftrag ohne Produktion (Schichtzeit).',
+      '- Fachbegriffe: Zustände Produktion, Rüsten, Erstteilprüfung, Werkzeugwechsel, Wartet auf Werkzeug/Bediener/Material, Ausgang voll, Störung, Bereit. Werkzeuge werden nur zwischen zwei Teilen gewechselt, angekündigt mit Uhrzeit und Einrichter. Prognose = Plantafel; „Engpass“ heißt nur der Werks-Engpass (bottleneck), der begrenzende Schritt eines Auftrags heißt „begrenzt durch …“; Ursache eines Verzugs = Engine-Ursache (orderAdvice, wie in der Meldung „Termin gefährdet“); Stillstandskosten = Maschinenstundensatz × Zeit mit eingeplantem Auftrag ohne Produktion (Schichtzeit).',
       tools && tools.length ? `- Für Details die Tools nutzen (${tools.filter(t => !t.act).map(t => t.name).join(', ')}).` : '- In dieser Ansicht gibt es keine Tools: antworte nur aus der Lageübersicht und sag, wenn Details fehlen.',
       '',
       `Lageübersicht (JSON, Stand ${snap.clock}):`,
@@ -3075,24 +3192,24 @@
   .ai-panel.busy .ai-h .ai-orb{animation:aiGlow 1.6s ease-in-out infinite}
   @keyframes aiGlow{0%,100%{box-shadow:0 6px 18px color-mix(in srgb,var(--accent) 26%,transparent),inset 0 1px 0 rgba(255,255,255,.35)}50%{box-shadow:0 6px 26px color-mix(in srgb,var(--accent) 55%,transparent),0 0 0 4px color-mix(in srgb,var(--accent) 14%,transparent),inset 0 1px 0 rgba(255,255,255,.35)}}
   .ai-ht{flex:1;min-width:0}
-  .ai-ttl{font:600 19px/1.1 var(--f-cond);letter-spacing:.01em;white-space:nowrap}
+  .ai-ttl{font:600 var(--fs-xl)/1.1 var(--f-cond);letter-spacing:.01em;white-space:nowrap}
   .ai-ttl b{color:var(--accent);font-weight:600}
   .ai-modew{position:relative;display:inline-flex;margin-top:4px}
-  .ai-mode{--c:var(--st-idle);display:inline-flex;align-items:center;gap:6px;font:600 11px/1 var(--f-ui);letter-spacing:.02em;padding:4px 8px 4px 7px;border-radius:999px;cursor:help;
+  .ai-mode{--c:var(--st-idle);display:inline-flex;align-items:center;gap:6px;font:600 var(--fs-xs)/1 var(--f-ui);letter-spacing:.02em;padding:4px 8px 4px 7px;border-radius:999px;cursor:help;
     color:color-mix(in srgb,var(--c) 80%,white);background:color-mix(in srgb,var(--c) 13%,transparent);border:1px solid color-mix(in srgb,var(--c) 34%,transparent)}
   .ai-mode i{width:7px;height:7px;border-radius:50%;background:var(--c);flex:none}
   .ai-mode.live{--c:var(--st-run)} .ai-mode.live i{animation:aiPulse 2s ease-in-out infinite}
   .ai-mode.offline{--c:var(--st-wait)} .ai-mode.verbinde{--c:var(--info)} .ai-mode.verbinde i{animation:aiBlinkDot 1s ease-in-out infinite}
   .ai-tip{position:absolute;left:0;top:calc(100% + 8px);width:300px;max-width:calc(100vw - 40px);z-index:5;padding:11px 12px;border-radius:10px;background:var(--card2);border:1px solid var(--line2);
-    box-shadow:var(--shadow);font:400 12.5px/1.45 var(--f-ui);color:var(--text2);opacity:0;transform:translateY(-3px);pointer-events:none;transition:opacity .15s ease,transform .15s ease}
+    box-shadow:var(--shadow);font:400 var(--fs-sm)/1.45 var(--f-ui);color:var(--text2);opacity:0;transform:translateY(-3px);pointer-events:none;transition:opacity .15s ease,transform .15s ease}
   .ai-tip b{color:var(--text);font-weight:600;display:block;margin-bottom:3px}
   .ai-modew:hover .ai-tip,.ai-modew:focus-within .ai-tip{opacity:1;transform:none}
   .ai-hb{display:flex;align-items:center;gap:4px}
   .ai-ib{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer}
   .ai-ib:hover{color:var(--text);background:var(--card);border-color:var(--line)}
   .ai-ib:disabled{opacity:.35;cursor:default;background:transparent;border-color:transparent}
-  .ai-ctx{position:relative;display:flex;align-items:center;gap:8px;padding:7px 14px 7px 16px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);min-height:38px;background:color-mix(in srgb,var(--bg2) 55%,transparent)}
-  .ai-ctx .eyebrow{font-size:9.5px;flex:none}
+  .ai-ctx{position:relative;display:flex;align-items:center;gap:8px;padding:7px 14px 7px 16px;border-bottom:1px solid var(--line);font-size:var(--fs-sm);color:var(--muted);min-height:38px;background:color-mix(in srgb,var(--bg2) 55%,transparent)}
+  .ai-ctx .eyebrow{font-size:var(--fs-2xs);flex:none}
   .ai-ctx .ai-ent{max-width:100%}
   .ai-ctx .ai-ctxs{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
   .ai-ctx button.ai-x{flex:none;border:0;background:transparent;color:var(--faint);cursor:pointer;padding:2px;border-radius:5px;display:grid;place-items:center}
@@ -3101,42 +3218,41 @@
   .ai-m{display:flex;flex-direction:column;min-width:0;animation:aiIn .22s ease}
   .ai-m.u{align-self:flex-end;align-items:flex-end;max-width:88%}
   .ai-bub{background:color-mix(in srgb,var(--accent) 14%,var(--card));border:1px solid color-mix(in srgb,var(--accent) 28%,transparent);border-radius:14px 14px 4px 14px;
-    padding:8px 12px;font-size:13.5px;line-height:1.45;color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere}
-  .ai-meta{font:500 10.5px/1 var(--f-ui);color:var(--faint);margin-top:5px;font-variant-numeric:tabular-nums;display:flex;gap:6px;align-items:center}
+    padding:8px 12px;font-size:var(--fs-md);line-height:1.45;color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere}
+  .ai-meta{font:500 var(--fs-2xs)/1 var(--f-ui);color:var(--faint);margin-top:5px;font-variant-numeric:tabular-nums;display:flex;gap:6px;align-items:center}
   .ai-m.a{display:flex;flex-direction:column;gap:7px}
-  .ai-ah{display:flex;align-items:center;gap:7px;min-height:20px;padding:0 2px;font-size:11.5px;color:var(--text2);font-weight:600}
+  .ai-ah{display:flex;align-items:center;gap:7px;min-height:20px;padding:0 2px;font-size:var(--fs-xs);color:var(--text2);font-weight:600}
   .ai-ah .ai-orb.sm{--s:20px;border-radius:6px}
-  .ai-ah .ai-tag{font:600 9px/1 var(--f-ui);letter-spacing:.09em;text-transform:uppercase;padding:3px 5px;border-radius:4px;color:var(--muted);border:1px solid var(--line2)}
+  .ai-ah .ai-tag{font:600 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.09em;text-transform:uppercase;padding:3px 5px;border-radius:4px;color:var(--muted);border:1px solid var(--line2)}
   /* Antwortkarte: Bezug · Kernaussage · Kennzahlen · Text · Empfehlung mit Aktionen · Datenbasis */
   .ai-card{--c:var(--info);position:relative;min-width:0;padding:14px 15px 12px;border-radius:13px;border:1px solid var(--line);
     background:linear-gradient(180deg,color-mix(in srgb,var(--c) 5%,var(--card)) 0,var(--card) 90px);box-shadow:0 12px 32px rgba(0,0,0,.2),inset 0 1px 0 rgba(255,255,255,.035);overflow:hidden}
   .ai-card::before{content:"";position:absolute;left:14px;right:14px;top:0;height:2px;border-radius:0 0 2px 2px;background:linear-gradient(90deg,var(--c),color-mix(in srgb,var(--c) 0%,transparent));opacity:.85}
   .ai-card.sev-crit{--c:var(--st-fault)} .ai-card.sev-warn{--c:var(--st-wait)} .ai-card.sev-ok{--c:var(--st-run)} .ai-card.sev-info{--c:var(--info)}
   .ai-top:empty{display:none}
-  .ai-eb{display:flex;align-items:center;gap:7px;min-width:0;margin:1px 0 7px;font:600 10px/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .ai-eb{display:flex;align-items:center;gap:7px;min-width:0;margin:1px 0 7px;font:600 var(--fs-2xs)/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
   .ai-eb i{width:7px;height:7px;border-radius:50%;flex:none;background:var(--c);box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 18%,transparent)}
   .ai-eb span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ai-hl{margin:0 0 10px;font:600 19px/1.24 var(--f-cond);letter-spacing:.005em;color:var(--text);text-wrap:balance;overflow-wrap:anywhere}
+  .ai-hl{margin:0 0 10px;font:600 var(--fs-xl)/1.24 var(--f-cond);letter-spacing:.005em;color:var(--text);text-wrap:balance;overflow-wrap:anywhere}
   .ai-md > .ai-hl:first-child{margin-top:0}
-  .ai-hl .ai-ent{height:20px;font-size:12px;vertical-align:2px}
   .ai-rec{margin:12px 0 2px;padding:11px 12px 11px;border-radius:10px;background:color-mix(in srgb,var(--accent) 7%,var(--bg2));border:1px solid color-mix(in srgb,var(--accent) 24%,var(--line))}
   .ai-rec.note{background:color-mix(in srgb,var(--st-wait) 6%,var(--bg2));border-color:color-mix(in srgb,var(--st-wait) 26%,var(--line))}
-  .ai-rec-h{display:flex;align-items:center;gap:6px;margin-bottom:5px;font:700 10px/1 var(--f-ui);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+  .ai-rec-h{display:flex;align-items:center;gap:6px;margin-bottom:5px;font:700 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
   .ai-rec.note .ai-rec-h{color:var(--st-wait)}
-  .ai-rec-t{font-size:13.4px;line-height:1.55;color:var(--text)}
+  .ai-rec-t{font-size:var(--fs-md);line-height:1.55;color:var(--text)}
   .ai-rec-t b{font-weight:600}
   .ai-ras{display:flex;flex-direction:column;gap:6px;margin-top:10px}
   .ai-ra{display:flex;align-items:center;gap:10px;padding:8px 8px 8px 9px;border-radius:9px;background:var(--card);border:1px solid var(--line);min-width:0}
   .ai-ra .ic{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;flex:none;color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
   .ai-ra .tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
-  .ai-ra .tx b{font-size:12.8px;font-weight:600;color:var(--text);line-height:1.3}
-  .ai-ra .tx small{font-size:11.3px;color:var(--muted);line-height:1.35;overflow-wrap:anywhere}
+  .ai-ra .tx b{font-size:var(--fs-sm);font-weight:600;color:var(--text);line-height:1.3}
+  .ai-ra .tx small{font-size:var(--fs-xs);color:var(--muted);line-height:1.35;overflow-wrap:anywhere}
   .ai-ra .b{flex:none;display:flex;align-items:center}
-  .ai-ra .res{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;white-space:nowrap}
+  .ai-ra .res{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-xs);font-weight:600;white-space:nowrap}
   .ai-ra .res.ok,.ai-ra.done .ic{color:var(--st-run)} .ai-ra .res.fail{color:var(--st-wait)}
   .ai-ra.done{border-color:color-mix(in srgb,var(--st-run) 35%,var(--line))} .ai-ra.done .ic{background:color-mix(in srgb,var(--st-run) 12%,transparent)}
   .ai-more{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
-  .ai-mb{display:inline-flex;align-items:center;gap:6px;height:27px;padding:0 10px;border-radius:7px;border:1px solid var(--line2);background:transparent;color:var(--text2);font:500 12px/1 var(--f-ui);cursor:pointer}
+  .ai-mb{display:inline-flex;align-items:center;gap:6px;height:27px;padding:0 10px;border-radius:7px;border:1px solid var(--line2);background:transparent;color:var(--text2);font:500 var(--fs-sm)/1 var(--f-ui);cursor:pointer}
   .ai-mb:hover{border-color:var(--muted);color:var(--text)}
   .ai-mb.danger{color:color-mix(in srgb,var(--st-fault) 85%,white);border-color:color-mix(in srgb,var(--st-fault) 35%,transparent)}
   .ai-mb.done{opacity:.55;cursor:default}
@@ -3145,14 +3261,14 @@
   .ai-after .ai-fu{margin-top:2px;padding-left:2px}
   .ai-md:empty{display:none}
   .ai-ah .ai-tag.ki{color:var(--st-run);border-color:color-mix(in srgb,var(--st-run) 35%,transparent)}
-  .ai-ah time{margin-left:auto;font:500 10.5px/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums}
+  .ai-ah time{margin-left:auto;font:500 var(--fs-2xs)/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums}
   .ai-tchips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
   .ai-copy{display:inline-grid;place-items:center;width:24px;height:22px;margin:-3px -4px -3px 2px;border-radius:6px;border:0;background:transparent;color:var(--faint);cursor:pointer;opacity:0;transition:opacity .15s ease,color .15s ease}
   .ai-m.a:hover .ai-copy,.ai-copy:focus-visible{opacity:1}
   .ai-copy:hover{color:var(--text);background:var(--card)}
   .ai-copy.ok{opacity:1;color:var(--st-run)}
   @media (hover:none){.ai-copy{opacity:.8}}
-  .ai-md{font-size:13.5px;line-height:1.56;color:var(--text2);overflow-wrap:anywhere}
+  .ai-md{font-size:var(--fs-md);line-height:1.56;color:var(--text2);overflow-wrap:anywhere}
   .ai-md > :first-child{margin-top:0}
   .ai-md p{margin:0 0 8px}
   .ai-md b,.ai-md strong{color:var(--text);font-weight:600}
@@ -3161,41 +3277,49 @@
   .ai-md li{position:relative;padding-left:16px;margin:4px 0}
   .ai-md ul > li::before{content:"";position:absolute;left:3px;top:.66em;width:5px;height:5px;border-radius:50%;background:color-mix(in srgb,var(--accent) 75%,var(--muted))}
   .ai-md ol > li{counter-increment:ai;padding-left:20px}
-  .ai-md ol > li::before{content:counter(ai) ".";position:absolute;left:0;top:0;color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px}
-  .ai-md h4{margin:14px 0 6px;font:600 10.5px/1.2 var(--f-ui);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+  .ai-md ol > li::before{content:counter(ai) ".";position:absolute;left:0;top:0;color:var(--muted);font-variant-numeric:tabular-nums;font-size:var(--fs-sm)}
+  .ai-md h4{margin:14px 0 6px;font:600 var(--fs-2xs)/1.2 var(--f-ui);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
   .ai-md h4:first-child{margin-top:2px}
   .ai-md blockquote{margin:10px 0 4px;padding:9px 11px 9px 12px;border-radius:9px;background:color-mix(in srgb,var(--accent) 7%,var(--bg2));
     border:1px solid color-mix(in srgb,var(--accent) 22%,transparent);box-shadow:inset 3px 0 0 color-mix(in srgb,var(--accent) 70%,transparent);color:var(--text2)}
   .ai-md blockquote + blockquote{margin-top:6px}
-  .ai-md code{font:500 12px/1 var(--f-mono);background:var(--bg2);border:1px solid var(--line);border-radius:4px;padding:1px 4px}
+  .ai-md code{font:500 var(--fs-sm)/1 var(--f-mono);background:var(--bg2);border:1px solid var(--line);border-radius:4px;padding:1px 4px}
   .ai-md hr{border:0;border-top:1px solid var(--line);margin:10px 0}
   .ai-tblw{overflow-x:auto;margin:6px 0 10px;border:1px solid var(--line);border-radius:8px}
-  .ai-tbl{width:100%;border-collapse:collapse;font-size:12px}
-  .ai-tbl th{text-align:left;font:600 10px/1.2 var(--f-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--line);background:var(--bg2);white-space:nowrap}
+  .ai-tbl{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+  .ai-tbl th{text-align:left;font:600 var(--fs-2xs)/1.2 var(--f-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--line);background:var(--bg2);white-space:nowrap}
   .ai-tbl td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
   .ai-tbl tr:last-child td{border-bottom:0}
-  .ai-pre{margin:6px 0 10px;padding:8px 10px;border-radius:8px;background:var(--bg2);border:1px solid var(--line);font:500 11.5px/1.5 var(--f-mono);color:var(--text2);white-space:pre-wrap;overflow-wrap:anywhere}
-  .ai-md p.ai-note{font-size:11.5px;line-height:1.5;color:var(--faint);margin:10px 0 0}
+  .ai-pre{margin:6px 0 10px;padding:8px 10px;border-radius:8px;background:var(--bg2);border:1px solid var(--line);font:500 var(--fs-xs)/1.5 var(--f-mono);color:var(--text2);white-space:pre-wrap;overflow-wrap:anywhere}
+  .ai-md p.ai-note{font-size:var(--fs-xs);line-height:1.5;color:var(--faint);margin:10px 0 0}
   .ai-md p + p.ai-note, .ai-md h4 + p.ai-note{margin-top:-4px;margin-bottom:8px}
   .ai-md .ai-cursor{display:inline-block;width:7px;height:14px;margin-left:2px;vertical-align:-2px;border-radius:1px;background:var(--accent);animation:aiCaret 1s steps(2,start) infinite}
-  .ai-ent{--c:var(--info);display:inline-flex;align-items:center;gap:4px;height:19px;padding:0 5px 0 4px;margin:0 1px;border-radius:5px;vertical-align:1px;
-    border:1px solid color-mix(in srgb,var(--c) 22%,transparent);background:color-mix(in srgb,var(--c) 9%,transparent);color:var(--text);font:500 11.3px/1 var(--f-mono);letter-spacing:-.01em;cursor:pointer;white-space:nowrap;transition:background-color .15s ease,border-color .15s ease}
-  .ai-ent:hover{background:color-mix(in srgb,var(--c) 20%,transparent);border-color:color-mix(in srgb,var(--c) 55%,transparent)}
-  .ai-ent i{width:5px;height:5px;border-radius:50%;background:var(--c);flex:none}
+  /* Bezüge im Text: schlichte Links (Mono, gepunktet unterstrichen), Zustandspunkt nur bei Maschinen – keine Rahmen im Fließtext */
+  .ai-ent{--c:var(--info);display:inline;padding:0;margin:0;border:0;background:none;color:var(--text);font-family:var(--f-mono);font-size:.95em;font-weight:500;line-height:inherit;letter-spacing:-.01em;cursor:pointer;white-space:nowrap;
+    text-decoration:underline dotted;text-decoration-color:color-mix(in srgb,var(--accent) 70%,transparent);text-decoration-thickness:1px;text-underline-offset:3px;transition:color .15s ease}
+  .ai-ent:hover{color:var(--accent);text-decoration-style:solid}
+  .ai-nb{white-space:nowrap}
+  .ai-ent i{display:none}
+  .ai-ent[data-k="machine"] i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--c);margin:0 4px 0 1px;vertical-align:.1em}
+  /* Bezugszeile (Kontext): als Pille */
+  .ai-ctx .ai-ent{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 6px 0 5px;border-radius:5px;border:1px solid color-mix(in srgb,var(--c) 26%,transparent);background:color-mix(in srgb,var(--c) 10%,transparent);text-decoration:none;font-size:var(--fs-xs);flex:none}
+  .ai-ctx .ai-ent i{display:inline-block;width:5px;height:5px;margin:0;border-radius:50%;background:var(--c)}
+  /* Kennzahl-Leiste der Antwort: .kpi-Anatomie (Eyebrow · Wert · Zeile), Hinweis nur warn/crit über Streifen + Wertfarbe */
   .ai-stats{display:grid;grid-template-columns:repeat(var(--n,4),minmax(0,1fr));margin:9px 0 11px;border-radius:9px;background:var(--bg2);border:1px solid var(--line);overflow:hidden}
-  .ai-stat{--c:var(--line2);position:relative;padding:8px 10px 8px 11px;min-width:0}
+  .ai-stat{position:relative;padding:9px 11px 9px;min-width:0}
   .ai-stat + .ai-stat{border-left:1px solid var(--line)}
-  .ai-stat::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:2px;border-radius:2px;background:var(--c);opacity:.9}
-  .ai-stat.ok{--c:var(--st-run)} .ai-stat.warn{--c:var(--st-wait)} .ai-stat.crit{--c:var(--st-fault)} .ai-stat.info{--c:var(--info)}
-  .ai-stat .l{font:500 10.5px/1.2 var(--f-ui);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ai-stat .v{font:600 19px/1.15 var(--f-cond);color:var(--text);margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ai-stats.n4 .ai-stat{padding:8px 8px 8px 10px} .ai-stats.n4 .ai-stat .v{font-size:17.5px}
+  .ai-stat.warn::before,.ai-stat.crit::before{content:"";position:absolute;inset:0 0 auto;height:2px;background:var(--st-wait)}
+  .ai-stat.crit::before{background:var(--st-fault)}
+  .ai-stat.warn .v{color:var(--st-wait)} .ai-stat.crit .v{color:var(--st-fault)}
+  .ai-stat .l{font:500 var(--fs-xs)/1.2 var(--f-ui);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ai-stat .v{font:600 var(--fs-xl)/1.15 var(--f-cond);color:var(--text);margin-top:4px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ai-stats.n4 .ai-stat{padding:9px 9px 9px 10px}
   @media (max-width:520px){.ai-stats.n4{grid-template-columns:repeat(2,minmax(0,1fr))}.ai-stats.n4 .ai-stat:nth-child(3){border-left:0}.ai-stats.n4 .ai-stat:nth-child(n+3){border-top:1px solid var(--line)}}
-  .ai-stat .s{font-size:10.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+  .ai-stat .s{font-size:var(--fs-2xs);color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
   .ai-imp{margin:9px 0 11px;padding:10px 12px 8px;border-radius:9px;background:var(--bg2);border:1px solid var(--line)}
   .ai-imp-h{display:flex;align-items:center;gap:10px;margin-bottom:6px;min-width:0}
-  .ai-imp-h .tt{font:600 10px/1.2 var(--f-ui);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-  .ai-imp-h .lg{margin-left:auto;display:flex;gap:10px;font-size:10.5px;color:var(--faint);white-space:nowrap}
+  .ai-imp-h .tt{font:600 var(--fs-2xs)/1.2 var(--f-ui);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .ai-imp-h .lg{margin-left:auto;display:flex;gap:10px;font-size:var(--fs-2xs);color:var(--faint);white-space:nowrap}
   .ai-imp-h .lg span{display:inline-flex;align-items:center;gap:4px}
   .lg-due{display:inline-block;width:2px;height:10px;border-radius:1px;background:var(--text2)}
   .lg-was{display:inline-block;width:7px;height:7px;border-radius:50%;border:1.5px solid var(--muted)}
@@ -3205,9 +3329,9 @@
   .ai-imp-g i{position:absolute;top:0;bottom:0;width:1px;background:color-mix(in srgb,var(--line) 70%,transparent)}
   .ai-imp-r{position:relative;display:block;height:34px}
   .ai-imp-r .id{position:absolute;left:-76px;top:0;width:70px;height:34px;display:flex;flex-direction:column;justify-content:center;gap:2px;min-width:0}
-  .ai-imp-r .id button{border:0;background:transparent;padding:0;text-align:left;font:500 11.3px/1 var(--f-mono);color:var(--text);cursor:pointer;white-space:nowrap}
+  .ai-imp-r .id button{border:0;background:transparent;padding:0;text-align:left;font:500 var(--fs-xs)/1 var(--f-mono);color:var(--text);cursor:pointer;white-space:nowrap}
   .ai-imp-r .id button:hover{color:var(--accent)}
-  .ai-imp-r .id small{font-size:10px;line-height:1;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ai-imp-r .id small{font-size:var(--fs-2xs);line-height:1;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ai-imp-r .tr{position:absolute;left:0;right:0;top:0;height:34px}
   .ai-imp-r .tr::before{content:"";position:absolute;left:0;right:0;top:16px;height:2px;border-radius:1px;background:var(--track)}
   .ai-imp-r .sl{position:absolute;top:14px;height:6px;border-radius:3px}
@@ -3215,19 +3339,19 @@
   .ai-imp-r .due{position:absolute;top:8px;width:2px;height:18px;margin-left:-1px;border-radius:1px;background:var(--text2)}
   .ai-imp-r .dot{position:absolute;top:12px;width:10px;height:10px;margin-left:-5px;border-radius:50%;background:var(--c);box-shadow:0 0 0 2px var(--bg2),0 0 0 4px color-mix(in srgb,var(--c) 25%,transparent)}
   .ai-imp-r .dot.was{top:13px;width:8px;height:8px;margin-left:-4px;background:var(--bg2);border:1.5px solid var(--muted);box-shadow:none}
-  .ai-imp-r .v{position:absolute;right:-82px;top:0;width:76px;height:34px;display:flex;flex-direction:column;justify-content:center;align-items:flex-end;gap:2px;font:600 12px/1 var(--f-ui);font-variant-numeric:tabular-nums;white-space:nowrap}
-  .ai-imp-r .v small{font:500 10px/1 var(--f-ui);color:var(--faint)}
-  .ai-imp-ax{position:relative;height:14px;margin:2px 82px 0 76px;font:500 10px/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums}
+  .ai-imp-r .v{position:absolute;right:-82px;top:0;width:76px;height:34px;display:flex;flex-direction:column;justify-content:center;align-items:flex-end;gap:2px;font:600 var(--fs-sm)/1 var(--f-ui);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ai-imp-r .v small{font:500 var(--fs-2xs)/1 var(--f-ui);color:var(--faint)}
+  .ai-imp-ax{position:relative;height:14px;margin:2px 82px 0 76px;font:500 var(--fs-2xs)/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums}
   .ai-imp-ax span{position:absolute;top:3px;transform:translateX(-50%);white-space:nowrap}
   .ai-imp-ax span.now{left:0;transform:none}
-  .ai-tc{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px 0 8px;border-radius:999px;font-size:11.5px;color:var(--text2);background:var(--card);border:1px solid var(--line);animation:aiIn .2s ease}
+  .ai-tc{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px 0 8px;border-radius:999px;font-size:var(--fs-xs);color:var(--text2);background:var(--card);border:1px solid var(--line);animation:aiIn .2s ease}
   .ai-tc .ico{color:var(--st-run)} .ai-tc.err .ico{color:var(--st-fault)} .ai-tc.err{color:var(--muted)}
   .ai-spin{width:11px;height:11px;border-radius:50%;border:2px solid color-mix(in srgb,var(--accent) 25%,transparent);border-top-color:var(--accent);animation:aiSpin .8s linear infinite;flex:none}
-  .ai-typing{display:flex;align-items:center;gap:9px;height:24px;color:var(--muted);font-size:12.5px}
+  .ai-typing{display:flex;align-items:center;gap:9px;height:24px;color:var(--muted);font-size:var(--fs-sm)}
   .ai-dots{display:inline-flex;gap:4px}
   .ai-dots i{width:6px;height:6px;border-radius:50%;background:color-mix(in srgb,var(--accent) 70%,var(--muted));animation:aiDot 1.2s ease-in-out infinite}
   .ai-dots i:nth-child(2){animation-delay:.15s} .ai-dots i:nth-child(3){animation-delay:.3s}
-  .ai-src{display:flex;align-items:flex-start;gap:7px;margin-top:12px;padding-top:9px;border-top:1px solid color-mix(in srgb,var(--line) 75%,transparent);font-size:10.8px;line-height:1.45;color:var(--faint)}
+  .ai-src{display:flex;align-items:flex-start;gap:7px;margin-top:12px;padding-top:9px;border-top:1px solid color-mix(in srgb,var(--line) 75%,transparent);font-size:var(--fs-2xs);line-height:1.45;color:var(--faint)}
   .ai-src .ico{flex:none;margin-top:1px;color:var(--faint)}
   .ai-src b{font-weight:600;color:var(--muted)}
   .ai-acts{display:flex;flex-direction:column;gap:7px;margin-top:11px}
@@ -3237,26 +3361,26 @@
   .ai-act > div:nth-child(2){padding-top:1px}
   .ai-act.danger{--c:var(--st-fault)} .ai-act.quiet{--c:var(--line2)}
   .ai-act .ic{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:var(--c);background:color-mix(in srgb,var(--c) 13%,transparent)}
-  .ai-act .t{font-size:12.8px;font-weight:600;color:var(--text);line-height:1.3}
-  .ai-act .d{font-size:11.5px;color:var(--muted);line-height:1.35;margin-top:2px;overflow-wrap:anywhere}
+  .ai-act .t{font-size:var(--fs-sm);font-weight:600;color:var(--text);line-height:1.3}
+  .ai-act .d{font-size:var(--fs-xs);color:var(--muted);line-height:1.35;margin-top:2px;overflow-wrap:anywhere}
   .ai-act .b{grid-column:2;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
   .ai-act .btn.sm{height:28px}
   .ai-act.ok{--c:var(--st-run)} .ai-act.fail{--c:var(--st-wait)} .ai-act.no{--c:var(--line2);opacity:.75}
-  .ai-act .res{font-size:11.5px;font-weight:600;color:var(--c);white-space:nowrap;display:flex;align-items:center;gap:5px}
-  .ai-notice{display:flex;gap:8px;align-items:flex-start;margin:2px 0 9px;padding:7px 10px;border-radius:8px;font-size:12px;line-height:1.45;color:var(--text2);
+  .ai-act .res{font-size:var(--fs-xs);font-weight:600;color:var(--c);white-space:nowrap;display:flex;align-items:center;gap:5px}
+  .ai-notice{display:flex;gap:8px;align-items:flex-start;margin:2px 0 9px;padding:7px 10px;border-radius:8px;font-size:var(--fs-sm);line-height:1.45;color:var(--text2);
     background:color-mix(in srgb,var(--st-wait) 7%,transparent);border:1px solid color-mix(in srgb,var(--st-wait) 26%,transparent)}
   .ai-notice .ico{flex:none;color:var(--st-wait);margin-top:1px}
   /* Meldungen bei offenem Copilot oben rechts im freien Bereich – nie über Navigation, Tour-Karte oder Drawer */
   @media (min-width:561px){ body.ai-open #toasts{top:calc(var(--top-h) + 12px);bottom:auto;right:calc(var(--ai-occ,440px) + 16px)} }
   @media (min-width:561px) and (max-width:900px){ body.ai-open #toasts{left:12px;right:calc(var(--ai-occ,440px) + 12px)} body.ai-open .toast{min-width:0;max-width:none} }
   @media (hover:none){ .ai-kb{display:none} }
-  .ai-err{display:flex;gap:9px;align-items:flex-start;margin-top:8px;padding:9px 11px;border-radius:9px;font-size:12.5px;line-height:1.45;color:var(--text2);
+  .ai-err{display:flex;gap:9px;align-items:flex-start;margin-top:8px;padding:9px 11px;border-radius:9px;font-size:var(--fs-sm);line-height:1.45;color:var(--text2);
     background:color-mix(in srgb,var(--st-wait) 8%,var(--card));border:1px solid color-mix(in srgb,var(--st-wait) 32%,transparent)}
   .ai-err .ico{color:var(--st-wait);flex:none;margin-top:1px}
   .ai-err .b{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
   .ai-fu{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
   .ai-chip{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:4px 11px;border-radius:999px;border:1px solid var(--line2);background:var(--card);color:var(--text2);
-    font:500 12px/1.25 var(--f-ui);cursor:pointer;text-align:left;transition:border-color .15s ease,color .15s ease,background-color .15s ease}
+    font:500 var(--fs-sm)/1.25 var(--f-ui);cursor:pointer;text-align:left;transition:border-color .15s ease,color .15s ease,background-color .15s ease}
   .ai-chip:hover{border-color:color-mix(in srgb,var(--accent) 55%,transparent);color:var(--text);background:color-mix(in srgb,var(--accent) 8%,var(--card))}
   .ai-chip .ico{color:var(--accent);flex:none}
   .ai-chip:disabled{opacity:.45;cursor:default}
@@ -3265,21 +3389,21 @@
   .ai-hero::before{content:"";position:absolute;z-index:-1;left:-40px;top:-46px;width:260px;height:170px;pointer-events:none;
     background:radial-gradient(closest-side,color-mix(in srgb,var(--accent) 16%,transparent),transparent);filter:blur(6px)}
   .ai-hero h3 span{color:var(--accent)}
-  .ai-hero h3{margin:0;font:600 23px/1.15 var(--f-cond);letter-spacing:.01em;color:var(--text)}
-  .ai-hero p{margin:0;color:var(--muted);font-size:13px;line-height:1.5;max-width:50ch}
+  .ai-hero h3{margin:0;font:600 var(--fs-2xl)/1.15 var(--f-cond);letter-spacing:.01em;color:var(--text)}
+  .ai-hero p{margin:0;color:var(--muted);font-size:var(--fs-md);line-height:1.5;max-width:50ch}
   .ai-live{display:flex;flex-wrap:wrap;gap:6px}
-  .ai-live > span{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:999px;font-size:11.5px;color:var(--text2);background:var(--card);border:1px solid var(--line);white-space:nowrap}
+  .ai-live > span{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:999px;font-size:var(--fs-xs);color:var(--text2);background:var(--card);border:1px solid var(--line);white-space:nowrap}
   .ai-live > span > i{width:6px;height:6px;border-radius:50%;background:var(--c,var(--st-run))}
   .ai-live b{font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;margin-right:2px}
   .ai-exg{display:flex;flex-direction:column;gap:6px}
-  .ai-exg .eyebrow{font-size:9.5px;margin:2px 0 1px}
-  .ai-ex{display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px 9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--text2);font:500 13px/1.3 var(--f-ui);text-align:left;cursor:pointer;transition:border-color .15s ease,color .15s ease,background-color .15s ease}
+  .ai-exg .eyebrow{font-size:var(--fs-2xs);margin:2px 0 1px}
+  .ai-ex{display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px 9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--text2);font:500 var(--fs-md)/1.3 var(--f-ui);text-align:left;cursor:pointer;transition:border-color .15s ease,color .15s ease,background-color .15s ease}
   .ai-ex .ico{color:var(--muted);flex:none;transition:color .15s ease}
   .ai-ex .tx{flex:1;min-width:0}
   .ai-ex .ar{flex:none;display:grid;color:var(--faint);opacity:0;transform:translateX(-4px);transition:opacity .15s ease,transform .15s ease}
   .ai-ex:hover{border-color:var(--line2);color:var(--text);background:var(--card2)}
   .ai-ex:hover .ico{color:var(--accent)} .ai-ex:hover .ar{opacity:1;transform:none}
-  .ai-tipline{display:flex;gap:7px;align-items:flex-start;margin:2px 0 0;font-size:11.5px;line-height:1.45;color:var(--faint)}
+  .ai-tipline{display:flex;gap:7px;align-items:flex-start;margin:2px 0 0;font-size:var(--fs-xs);line-height:1.45;color:var(--faint)}
   .ai-tipline .ico{flex:none;margin-top:1px;color:var(--accent);opacity:.8}
   .ai-foot{position:relative;border-top:1px solid var(--line);padding:9px 12px max(10px,env(safe-area-inset-bottom,0px));background:var(--panel)}
   .ai-sugg{display:flex;gap:6px;overflow-x:auto;padding:1px 0 9px;scrollbar-width:none;-webkit-mask-image:linear-gradient(90deg,#000 88%,transparent);mask-image:linear-gradient(90deg,#000 88%,transparent)}
@@ -3287,66 +3411,64 @@
   .ai-sugg .ai-chip{white-space:nowrap}
   .ai-comp{display:flex;align-items:flex-end;gap:8px;padding:5px 5px 5px 12px;border-radius:12px;background:var(--bg2);border:1px solid var(--line2);transition:border-color .15s ease,box-shadow .15s ease}
   .ai-comp:focus-within{border-color:color-mix(in srgb,var(--accent) 70%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent)}
-  .ai-comp textarea{flex:1;min-width:0;border:0;outline:none;background:transparent;resize:none;color:var(--text);font:400 13.5px/1.45 var(--f-ui);padding:6px 0;max-height:132px;min-height:32px}
+  .ai-comp textarea{flex:1;min-width:0;border:0;outline:none;background:transparent;resize:none;color:var(--text);font:400 var(--fs-md)/1.45 var(--f-ui);padding:6px 0;max-height:132px;min-height:32px}
   .ai-comp textarea::placeholder{color:var(--faint)}
   .ai-send{flex:none;width:34px;height:34px;border-radius:9px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;cursor:pointer;transition:filter .15s ease,opacity .15s ease}
   .ai-send:hover{filter:brightness(1.08)}
   .ai-send:disabled{opacity:.35;cursor:default;filter:none}
   .ai-send.stop{background:var(--card2);border-color:var(--line2);color:var(--text)}
   .ai-send.stop i{width:10px;height:10px;border-radius:2px;background:currentColor}
-  .ai-hint{display:flex;justify-content:space-between;gap:10px;margin-top:7px;font-size:10.5px;color:var(--faint);white-space:nowrap;min-width:0}
+  .ai-hint{display:flex;justify-content:space-between;gap:10px;margin-top:7px;font-size:var(--fs-2xs);color:var(--faint);white-space:nowrap;min-width:0}
   .ai-hint > span{overflow:hidden;text-overflow:ellipsis;min-width:0}
-  .ai-hint kbd{font:500 10px/1 var(--f-mono);padding:2px 4px;border-radius:4px;border:1px solid var(--line2);color:var(--muted);background:var(--card)}
-  .ai-sys{align-self:center;max-width:92%;display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted);padding:5px 10px;border-radius:999px;background:var(--card);border:1px solid var(--line);animation:aiIn .2s ease}
+  .ai-hint kbd{font:500 var(--fs-2xs)/1 var(--f-mono);padding:2px 4px;border-radius:4px;border:1px solid var(--line2);color:var(--muted);background:var(--card)}
+  .ai-sys{align-self:center;max-width:92%;display:flex;align-items:center;gap:7px;font-size:var(--fs-xs);color:var(--muted);padding:5px 10px;border-radius:999px;background:var(--card);border:1px solid var(--line);animation:aiIn .2s ease}
   .ai-sys .ico{flex:none}
   .ai-sys.ok .ico{color:var(--st-run)} .ai-sys.warn .ico{color:var(--st-wait)}
   .btn-ai.ai-on{background:color-mix(in srgb,var(--accent) 26%,var(--card));box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent) inset}
   .ai-slot:empty,.ai-embed:empty{display:none}
   /* Balken */
   .ai-bars{display:grid;gap:9px;margin:4px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:color-mix(in srgb,var(--card2) 70%,transparent)}
-  .ai-br .h{display:flex;align-items:center;gap:7px;min-width:0;font-size:12.5px;line-height:19px}
-  .ai-br .h .ai-ent{margin:0;flex:none}
+  .ai-br .h{display:flex;align-items:center;gap:7px;min-width:0;font-size:var(--fs-sm);line-height:19px}
+  .ai-br .h .ai-ent{flex:none}
   .ai-br .n{flex:1;min-width:0;color:var(--text);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ai-br .q{flex:none;font-weight:600;font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--text)}
+  .ai-br .q{flex:none;font-weight:600;font-size:var(--fs-sm);font-variant-numeric:tabular-nums;color:var(--text)}
   .ai-br .tr{height:6px;margin-top:4px;border-radius:3px;background:var(--track);overflow:hidden}
   .ai-br .tr i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,color-mix(in srgb,var(--c) 70%,transparent),var(--c))}
-  .ai-br .s{margin-top:3px;font-size:11.5px;line-height:1.4;color:var(--muted)}
+  .ai-br .s{margin-top:3px;font-size:var(--fs-xs);line-height:1.4;color:var(--muted)}
   /* Risiko-Karten */
   .ai-risk{display:grid;gap:8px;margin:4px 0 12px}
   .ai-rk{position:relative;padding:9px 11px 9px 13px;border:1px solid var(--line);border-radius:var(--r-sm);background:color-mix(in srgb,var(--card2) 70%,transparent);overflow:hidden}
   .ai-rk::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--c)}
   .ai-rk .h{display:flex;align-items:center;gap:7px;min-width:0}
-  .ai-rk .h .ai-ent{margin:0;flex:none}
-  .ai-rk .nm{flex:1;min-width:0;font-weight:600;font-size:12.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ai-rk .tg{flex:none;font:600 10.5px/17px var(--f-ui);padding:0 7px;border-radius:999px;white-space:nowrap;color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent);border:1px solid color-mix(in srgb,var(--c) 32%,transparent)}
-  .ai-rk .m{margin:4px 0 5px;font-size:11.5px;color:var(--muted)}
+  .ai-rk .h .ai-ent{flex:none;font-weight:600}
+  .ai-rk .nm{flex:1;min-width:0;font-weight:600;font-size:var(--fs-sm);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ai-rk .tg{flex:none;font:600 var(--fs-2xs)/17px var(--f-ui);padding:0 7px;border-radius:999px;white-space:nowrap;color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent);border:1px solid color-mix(in srgb,var(--c) 32%,transparent)}
+  .ai-rk .m{margin:4px 0 5px;font-size:var(--fs-xs);color:var(--muted)}
   .ai-rk .m b{color:var(--text2);font-weight:600}
-  .ai-rk .ln{display:grid;grid-template-columns:58px minmax(0,1fr);gap:8px;padding:3px 0 0;font-size:12px;line-height:1.45;color:var(--text2)}
+  .ai-rk .ln{display:grid;grid-template-columns:58px minmax(0,1fr);gap:8px;padding:3px 0 0;font-size:var(--fs-sm);line-height:1.45;color:var(--text2)}
   .ai-rk .ln + .ln{margin-top:2px}
-  .ai-rk .k{font:600 9.5px/18px var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
-  .ai-rk .v .ai-ent{height:17px}
+  .ai-rk .k{font:600 var(--fs-2xs)/18px var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
   /* Personal */
   .ai-crew{display:grid;margin:4px 0 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:color-mix(in srgb,var(--card2) 70%,transparent);overflow:hidden}
   .ai-pp{display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:10px;padding:8px 10px}
   .ai-pp + .ai-pp{border-top:1px solid var(--line)}
-  .ai-pp .av{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font:600 11px/1 var(--f-ui);letter-spacing:.02em;color:var(--text);cursor:pointer;
+  .ai-pp .av{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font:600 var(--fs-xs)/1 var(--f-ui);letter-spacing:.02em;color:var(--text);cursor:pointer;
     background:color-mix(in srgb,var(--c) 18%,var(--card));border:1.5px solid color-mix(in srgb,var(--c) 65%,transparent);padding:0}
   .ai-pp .av:hover{background:color-mix(in srgb,var(--c) 30%,var(--card))}
   .ai-pp .tx{min-width:0}
-  .ai-pp .n{display:flex;align-items:baseline;gap:6px;min-width:0;font-size:12.5px;line-height:17px}
+  .ai-pp .n{display:flex;align-items:baseline;gap:6px;min-width:0;font-size:var(--fs-sm);line-height:17px}
   .ai-pp .n button{all:unset;cursor:pointer;font-weight:600;color:var(--text);white-space:nowrap}
   .ai-pp .n button:hover{color:var(--accent)}
-  .ai-pp .n small{min-width:0;font-size:11px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ai-pp .a{font-size:12px;line-height:1.45;color:var(--muted);margin-top:1px}
-  .ai-pp .a .ai-ent{height:17px}
-  .ai-pp .tg{flex:none;font:600 10px/16px var(--f-ui);padding:0 7px;border-radius:999px;white-space:nowrap;color:var(--c);background:color-mix(in srgb,var(--c) 13%,transparent);border:1px solid color-mix(in srgb,var(--c) 30%,transparent)}
+  .ai-pp .n small{min-width:0;font-size:var(--fs-xs);color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ai-pp .a{font-size:var(--fs-sm);line-height:1.45;color:var(--muted);margin-top:1px}
+  .ai-pp .tg{flex:none;font:600 var(--fs-2xs)/16px var(--f-ui);padding:0 7px;border-radius:999px;white-space:nowrap;color:var(--c);background:color-mix(in srgb,var(--c) 13%,transparent);border:1px solid color-mix(in srgb,var(--c) 30%,transparent)}
   /* Rohmaterial */
   .ai-stock{display:grid;gap:9px;margin:4px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:color-mix(in srgb,var(--card2) 70%,transparent)}
-  .ai-sk .h{display:flex;align-items:baseline;gap:8px;min-width:0;font-size:12.5px;line-height:18px}
+  .ai-sk .h{display:flex;align-items:baseline;gap:8px;min-width:0;font-size:var(--fs-sm);line-height:18px}
   .ai-sk .n{all:unset;cursor:pointer;flex:1 1 auto;min-width:0;color:var(--text);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ai-sk .n:hover{color:var(--accent)}
-  .ai-sk .tg{flex:none;font:600 10px/16px var(--f-ui);padding:0 6px;border-radius:999px;color:var(--c);background:color-mix(in srgb,var(--c) 13%,transparent);border:1px solid color-mix(in srgb,var(--c) 30%,transparent)}
-  .ai-sk .q{flex:none;font-weight:600;font-size:12px;font-variant-numeric:tabular-nums;color:var(--c)}
+  .ai-sk .tg{flex:none;font:600 var(--fs-2xs)/16px var(--f-ui);padding:0 6px;border-radius:999px;color:var(--c);background:color-mix(in srgb,var(--c) 13%,transparent);border:1px solid color-mix(in srgb,var(--c) 30%,transparent)}
+  .ai-sk .q{flex:none;font-weight:600;font-size:var(--fs-sm);font-variant-numeric:tabular-nums;color:var(--c)}
   .ai-sk .wb{position:relative;height:6px;margin-top:4px;border-radius:3px;background:var(--track)}
   .ai-sk .wb .tr{position:absolute;inset:0;border-radius:3px;overflow:hidden}
   .ai-sk .wb i{position:absolute;left:0;top:0;bottom:0;background:var(--c)}
@@ -3355,7 +3477,7 @@
   .ai-sk .wb b.min{background:var(--text2);opacity:.8}
   .ai-sk .wb i.res{background:color-mix(in srgb,var(--c) 38%,transparent)}
   .ai-sk .wb i.sh{background:color-mix(in srgb,var(--st-fault) 22%,transparent);box-shadow:inset 0 0 0 1.5px var(--st-fault)}
-  .ai-sk-lg{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:2px;font-size:10.5px;color:var(--faint)}
+  .ai-sk-lg{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:2px;font-size:var(--fs-2xs);color:var(--faint)}
   .ai-sk-lg span{display:inline-flex;align-items:center;gap:5px}
   .ai-sk-lg i{display:inline-block}
   .ai-sk-lg .l-min{width:2px;height:10px;border-radius:1px;background:var(--text2)}
@@ -3364,15 +3486,15 @@
   .ai-sk-lg .l-ord{width:12px;height:6px;border-radius:2px;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--st-run) 55%,transparent) 0 3px,transparent 3px 6px)}
   /* Werkzeug-Standzeiten */
   .ai-tools{display:grid;gap:8px;margin:4px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:color-mix(in srgb,var(--card2) 70%,transparent)}
-  .ai-tl .h{display:flex;align-items:baseline;gap:8px;min-width:0;font-size:12.5px;line-height:18px}
+  .ai-tl .h{display:flex;align-items:baseline;gap:8px;min-width:0;font-size:var(--fs-sm);line-height:18px}
   .ai-tl .n{flex:1;min-width:0;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .ai-tl .r{flex:none;font-weight:600;font-size:12px;font-variant-numeric:tabular-nums;color:var(--c)}
+  .ai-tl .r{flex:none;font-weight:600;font-size:var(--fs-sm);font-variant-numeric:tabular-nums;color:var(--c)}
   .ai-tl .wb{position:relative;height:6px;margin:4px 0 4px;border-radius:3px;background:var(--track);overflow:visible}
   .ai-tl .wb i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--c)}
   .ai-tl .wb i.nx{border-radius:0 3px 3px 0;background:color-mix(in srgb,var(--c) 40%,transparent)}
   .ai-tl .wb b{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;border-radius:1px;background:var(--text2);opacity:.75}
-  .ai-tl .s{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:11.5px;color:var(--muted)}
-  .ai-tl .tg{display:inline-flex;align-items:center;gap:4px;padding:0 7px;border-radius:999px;font-weight:600;font-size:10.5px;line-height:17px;color:var(--st-tool);background:color-mix(in srgb,var(--st-tool) 13%,transparent);border:1px solid color-mix(in srgb,var(--st-tool) 30%,transparent)}
+  .ai-tl .s{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:var(--fs-xs);color:var(--muted)}
+  .ai-tl .tg{display:inline-flex;align-items:center;gap:4px;padding:0 7px;border-radius:999px;font-weight:600;font-size:var(--fs-2xs);line-height:17px;color:var(--st-tool);background:color-mix(in srgb,var(--st-tool) 13%,transparent);border:1px solid color-mix(in srgb,var(--st-tool) 30%,transparent)}
   .ai-tl .tg svg{width:11px;height:11px}
   /* Arbeitsgang-Kette */
   .ai-route{list-style:none;margin:4px 0 12px;padding:0}
@@ -3392,13 +3514,12 @@
   .ai-rt.s-plan .nd{border:2px dashed var(--line2);background:var(--card)}
   .ai-rt .bd{min-width:0}
   .ai-rt .h{display:flex;align-items:baseline;gap:7px;min-width:0;line-height:20px}
-  .ai-rt .sq{flex:none;font:600 10.5px/20px var(--f-mono);color:var(--faint);letter-spacing:.02em}
+  .ai-rt .sq{flex:none;font:600 var(--fs-2xs)/20px var(--f-mono);color:var(--faint);letter-spacing:.02em}
   .ai-rt .op{flex:1 1 auto;min-width:0;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ai-rt.s-done .op,.ai-rt.s-plan .op,.ai-rt.s-ship .op{color:var(--text2);font-weight:500}
-  .ai-rt .tg{flex:none;align-self:center;font:600 10px/16px var(--f-ui);padding:0 7px;border-radius:999px;color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent);border:1px solid color-mix(in srgb,var(--c) 32%,transparent);white-space:nowrap}
+  .ai-rt .tg{flex:none;align-self:center;font:600 var(--fs-2xs)/16px var(--f-ui);padding:0 7px;border-radius:999px;color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent);border:1px solid color-mix(in srgb,var(--c) 32%,transparent);white-space:nowrap}
   .ai-rt.s-plan .tg,.ai-rt.s-ship .tg{color:var(--muted);background:transparent;border-color:var(--line2)}
-  .ai-rt .w{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;margin-top:1px;font-size:12px;line-height:1.5;color:var(--muted)}
-  .ai-rt .w .ai-ent{margin:0}
+  .ai-rt .w{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;margin-top:1px;font-size:var(--fs-sm);line-height:1.5;color:var(--muted)}
   .ai-rt .wh{color:var(--text2)}
   .ai-rt .sub{min-width:0}
   .ai-rt .w.sub2{display:block;margin-top:2px}
@@ -3413,12 +3534,39 @@
   @keyframes aiPulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--st-run) 60%,transparent)}50%{box-shadow:0 0 0 4px color-mix(in srgb,var(--st-run) 0%,transparent)}}
   @keyframes aiBlinkDot{50%{opacity:.3}}
   @media (max-width:560px){
-    .ai-h{padding:10px 8px 10px 12px;gap:9px} .ai-orb{--s:30px} .ai-ttl{font-size:17px}
+    .ai-h{padding:10px 8px 10px 12px;gap:9px} .ai-orb{--s:30px} .ai-ttl{font-size:var(--fs-xl)}
     .ai-log{padding:12px 12px 8px;gap:16px} .ai-ctx{padding:6px 10px 6px 12px}
     .ai-foot{padding:8px 10px max(9px,env(safe-area-inset-bottom,0px))} .ai-hint .ai-kb{display:none}
-    .ai-card{padding:12px 12px 11px;border-radius:12px} .ai-hl{font-size:18px} .ai-ra{flex-wrap:wrap} .ai-ra .b{margin-left:36px}
+    .ai-card{padding:12px 12px 11px;border-radius:12px} .ai-hl{font-size:var(--fs-xl)} .ai-ra{flex-wrap:wrap} .ai-ra .b{margin-left:36px}
     .ai-m.u{max-width:92%}
     .ai-tip{width:260px}
+  }
+  /* Restlaufzeit nach Ursache (Engine delayBreakdown): Balken in Arbeitsgang-Reihenfolge, darunter die größten Beiträge */
+  .ai-dly{margin:6px 0 12px;padding:10px 12px 11px;border:1px solid var(--line);border-radius:var(--r-sm);background:color-mix(in srgb,var(--card2) 70%,transparent)}
+  .ai-dly-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px}
+  .ai-dly-h .tt{font:600 var(--fs-2xs)/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .ai-dly-h .tot{font:600 var(--fs-sm)/1 var(--f-ui);color:var(--text2);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ai-dly-bar{display:flex;gap:2px;height:10px;border-radius:3px;overflow:hidden;background:var(--track)}
+  .ai-dly-bar i{display:block;height:100%;min-width:2px;background:var(--c);opacity:.72}
+  .ai-dly-bar i.lim{opacity:1}
+  .ai-dly .k-noShift{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--st-idle) 70%,transparent) 0 2px,transparent 2px 5px) !important}
+  .ai-dly-l{display:grid;gap:4px;margin-top:10px}
+  .ai-dly-l .r{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:8px;align-items:baseline;font-size:var(--fs-sm);line-height:1.45;color:var(--text2)}
+  .ai-dly-l .r > i{width:8px;height:8px;border-radius:2px;background:var(--c);align-self:center;opacity:.85}
+  .ai-dly-l .r b{font-weight:600;color:var(--text2);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ai-dly-l .r.lim .t,.ai-dly-l .r.lim b{color:var(--text);font-weight:600}
+  .ai-dly-l .r.lim > i{opacity:1}
+  /* Touch: Bedienflächen ≥ 40 px, Eingabefeld 16 px (kein Zoom unter iOS) */
+  @media (pointer:coarse){
+    .ai-chip{min-height:40px;padding:6px 13px}
+    .ai-mb{height:40px;padding:0 12px}
+    .ai-copy{width:40px;height:40px;margin:-10px -10px -10px 0;opacity:.8}
+    .ai-ib,.ai-send{width:40px;height:40px}
+    .ai-ctx button.ai-x{width:40px;height:40px;margin:-8px -10px -8px 0}
+    .ai-ex{min-height:44px}
+    .ai-comp textarea{font-size:16px !important;min-height:40px}
+    .ai-md .ai-ent,.ai-rec-t .ai-ent,.ai-rt .ai-ent,.ai-rk .ai-ent,.ai-br .ai-ent{padding:9px 0;margin:-9px 0}
+    .ai-imp-r .id button,.ai-pp .n button,.ai-sk .n{padding:9px 0;margin:-9px 0}
   }
   `, 'ai-copilot');
 
@@ -3455,7 +3603,7 @@
     const keep = (h) => '\u0001' + (ph.push(h) - 1) + '\u0002';
     let t = esc(s);
     t = t.replace(/`([^`]+)`/g, (_, c2) => keep('<code>' + c2 + '</code>'));
-    if (!noLinks) t = linkEntities(t, keep);
+    if (!noLinks) { t = linkEntities(t, keep); t = t.replace(/(\u0001\d+\u0002)([)\].,;:!?]+)/g, (_, ph1, pn) => keep('<span class="ai-nb">') + ph1 + pn + keep('</span>')); }
     t = t.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/__(.+?)__/g, '<b>$1</b>');
     t = t.replace(/(^|[\s(])\*(?!\s)([^*\n]+?)\*(?=[\s).,;:!?]|$)/g, '$1<i>$2</i>');
     t = t.replace(/\u0003/g, '<span class="ai-cursor"></span>');
@@ -3872,14 +4020,14 @@
         <div class="wb"><span class="tr">${free > 0 ? `<i style="width:${X(free).toFixed(1)}%"></i>` : ''}${res > 0 ? `<i class="res" style="left:${X(free).toFixed(1)}%;width:${(X(r.on) - X(free)).toFixed(1)}%"></i>` : ''}${r.ord ? `<i class="ord" style="left:${X(r.on).toFixed(1)}%;width:${(X(r.on + r.ord) - X(r.on)).toFixed(1)}%"></i>` : ''}${short > 0 ? `<i class="sh" style="left:${X(r.on + r.ord).toFixed(1)}%;width:${(X(r.nd) - X(r.on + r.ord)).toFixed(1)}%"></i>` : ''}</span><b class="min" style="left:${X(r.min).toFixed(1)}%"></b></div></div>`;
     }).join('')}<div class="ai-sk-lg"><span><i class="l-free"></i>frei</span><span><i class="l-res"></i>für offene Aufträge verplant</span><span><i class="l-ord"></i>bestellt</span><span><i class="l-min"></i>Mindestbestand</span></div></div>`;
   }
-  /** Risiko-Karten: je Auftrag Kopf (Puffer/Verzug), Prognose/Termin, „Jetzt“ und „Engpass“ */
+  /** Risiko-Karten: je Auftrag Kopf (Puffer/Verzug), Prognose/Termin, „Jetzt“ und „Ursache“ (Engine, wie die Meldung) */
   function riskHTML(list) {
     if (!list || !list.length) return '';
     return `<div class="ai-risk">${list.map(r => `<div class="ai-rk${r.late ? ' late' : ''}" style="--c:${r.late ? 'var(--st-fault)' : 'var(--st-wait)'}">
       <div class="h">${entChip('order', r.id)}<span class="nm">${esc(r.part)}</span><span class="tg">${esc(dur0(Math.abs(r.slack)) + (r.late ? ' Verzug' : ' Puffer'))}</span></div>
       <div class="m">${esc(r.cust)} · Prognose <b>${esc(r.eta)}</b> · Termin ${esc(r.due)}${r.eil ? ' · <b>Eilauftrag</b>' : ''}</div>
       ${r.now ? `<div class="ln"><span class="k">Jetzt</span><span class="v">${inline(r.now)}</span></div>` : ''}
-      ${r.bn ? `<div class="ln"><span class="k">Engpass</span><span class="v">${inline(r.bn)}</span></div>` : ''}</div>`).join('')}</div>`;
+      ${r.bn ? `<div class="ln"><span class="k">Ursache</span><span class="v">${inline(uc1(r.bn))}</span></div>` : ''}</div>`).join('')}</div>`;
   }
   /** Balken (horizontal): Wert relativ zum größten Wert; optional Maschinen-Chip und Unterzeile */
   function barsHTML(d) {
@@ -3890,7 +4038,17 @@
       <div class="tr"><i style="width:${Math.max(1.5, (r.v || 0) / max * 100).toFixed(1)}%"></i></div>
       ${r.sub ? `<div class="s">${inline(r.sub)}</div>` : ''}</div>`).join('')}</div>`;
   }
-  const SLOT_HTML = { route: routeHTML, tools: toolsHTML, crew: crewHTML, stock: stockHTML, risk: riskHTML, bars: barsHTML, today: () => '' };
+  /** Restlaufzeit bis zur Prognose nach Ursache (Engine delayBreakdown): ein Balken in Arbeitsgang-Reihenfolge (Warten,
+      Bearbeitung, Fremdbearbeitung …), darunter die größten Beiträge; der begrenzende Beitrag („Ursache“) ist betont */
+  function delayHTML(d) {
+    if (!d || !d.segs || !d.segs.length) return '';
+    const tot = d.total || d.segs.reduce((x, e) => x + e.sec, 0) || 1;
+    const K = (k) => DLY[k] || { l: k, c: 'var(--muted)' };
+    const bar = d.segs.map(e => `<i class="k-${esc(e.kind)}${e.lim ? ' lim' : ''}" style="--c:${K(e.kind).c};width:${(e.sec / tot * 100).toFixed(2)}%" title="${esc(uc1(e.label) + ': ' + durR(e.sec))}"></i>`).join('');
+    const rows = (d.top || []).map(e => `<div class="r${e.lim ? ' lim' : ''}" style="--c:${K(e.kind).c}"><i class="k-${esc(e.kind)}"></i><span class="t">${inline(uc1(e.label))}</span><b>${esc(durR(e.sec))}</b></div>`).join('');
+    return `<div class="ai-dly"><div class="ai-dly-h"><span class="tt">Restlaufzeit bis zur Prognose${d.eta != null ? ' ' + esc(tc(d.eta)) : ''}</span><span class="tot">${esc(durR(tot))}</span></div><div class="ai-dly-bar" role="img" aria-label="Restlaufzeit nach Ursache">${bar}</div>${rows ? `<div class="ai-dly-l">${rows}</div>` : ''}</div>`;
+  }
+  const SLOT_HTML = { route: routeHTML, tools: toolsHTML, crew: crewHTML, stock: stockHTML, risk: riskHTML, bars: barsHTML, delay: delayHTML, today: () => '' };
   /** Grafiken, die Claude im Live-Modus per eigener Zeile „[[route FA-24118]]“ einbetten kann – aus denselben Bausteinen wie der Offline-Copilot */
   function embedHTML(kind, id) {
     const c = data(), slotOf = (a, k) => (a && a.slots && a.slots[k] ? (SLOT_HTML[k] || SLOT_HTML[k.replace(/\d+$/, '')])(a.slots[k].data) : '');

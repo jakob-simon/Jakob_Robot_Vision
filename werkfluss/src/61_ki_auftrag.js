@@ -1211,7 +1211,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   const CSS = `
   .ka-root{min-width:0}
   .ka-hr{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .ka-ai{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);font-size:12px;color:var(--text2);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+  .ka-ai{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);font-size:var(--fs-xs);color:var(--text2);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
   .ka-ai i{width:8px;height:8px;border-radius:50%;background:var(--st-idle);flex:none}
   .ka-ai[data-s="ready"] i,.ka-ai[data-s="noimg"] i{background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
   .ka-ai[data-s="off"] i{background:var(--st-wait)}
@@ -1225,12 +1225,12 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     .ka-srcB .ka-form{grid-template-columns:minmax(0,1fr)}
     .ka-srcB .ka-go{margin-top:auto}
   }
-  .ka-subh h3{margin:0;font:600 13px/1.2 var(--f-ui)}.ka-subh .muted{font-size:12px;margin-left:auto}
+  .ka-subh h3{margin:0;font:600 var(--fs-lg)/1.25 var(--f-ui)}.ka-subh .muted{font-size:var(--fs-xs);margin-left:auto}
   @media (max-width:1240px){.ka-grid{grid-template-columns:minmax(0,1fr)}}
   .ka-left,.ka-right{display:flex;flex-direction:column;gap:14px;min-width:0}
   .ka-card-h{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line)}
-  .ka-card-h h3{margin:0;font:600 13px/1.2 var(--f-ui)}
-  .ka-card-h .muted{font-size:12px;margin-left:auto;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .ka-card-h h3{margin:0;font:600 var(--fs-lg)/1.25 var(--f-ui);white-space:nowrap}
+  .ka-card-h .muted{font-size:var(--fs-xs);margin-left:auto;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
   .ka-card-h .btn{flex:none;margin:-4px -6px -4px 0}
   .ka-exs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
   .ka-ex{position:relative;display:flex;flex-direction:column;gap:5px;padding:6px 6px 7px;border-radius:9px;border:1px solid var(--line);background:var(--bg2);color:var(--text2);cursor:pointer;text-align:left;min-width:0;font:inherit;transition:border-color .15s,background .15s,box-shadow .15s}
@@ -1238,28 +1238,28 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-ex.on{border-color:color-mix(in srgb,var(--accent) 75%,transparent);background:color-mix(in srgb,var(--accent) 9%,var(--card2));box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent)}
   .ka-ex .th{display:block;border-radius:4px;overflow:hidden;aspect-ratio:2.35/1;box-shadow:0 0 0 1px var(--line)}
   .ka-ex .th svg{display:block;width:100%;height:100%}
-  .ka-ex b{display:block;font-size:12px;font-weight:600;color:var(--text);padding:0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:16px}
+  .ka-ex b{display:block;font-size:var(--fs-sm);font-weight:600;color:var(--text);padding:0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:16px}
   @media (min-width:1241px){.ka-left.stick{position:sticky;top:0}}
-  .ka-ex small{display:block;font-size:10.5px;line-height:1.25;color:var(--muted);padding:0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ka-ex small{display:block;font-size:var(--fs-2xs);line-height:1.25;color:var(--muted);padding:0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ka-ex.up .th{display:grid;place-items:center;align-content:center;gap:2px;background:var(--bg);border:1px dashed var(--line2);box-shadow:none;color:var(--muted)}
   .ka-ex.up.on .th{border-color:var(--accent);color:var(--accent)}
-  @media (max-width:560px){.ka-ex small{display:none}.ka-ex b{font-size:11px}}
+  @media (max-width:560px){.ka-ex small{display:none}.ka-ex b{font-size:var(--fs-xs)}}
   .ka-stage{position:relative;margin-top:12px;border-radius:7px;overflow:hidden;background:var(--bg2);box-shadow:0 0 0 1px var(--line2),0 16px 36px rgba(0,0,0,.38)}
   .ka-stage .ka-dwg{display:block;width:100%;height:auto}
   .ka-stage.drag{box-shadow:0 0 0 2px var(--accent),0 16px 36px rgba(0,0,0,.38)}
   .ka-ov{position:absolute;inset:0;pointer-events:none}
   .ka-scan{position:absolute;left:0;right:0;top:0;height:26%;pointer-events:none;background:linear-gradient(180deg,transparent,color-mix(in srgb,var(--accent) 14%,transparent) 70%,color-mix(in srgb,var(--accent) 38%,transparent));border-bottom:2px solid var(--accent);animation:kaScan 1.7s cubic-bezier(.45,.05,.55,.95) infinite;box-shadow:0 6px 18px color-mix(in srgb,var(--accent) 30%,transparent)}
-  .ka-mk{position:absolute;width:19px;height:19px;margin:-9.5px 0 0 -9.5px;border-radius:50%;display:grid;place-items:center;font:700 10.5px/1 var(--f-ui);color:var(--accent-ink);background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 30%,transparent),0 2px 6px rgba(4,16,30,.45);animation:kaPop .42s cubic-bezier(.2,.9,.3,1.35) both;pointer-events:auto;cursor:default;transition:transform .15s,box-shadow .15s}
+  .ka-mk{position:absolute;width:19px;height:19px;margin:-9.5px 0 0 -9.5px;border-radius:50%;display:grid;place-items:center;font:700 var(--fs-2xs)/1 var(--f-ui);color:var(--accent-ink);background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 30%,transparent),0 2px 6px rgba(4,16,30,.45);animation:kaPop .42s cubic-bezier(.2,.9,.3,1.35) both;pointer-events:auto;cursor:default;transition:transform .15s,box-shadow .15s}
   .ka-mk.hl{transform:scale(1.35);box-shadow:0 0 0 5px color-mix(in srgb,var(--accent) 40%,transparent),0 2px 8px rgba(4,16,30,.5);z-index:2}
   .ka-imgbox{position:relative;display:block;margin:0 auto;width:max-content;max-width:100%}
   .ka-imgbox img{display:block;max-width:100%;max-height:440px;height:auto}
-  .ka-drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;aspect-ratio:297/210;padding:18px;border:1.5px dashed var(--line2);border-radius:7px;color:var(--muted);font-size:12.5px;cursor:pointer;background:var(--bg)}
+  .ka-drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;aspect-ratio:297/210;padding:18px;border:1.5px dashed var(--line2);border-radius:7px;color:var(--muted);font-size:var(--fs-sm);cursor:pointer;background:var(--bg)}
   .ka-drop:hover,.ka-stage.drag .ka-drop{border-color:var(--accent);color:var(--text2)}
-  .ka-drop b{color:var(--text);font-size:14px}
-  .ka-pdf{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;aspect-ratio:297/210;padding:18px;text-align:center;color:var(--text2);font-size:12.5px;background:var(--bg)}
-  .ka-pdf .ic{width:52px;height:64px;border-radius:6px;display:grid;place-items:center;background:var(--card2);border:1px solid var(--line2);color:var(--st-fault);font:700 12px var(--f-ui)}
+  .ka-drop b{color:var(--text);font-size:var(--fs-md)}
+  .ka-pdf{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;aspect-ratio:297/210;padding:18px;text-align:center;color:var(--text2);font-size:var(--fs-sm);background:var(--bg)}
+  .ka-pdf .ic{width:52px;height:64px;border-radius:6px;display:grid;place-items:center;background:var(--card2);border:1px solid var(--line2);color:var(--st-fault);font:700 var(--fs-sm) var(--f-ui)}
   .ka-sinfo{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px}
-  .ka-sinfo .chip{font-family:var(--f-mono);font-size:11px}
+  .ka-sinfo .chip{font-family:var(--f-mono);font-size:var(--fs-xs)}
   .ka-form{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:10px 12px;padding:10px 14px 12px}
   @media (max-width:520px){.ka-form{grid-template-columns:minmax(0,1fr)}}
   .ka-form .full{grid-column:1/-1}
@@ -1277,17 +1277,17 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-form .seg{height:34px;align-items:stretch}
   .ka-go{display:flex;flex-direction:column;gap:9px;padding:0 14px 14px}
   .ka-gorow{display:flex;gap:8px;align-items:stretch}
-  .ka-gobtn{flex:1;height:42px;font-size:14px;border-radius:9px;gap:9px}
+  .ka-gobtn{flex:1;height:42px;font-size:var(--fs-md);border-radius:9px;gap:9px}
   .ka-gobtn .spin{width:15px;height:15px;border-radius:50%;border:2px solid color-mix(in srgb,var(--accent-ink) 35%,transparent);border-top-color:var(--accent-ink);animation:kaSpin .8s linear infinite}
-  .ka-gohint{display:flex;align-items:flex-start;gap:7px;font-size:11.5px;line-height:1.4;color:var(--muted);min-height:16px}
+  .ka-gohint{display:flex;align-items:flex-start;gap:7px;font-size:var(--fs-xs);line-height:1.4;color:var(--muted);min-height:16px}
   .ka-gohint .ico{flex:none;margin-top:1px;color:var(--faint)}
-  .ka-mode{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted)}
-  .ka-mode .seg button{padding:4px 10px;font-size:11.5px}
+  .ka-mode{display:flex;align-items:center;gap:8px;font-size:var(--fs-xs);color:var(--muted)}
+  .ka-mode .seg button{padding:4px 10px;font-size:var(--fs-xs)}
   .ka-recent .row{padding:8px 14px;border-top:1px solid var(--line);gap:10px;flex-wrap:nowrap;cursor:pointer}
   .ka-recent .row:hover{background:color-mix(in srgb,var(--raise) 40%,transparent)}
-  .ka-recent .row .id{font-family:var(--f-mono);font-size:12px;color:var(--text)}
-  .ka-recent .row .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px;color:var(--text2)}
-  .ka-recent .row .eta{font-size:12px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .ka-recent .row .id{font-family:var(--f-mono);font-size:var(--fs-sm);color:var(--text)}
+  .ka-recent .row .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:var(--fs-sm);color:var(--text2)}
+  .ka-recent .row .eta{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
   /* Ergebnis */
   .ka-flow{padding:14px 12px 12px}
   .ka-steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
@@ -1299,13 +1299,13 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-st.act .d{color:var(--accent);border-color:var(--accent);box-shadow:0 0 0 5px color-mix(in srgb,var(--accent) 14%,transparent);animation:kaRing 1.3s ease-in-out infinite}
   .ka-st.done .d{color:var(--accent-ink);background:var(--accent);border-color:var(--accent)}
   .ka-st.err .d{color:var(--st-fault);border-color:var(--st-fault)}
-  .ka-st b{font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .ka-st b{font-size:var(--fs-sm);font-weight:600;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
   .ka-st.act b,.ka-st.done b{color:var(--text)}
-  .ka-st small{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;font-variant-numeric:tabular-nums;min-height:15px}
+  .ka-st small{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;font-variant-numeric:tabular-nums;min-height:15px}
   .ka-st b .sm{display:none}
-  @media (max-width:560px){.ka-st b{font-size:11px}.ka-st b .lg{display:none}.ka-st b .sm{display:inline}.ka-st small{display:none}.ka-st .d{width:28px;height:28px}.ka-st::before{top:13px;right:calc(50% + 18px);left:calc(-50% + 18px)}}
+  @media (max-width:560px){.ka-st b{font-size:var(--fs-xs)}.ka-st b .lg{display:none}.ka-st b .sm{display:inline}.ka-st small{display:none}.ka-st .d{width:28px;height:28px}.ka-st::before{top:13px;right:calc(50% + 18px);left:calc(-50% + 18px)}}
   .ka-sec{overflow:hidden}
-  .ka-sum{display:flex;align-items:flex-start;gap:9px;margin:12px 4px 0;padding:10px 12px 0;border-top:1px solid var(--line);font-size:12.8px;color:var(--text2);line-height:1.5}
+  .ka-sum{display:flex;align-items:flex-start;gap:9px;margin:12px 4px 0;padding:10px 12px 0;border-top:1px solid var(--line);font-size:var(--fs-sm);color:var(--text2);line-height:1.5}
   .ka-sum>.ico{flex:none;margin-top:3px;color:var(--accent)}
   .ka-sum b{color:var(--text);font-weight:600}
   .ka-sum b.ok{color:var(--st-run)}.ka-sum b.bad{color:var(--st-fault)}.ka-sum b.warn{color:var(--st-wait)}
@@ -1313,8 +1313,8 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-wait{padding:16px}
   .ka-wait .hd{display:flex;align-items:flex-start;gap:12px}
   .ka-wait .hd>div{flex:1;min-width:0}
-  .ka-wait b{font-size:14px}
-  .ka-wait p{margin:3px 0 0;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .ka-wait b{font-size:var(--fs-md)}
+  .ka-wait p{margin:3px 0 0;font-size:var(--fs-sm);color:var(--muted);font-variant-numeric:tabular-nums}
   .ka-wait .sp{flex:none;width:22px;height:22px;margin-top:1px;border-radius:50%;border:2px solid color-mix(in srgb,var(--accent) 25%,transparent);border-top-color:var(--accent);animation:kaSpin .9s linear infinite}
   .ka-sk{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:18px;margin-top:16px}
   .ka-sk i{display:block;height:10px;border-radius:5px;margin-bottom:11px;background:linear-gradient(90deg,var(--card2) 0%,var(--raise) 45%,var(--card2) 90%);background-size:220% 100%;animation:kaShim 1.5s linear infinite}
@@ -1322,30 +1322,30 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   @keyframes kaShim{from{background-position:120% 0}to{background-position:-120% 0}}
   .ka-sh{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line);min-width:0}
   .ka-sh .n{flex:none;width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font:700 11.5px/1 var(--f-ui);color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);border:1px solid color-mix(in srgb,var(--accent) 32%,transparent)}
-  .ka-sh h3{margin:0;font:600 13.5px/1.2 var(--f-ui);white-space:nowrap}
-  .ka-sh .m{margin-left:auto;font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ka-badge{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid var(--line2);color:var(--text2);background:var(--card2);white-space:nowrap}
+  .ka-sh h3{margin:0;font:600 var(--fs-lg)/1.25 var(--f-ui);white-space:nowrap}
+  .ka-sh .m{margin-left:auto;font-size:var(--fs-xs);color:var(--muted);display:flex;gap:8px;align-items:center;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ka-badge{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;font-size:var(--fs-xs);font-weight:600;border:1px solid var(--line2);color:var(--text2);background:var(--card2);white-space:nowrap}
   .ka-badge.ai{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,transparent);background:color-mix(in srgb,var(--accent) 9%,transparent)}
   .ka-in{animation:kaIn .5s cubic-bezier(.2,.7,.2,1) both}
   .ka-est{text-decoration:underline dotted color-mix(in srgb,var(--accent) 65%,transparent);text-underline-offset:3px;text-decoration-thickness:1.5px;cursor:help}
   /* 1 Teil */
   .ka-part{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:0}
   .ka-pmain{padding:14px;border-right:1px solid var(--line);min-width:0}
-  .ka-pname{font:600 26px/1.05 var(--f-cond);letter-spacing:.01em}
-  .ka-psub{margin-top:4px;font-size:12.5px;color:var(--muted)}
+  .ka-pname{font:600 var(--fs-2xl)/1.05 var(--f-cond);letter-spacing:.01em}
+  .ka-psub{margin-top:4px;font-size:var(--fs-sm);color:var(--muted)}
   .ka-psub .mono{color:var(--text2)}
   .ka-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px;margin-top:14px}
   .ka-fact{min-width:0}
-  .ka-fact .l{font:600 10px/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
-  .ka-fact .v{margin-top:3px;font-size:13.5px;font-weight:600;color:var(--text);overflow-wrap:break-word}
-  .ka-fact .s{margin-top:1px;font-size:12px;color:var(--muted);line-height:1.35}
+  .ka-fact .l{font:600 var(--fs-2xs)/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .ka-fact .v{margin-top:3px;font-size:var(--fs-md);font-weight:600;color:var(--text);overflow-wrap:break-word}
+  .ka-fact .s{margin-top:1px;font-size:var(--fs-xs);color:var(--muted);line-height:1.35}
   .ka-fact.full{grid-column:1/-1}
   .ka-stock{margin-top:8px}
   .ka-stock .bw{position:relative}
   .ka-stock .trk{height:10px;border-radius:5px;background:var(--track);overflow:hidden;display:flex}
   .ka-stock .trk i{display:block;height:100%}
   .ka-stock .mn{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;border-radius:1px;background:var(--st-wait);box-shadow:0 0 0 1.5px var(--card)}
-  .ka-stock .lg{display:flex;gap:4px 12px;flex-wrap:wrap;margin-top:6px;font-size:11.5px;color:var(--muted)}
+  .ka-stock .lg{display:flex;gap:4px 12px;flex-wrap:wrap;margin-top:6px;font-size:var(--fs-xs);color:var(--muted)}
   .ka-stock .lg span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
   .ka-stock .lg i{width:9px;height:9px;border-radius:2px;display:inline-block}
   .ka-feats{padding:12px 14px 14px;min-width:0}
@@ -1353,57 +1353,57 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-fl{display:flex;flex-direction:column;gap:5px}
   .ka-feat{display:grid;grid-template-columns:20px 26px minmax(0,1fr);gap:9px;align-items:center;padding:6px 9px 6px 7px;border-radius:7px;background:var(--bg2);border:1px solid var(--line);transition:border-color .15s,background .15s}
   .ka-feat.hl{border-color:color-mix(in srgb,var(--accent) 60%,transparent);background:color-mix(in srgb,var(--accent) 7%,var(--bg2))}
-  .ka-feat .no{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font:700 10.5px/1 var(--f-ui);color:var(--accent-ink);background:var(--accent)}
+  .ka-feat .no{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font:700 var(--fs-2xs)/1 var(--f-ui);color:var(--accent-ink);background:var(--accent)}
   .ka-feat .no.x{background:var(--raise);color:var(--muted)}
   .ka-feat .ic{width:26px;height:24px;border-radius:5px;display:grid;place-items:center;color:var(--text2);background:var(--card2);border:1px solid var(--line2)}
   .ka-feat .t{display:flex;align-items:baseline;gap:8px;min-width:0}
-  .ka-feat .t b{font-family:var(--f-mono);font-size:12.5px;font-weight:500;color:var(--text);white-space:nowrap}
-  .ka-feat .t .crit{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--st-wait)}
-  .ka-feat .d{font-size:11.8px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ka-feat .t b{font-family:var(--f-mono);font-size:var(--fs-sm);font-weight:500;color:var(--text);white-space:nowrap}
+  .ka-feat .t .crit{font-size:var(--fs-2xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--st-wait)}
+  .ka-feat .d{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   @media (max-width:760px){.ka-part{grid-template-columns:minmax(0,1fr)}.ka-pmain{border-right:0;border-bottom:1px solid var(--line)}}
   /* 2 Arbeitsplan */
   .ka-oph,.ka-op{display:grid;grid-template-columns:36px minmax(0,1fr) 222px;gap:4px 14px;padding:0 14px}
-  .ka-oph{padding-top:8px;padding-bottom:7px;border-bottom:1px solid var(--line);font:600 10px/1.2 var(--f-ui);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+  .ka-oph{padding-top:8px;padding-bottom:7px;border-bottom:1px solid var(--line);font:600 var(--fs-2xs)/1.2 var(--f-ui);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
   .ka-oph .nums span,.ka-op .nums>div{text-align:right}
   .ka-nums{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
   .ka-op{padding-top:11px;padding-bottom:11px;border-bottom:1px solid var(--line);align-items:start}
   .ka-op:last-child{border-bottom:0}
-  .ka-op .seq{font:600 12.5px/20px var(--f-mono);color:var(--muted)}
+  .ka-op .seq{font:600 var(--fs-sm)/20px var(--f-mono);color:var(--muted)}
   .ka-op .hd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
-  .ka-op .hd b{font-size:13.5px;font-weight:600}
-  .ka-op .why{margin-top:3px;font-size:12px;line-height:1.4;color:var(--muted)}
-  .ka-op .meta{display:flex;flex-wrap:wrap;gap:3px 10px;margin-top:4px;font-size:11.5px;color:var(--muted)}
+  .ka-op .hd b{font-size:var(--fs-md);font-weight:600}
+  .ka-op .why{margin-top:3px;font-size:var(--fs-sm);line-height:1.4;color:var(--muted)}
+  .ka-op .meta{display:flex;flex-wrap:wrap;gap:3px 10px;margin-top:4px;font-size:var(--fs-xs);color:var(--muted)}
   .ka-op .meta span{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
   .ka-op .meta .w{color:color-mix(in srgb,var(--st-wait) 88%,white)}
   .ka-op .meta .ico{opacity:.8}
   .ka-op .tl{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
-  .ka-op .tl .chip{font-size:11px;padding:2px 7px}
+  .ka-op .tl .chip{font-size:var(--fs-xs);padding:2px 7px}
   .ka-op .tl .chip em{font-style:normal;color:var(--muted);margin-left:2px}
   .ka-op .tl .chip.chg{border-color:color-mix(in srgb,var(--st-tool) 45%,transparent)}
   .ka-op .tl .chip.chg em{color:color-mix(in srgb,var(--st-tool) 85%,white)}
-  .ka-op .nums>div{font:600 13px/20px var(--f-ui);font-variant-numeric:tabular-nums;white-space:nowrap}
-  .ka-op .nums small{display:block;font:500 11px/1.3 var(--f-ui);color:var(--muted);white-space:nowrap}
-  .ka-mc{display:inline-flex;align-items:center;gap:6px;padding:2px 8px 2px 7px;border-radius:6px;background:var(--card2);border:1px solid var(--line2);font-size:11.5px;color:var(--text2);white-space:nowrap;cursor:pointer}
+  .ka-op .nums>div{font:600 var(--fs-md)/20px var(--f-ui);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ka-op .nums small{display:block;font:500 var(--fs-xs)/1.3 var(--f-ui);color:var(--muted);white-space:nowrap}
+  .ka-mc{position:relative;display:inline-flex;align-items:center;gap:6px;padding:2px 8px 2px 7px;border-radius:6px;background:var(--card2);border:1px solid var(--line2);font-size:var(--fs-xs);color:var(--text2);white-space:nowrap;cursor:pointer}
   .ka-mc:hover{border-color:var(--muted);color:var(--text)}
   .ka-mc i{width:7px;height:7px;border-radius:50%;background:var(--c,var(--st-idle));flex:none}
-  .ka-mc .id{font-family:var(--f-mono);font-size:11px;color:var(--text)}
-  .ka-mc.ext{cursor:default;border-color:color-mix(in srgb,var(--mat) 40%,transparent);color:color-mix(in srgb,var(--mat) 85%,white);background:color-mix(in srgb,var(--mat) 8%,transparent)}
-  .ka-altb{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:6px;border:1px dashed var(--line2);background:transparent;color:var(--text2);font:500 11.5px/1 var(--f-ui);cursor:pointer;white-space:nowrap}
+  .ka-mc .id{font-family:var(--f-mono);font-size:var(--fs-xs);color:var(--text)}
+  .ka-mc.ext{cursor:default;border-color:color-mix(in srgb,var(--ext) 40%,transparent);color:color-mix(in srgb,var(--ext) 85%,white);background:color-mix(in srgb,var(--ext) 8%,transparent)}
+  .ka-altb{position:relative;display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 8px;border-radius:6px;border:1px dashed var(--line2);background:transparent;color:var(--text2);font:500 var(--fs-xs)/1 var(--f-ui);cursor:pointer;white-space:nowrap}
   .ka-altb:hover{border-color:var(--accent);color:var(--text)}
   .ka-altb em{font-style:normal;color:var(--muted)}
-  .ka-free{font-size:11.5px;color:var(--muted);white-space:nowrap}
+  .ka-free{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap}
   .ka-free.w{color:color-mix(in srgb,var(--st-wait) 85%,white)}
   .ka-chain{display:flex;align-items:center;flex-wrap:wrap;gap:6px 4px;padding:10px 14px;border-bottom:1px solid var(--line);background:linear-gradient(90deg,color-mix(in srgb,var(--mat) 5%,transparent),transparent 70%)}
-  .ka-cc{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px 0 8px;border-radius:7px;background:var(--bg2);border:1px solid var(--line2);font-size:11.5px;color:var(--text2);white-space:nowrap}
+  .ka-cc{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px 0 8px;border-radius:7px;background:var(--bg2);border:1px solid var(--line2);font-size:var(--fs-xs);color:var(--text2);white-space:nowrap}
   .ka-cc i{width:7px;height:7px;border-radius:50%;background:var(--c,var(--st-idle))}
-  .ka-cc b{font:600 11.5px/1 var(--f-mono);color:var(--text)}
-  .ka-cc small{font-size:11px;color:var(--muted)}
-  .ka-cc.ext{border-color:color-mix(in srgb,var(--mat) 45%,transparent);background:color-mix(in srgb,var(--mat) 9%,transparent);color:color-mix(in srgb,var(--mat) 85%,white)}
-  .ka-cc.ext b{color:color-mix(in srgb,var(--mat) 90%,white);font-family:var(--f-ui)}
+  .ka-cc b{font:600 var(--fs-xs)/1 var(--f-mono);color:var(--text)}
+  .ka-cc small{font-size:var(--fs-xs);color:var(--muted)}
+  .ka-cc.ext{border-color:color-mix(in srgb,var(--ext) 45%,transparent);background:color-mix(in srgb,var(--ext) 9%,transparent);color:color-mix(in srgb,var(--ext) 85%,white)}
+  .ka-cc.ext b{color:color-mix(in srgb,var(--ext) 90%,white);font-family:var(--f-ui)}
   .ka-ca{display:inline-grid;place-items:center;color:var(--mat);opacity:.9}
-  .ka-ops-f{display:flex;gap:6px 18px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line);background:var(--bg2);font-size:12px;color:var(--muted)}
+  .ka-ops-f{display:flex;gap:6px 18px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line);background:var(--bg2);font-size:var(--fs-sm);color:var(--muted)}
   .ka-ops-f b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
-  .ka-legend{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted)}
+  .ka-legend{display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--muted)}
   @media (max-width:640px){
     .ka-oph{display:none}
     .ka-op{grid-template-columns:30px minmax(0,1fr)}
@@ -1415,25 +1415,25 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-cl{padding:12px 14px;border-right:1px solid var(--line);min-width:0}
   .ka-cr{display:grid;grid-template-columns:minmax(0,1fr) max-content;gap:2px 14px;align-items:baseline;padding:5px 0;border-bottom:1px dashed var(--line)}
   .ka-cr:last-child{border-bottom:0}
-  .ka-cr .k{font-size:12.8px;color:var(--text2);min-width:0}
-  .ka-cr .k small{display:block;font-size:11.8px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:normal;overflow-wrap:anywhere;margin-top:1px}
-  .ka-cr .a{font:600 13px/1.2 var(--f-ui);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;color:var(--text)}
+  .ka-cr .k{font-size:var(--fs-sm);color:var(--text2);min-width:0}
+  .ka-cr .k small{display:block;font-size:var(--fs-xs);color:var(--muted);font-variant-numeric:tabular-nums;white-space:normal;overflow-wrap:anywhere;margin-top:1px}
+  .ka-cr .a{font:600 var(--fs-md)/1.2 var(--f-ui);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;color:var(--text)}
   .ka-cr.sub{border-bottom:0;padding:2px 0 2px 12px}
-  .ka-cr.sub .k{font-size:12px;color:var(--muted)}
-  .ka-cr.sub .a{font-weight:500;font-size:12px;color:var(--text2)}
+  .ka-cr.sub .k{font-size:var(--fs-sm);color:var(--muted)}
+  .ka-cr.sub .a{font-weight:500;font-size:var(--fs-sm);color:var(--text2)}
   .ka-cr.sum{border-top:1px solid var(--line2);border-bottom:0;margin-top:4px;padding-top:7px}
   .ka-cr.sum .k{color:var(--text);font-weight:600}
   .ka-cr.tot .k{font-weight:700;color:var(--text)}
-  .ka-cr.tot .a{font-size:15px}
+  .ka-cr.tot .a{font-size:var(--fs-lg)}
   .ka-price{padding:14px;display:flex;flex-direction:column;gap:12px;background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 6%,transparent),transparent 60%);min-width:0}
-  .ka-price .big{font:600 38px/1 var(--f-cond);font-variant-numeric:tabular-nums;letter-spacing:.01em}
-  .ka-price .big small{font-size:16px;color:var(--muted);font-weight:500;margin-left:4px}
-  .ka-price .tot{font-size:13px;color:var(--text2)}
+  .ka-price .big{font:600 var(--fs-kpi)/1.1 var(--f-cond);margin-top:5px;font-variant-numeric:tabular-nums;letter-spacing:.01em}
+  .ka-price .big small{font-size:var(--fs-lg);color:var(--muted);font-weight:500;margin-left:4px}
+  .ka-price .tot{font-size:var(--fs-sm);margin-top:3px;color:var(--text2)}
   .ka-price .tot b{font-variant-numeric:tabular-nums}
-  .ka-zrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
-  .ka-zrow .seg button{padding:4px 8px;font-size:11.5px}
+  .ka-zrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:var(--fs-sm);color:var(--muted)}
+  .ka-zrow .seg button{padding:4px 8px;font-size:var(--fs-xs)}
   .ka-stf{display:flex;flex-direction:column;gap:4px}
-  .ka-stf button{display:grid;grid-template-columns:62px minmax(0,1fr) 74px;align-items:center;gap:8px;padding:3px 4px;border:0;border-radius:6px;background:transparent;color:var(--text2);cursor:pointer;font:inherit;font-size:12px;text-align:left}
+  .ka-stf button{display:grid;grid-template-columns:62px minmax(0,1fr) 74px;align-items:center;gap:8px;padding:3px 4px;border:0;border-radius:6px;background:transparent;color:var(--text2);cursor:pointer;font:inherit;font-size:var(--fs-sm);text-align:left}
   .ka-stf button:hover{background:color-mix(in srgb,var(--raise) 50%,transparent)}
   .ka-stf button .q{font-variant-numeric:tabular-nums;white-space:nowrap}
   .ka-stf button .b{height:8px;border-radius:4px;background:var(--track);overflow:hidden}
@@ -1444,41 +1444,39 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   @media (max-width:760px){.ka-calc{grid-template-columns:minmax(0,1fr)}.ka-cl{border-right:0;border-bottom:1px solid var(--line)}}
   /* 4 Termin */
   .ka-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:12px 14px 4px}
-  .ka-tile{--c:var(--line2);min-width:0;padding:10px 12px 11px;border-radius:9px;background:var(--bg2);border:1px solid var(--line);box-shadow:inset 3px 0 0 var(--c)}
-  .ka-tile .l{font:600 10px/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
-  .ka-tile .v{margin-top:5px;font:600 25px/1.05 var(--f-cond);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ka-tile .s{margin-top:4px;font-size:11.8px;color:var(--muted);line-height:1.35}
-  .ka-tile .s b{color:var(--text2);font-weight:600}
+  /* Termin-Kennzahlen: Standard-Kachel .kpi (UI_GUIDE Regel 14) – Hinweis nur über .warn/.crit */
+  .ka-tiles .kpi{min-height:0;background:var(--bg2)}
+  .ka-tiles .kpi .s b{color:var(--text2);font-weight:600}
   .ka-gantt{position:relative;padding:8px 14px 4px;min-width:0}
   .ka-gantt svg{display:block;width:100%;overflow:visible}
-  .ka-gantt text{font-family:var(--f-ui);font-size:11px;fill:var(--muted)}
+  .ka-gantt text{font-family:var(--f-ui);font-size:11.5px;fill:var(--muted)}
   .ka-gantt .lb{fill:var(--text2);font-size:11.5px;font-weight:600}
   .ka-gantt .lb2{fill:var(--muted);font-size:10.5px}
   .ka-gantt .bt{fill:var(--bg);font-size:10.5px;font-weight:600}
-  .ka-gantt .qt{fill:var(--text2);font-size:10px}
+  .ka-gantt .qt{fill:var(--text2);font-size:10.5px}
   .ka-gantt [data-tip]{cursor:default}
   .ka-gb{transform-box:fill-box;transform-origin:left center}
   .ka-gantt.anim .ka-gb{animation:kaGrow .7s cubic-bezier(.2,.7,.2,1) both}
-  .ka-glg{display:flex;gap:4px 14px;flex-wrap:wrap;padding:2px 14px 10px;font-size:11.5px;color:var(--muted)}
+  .ka-glg{display:flex;gap:4px 14px;flex-wrap:wrap;padding:2px 14px 10px;font-size:var(--fs-xs);color:var(--muted)}
   .ka-glg span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
   .ka-glg i{width:12px;height:8px;border-radius:2px;display:inline-block}
-  .ka-tip{position:fixed;z-index:80;pointer-events:none;max-width:300px;padding:7px 9px;border-radius:8px;background:var(--card2);border:1px solid var(--line2);box-shadow:var(--shadow);font-size:12px;line-height:1.4;color:var(--text2)}
+  .ka-tip{position:fixed;z-index:80;pointer-events:none;max-width:300px;padding:7px 9px;border-radius:8px;background:var(--card2);border:1px solid var(--line2);box-shadow:var(--shadow);font-size:var(--fs-sm);line-height:1.4;color:var(--text2)}
   .ka-tip b{color:var(--text)}
   .ka-imp{padding:4px 14px 12px}
   .ka-imp .eyebrow{margin:6px 0 6px}
-  .ka-imp .r{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--line);font-size:12.5px}
-  .ka-imp .r .id{font-family:var(--f-mono);font-size:12px;color:var(--text)}
+  .ka-imp .r{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--line);font-size:var(--fs-sm)}
+  .ka-imp .r .id{font-family:var(--f-mono);font-size:var(--fs-sm);color:var(--text)}
   .ka-imp .r .t{color:var(--text2);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ka-imp .none{font-size:12.5px;color:var(--muted);display:flex;gap:8px;align-items:center}
-  .ka-duec{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line);background:var(--bg2);font-size:12px;color:var(--muted)}
-  .ka-duec .seg button{padding:5px 10px;font-size:12px}
-  @media (max-width:760px){.ka-tiles{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.ka-tiles .ka-tile:first-child{grid-column:1/-1}}
+  .ka-imp .none{font-size:var(--fs-sm);color:var(--muted);display:flex;gap:8px;align-items:center}
+  .ka-duec{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line);background:var(--bg2);font-size:var(--fs-sm);color:var(--muted)}
+  .ka-duec .seg button{padding:5px 10px;font-size:var(--fs-sm)}
+  @media (max-width:760px){.ka-tiles{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.ka-tiles .kpi:first-child{grid-column:1/-1}}
   /* 5 Hinweise */
   .ka-hints{display:flex;flex-direction:column;gap:7px;padding:12px 14px 14px}
   .ka-hint{--c:var(--info);display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:10px;align-items:start;padding:9px 11px;border-radius:8px;background:var(--bg2);border:1px solid var(--line);box-shadow:inset 3px 0 0 var(--c)}
   .ka-hint .ic{color:var(--c);margin-top:1px}
-  .ka-hint b{display:block;font-size:13px;font-weight:600;color:var(--text)}
-  .ka-hint p{margin:2px 0 0;font-size:12.2px;line-height:1.45;color:var(--text2)}
+  .ka-hint b{display:block;font-size:var(--fs-md);font-weight:600;color:var(--text)}
+  .ka-hint p{margin:2px 0 0;font-size:var(--fs-sm);line-height:1.45;color:var(--text2)}
   .ka-hint .btn{align-self:center}
   @media (max-width:560px){.ka-hint{grid-template-columns:20px minmax(0,1fr)}.ka-hint .btn{grid-column:2;justify-self:start}}
   /* Fußleiste */
@@ -1487,17 +1485,17 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-foot::before{content:"";position:absolute;left:-1px;right:-1px;bottom:calc(100% + 1px);height:26px;background:linear-gradient(180deg,color-mix(in srgb,var(--bg) 0%,transparent),var(--bg));pointer-events:none}
   .ka-foot .sum{display:flex;align-items:baseline;gap:6px 22px;flex-wrap:wrap;min-width:0;flex:1}
   .ka-foot .sum div{display:flex;flex-direction:column;min-width:0}
-  .ka-foot .sum .l{font:600 10px/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
-  .ka-foot .sum .v{font:600 18px/1.2 var(--f-cond);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ka-foot .sum .l{font:600 var(--fs-2xs)/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .ka-foot .sum .v{font:600 var(--fs-xl)/1.2 var(--f-cond);font-variant-numeric:tabular-nums;white-space:nowrap}
   .ka-foot .acts{display:flex;gap:8px;flex-wrap:wrap}
-  .ka-foot .btn.primary{height:40px;padding:0 18px;font-size:14px}
+  .ka-foot .btn.primary{height:40px;padding:0 18px;font-size:var(--fs-md)}
   .ka-foot .btn{height:40px}
   @media (max-width:560px){
     .ka-foot{padding:10px 12px;gap:8px}
     .ka-foot .sum{gap:2px 14px}
-    .ka-foot .sum .l{font-size:9.5px}.ka-foot .sum .v{font-size:16px}
+    .ka-foot .sum .v{font-size:var(--fs-lg)}
     .ka-foot .acts{width:100%;flex-wrap:nowrap}
-    .ka-foot .acts .btn{height:38px}
+    .ka-foot .acts .btn{height:40px}
     .ka-foot .acts .btn.primary{flex:1}
     .ka-foot .acts .btn .tx{display:none}
   }
@@ -1505,29 +1503,29 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-ban{--c:var(--st-run);display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 14px;border-radius:var(--r);background:color-mix(in srgb,var(--c) 9%,var(--card));border:1px solid color-mix(in srgb,var(--c) 40%,transparent)}
   .ka-ban .ic{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;flex:none;color:var(--c);background:color-mix(in srgb,var(--c) 16%,transparent)}
   .ka-ban .tx{flex:1;min-width:200px}
-  .ka-ban b{font-size:14px}
-  .ka-ban p{margin:2px 0 0;font-size:12.5px;color:var(--text2)}
+  .ka-ban b{font-size:var(--fs-md)}
+  .ka-ban p{margin:2px 0 0;font-size:var(--fs-sm);color:var(--text2)}
   .ka-ban .bar{margin-top:7px;max-width:360px}
   .ka-empty{padding:22px 22px 18px}
   .ka-empty .hd{display:flex;gap:14px;align-items:flex-start}
   .ka-empty .hd .ic{flex:none;width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent)}
-  .ka-empty h2{margin:0;font:600 24px/1.1 var(--f-cond)}
-  .ka-empty .hd p{margin:6px 0 0;color:var(--text2);font-size:13px;line-height:1.5;max-width:62ch}
+  .ka-empty h2{margin:0;font:600 var(--fs-xl)/1.15 var(--f-cond)}
+  .ka-empty .hd p{margin:6px 0 0;color:var(--text2);font-size:var(--fs-md);line-height:1.5;max-width:62ch}
   .ka-esteps{list-style:none;margin:18px 0 0;padding:0;display:grid;grid-template-columns:minmax(0,1fr);gap:0}
   .ka-esteps li{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
   .ka-esteps li .d{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:var(--bg2);border:1px solid var(--line2);color:var(--accent)}
-  .ka-esteps li b{display:block;font-size:13px}
-  .ka-esteps li span{font-size:12.2px;color:var(--muted);line-height:1.4}
-  .ka-esteps li .who{font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:3px 7px;border-radius:5px;white-space:nowrap}
+  .ka-esteps li b{display:block;font-size:var(--fs-md)}
+  .ka-esteps li span{font-size:var(--fs-sm);color:var(--muted);line-height:1.4}
+  .ka-esteps li .who{font-size:var(--fs-2xs);font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:3px 7px;border-radius:5px;white-space:nowrap}
   .ka-esteps li .who.c{color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent)}
   .ka-esteps li .who.w{color:var(--st-run);background:color-mix(in srgb,var(--st-run) 10%,transparent)}
   .ka-cap{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
   .ka-cap .eyebrow{display:flex;justify-content:space-between;gap:10px}
   .ka-capg{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:6px;margin-top:9px}
-  .ka-capg .c{display:grid;grid-template-columns:7px minmax(0,1fr);grid-template-rows:auto auto auto;gap:2px 8px;align-items:center;padding:7px 9px 8px;border-radius:7px;background:var(--bg2);border:1px solid var(--line);font-size:12px;min-width:0}
+  .ka-capg .c{display:grid;grid-template-columns:7px minmax(0,1fr);grid-template-rows:auto auto auto;gap:2px 8px;align-items:center;padding:7px 9px 8px;border-radius:7px;background:var(--bg2);border:1px solid var(--line);font-size:var(--fs-sm);min-width:0}
   .ka-capg .c .nmw{display:flex;gap:6px;align-items:baseline;min-width:0}
   .ka-capg .c .frw{grid-column:2;display:flex;align-items:baseline;gap:6px;min-width:0}
-  .ka-capg .c .bis{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;font-variant-numeric:tabular-nums}
+  .ka-capg .c .bis{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;font-variant-numeric:tabular-nums}
   .ka-capg .c .occ{grid-column:1/-1;position:relative;display:block;height:4px;margin-top:4px;border-radius:2px;background:var(--track);overflow:hidden}
   .ka-capg .c .occ i{position:absolute;top:0;bottom:0;width:auto;height:auto;border-radius:1px;background:color-mix(in srgb,var(--muted) 55%,transparent)}
   .ka-capg .c .occ i.a{background:var(--c)}
@@ -1536,26 +1534,26 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-capg .c .bnt{flex:none;align-self:center;display:inline-grid;place-items:center;color:var(--st-wait)}
   .ka-caplg .bnl{display:inline-flex;align-items:center;gap:5px}
   .ka-caplg .bnl .ico{color:var(--st-wait)}
-  .ka-caplg{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:11px;color:var(--muted)}
+  .ka-caplg{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:var(--fs-xs);color:var(--muted)}
   .ka-caplg span{display:inline-flex;align-items:center;gap:6px}
   .ka-caplg i{display:inline-block;width:14px;height:4px;border-radius:2px;background:color-mix(in srgb,var(--muted) 55%,transparent)}
   .ka-caplg i.a{background:var(--st-run)}
   .ka-capg .c i{width:7px;height:7px;border-radius:50%;flex:none;background:var(--c)}
-  .ka-capg .c .id{font-family:var(--f-mono);font-size:11px;color:var(--muted)}
+  .ka-capg .c .id{font-family:var(--f-mono);font-size:var(--fs-xs);color:var(--muted)}
   .ka-capg .c .nm{color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
   .ka-capg .c .fr{white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--text);flex:none}
   .ka-capg .c .fr.ok{color:var(--st-run)}
   .ka-note{padding:18px;display:flex;gap:14px;align-items:flex-start}
   .ka-note .ic{flex:none;width:40px;height:40px;border-radius:11px;display:grid;place-items:center;color:var(--c,var(--st-wait));background:color-mix(in srgb,var(--c,var(--st-wait)) 13%,transparent)}
-  .ka-note h3{margin:0;font:600 18px/1.2 var(--f-cond)}
-  .ka-note p{margin:5px 0 0;font-size:13px;color:var(--text2);line-height:1.5}
+  .ka-note h3{margin:0;font:600 var(--fs-xl)/1.2 var(--f-cond)}
+  .ka-note p{margin:5px 0 0;font-size:var(--fs-md);color:var(--text2);line-height:1.5}
   .ka-note .row{margin-top:12px}
-  .ka-qt{width:100%;min-height:330px;font-family:var(--f-mono);font-size:12px;line-height:1.5;resize:vertical}
+  .ka-qt{width:100%;min-height:330px;font-family:var(--f-mono);font-size:var(--fs-sm);line-height:1.5;resize:vertical}
   .ka-zm{background:var(--bg2);border-radius:8px;overflow:hidden;position:relative}
   .ka-zm svg{display:block;width:100%;height:auto}
   .ka-zm .ka-mk{animation:none;cursor:pointer}
   .ka-mk{cursor:pointer}
-  .ka-zhint{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin:-4px 0 0}
+  .ka-zhint{display:flex;align-items:center;gap:8px;font-size:var(--fs-xs);color:var(--muted);margin:-4px 0 0}
   .ka-zhint .ico{flex:none;color:var(--faint)}
   /* Telefon: Lightbox als Vollbild, Zeichnung in fester Breite – verschieben und mit zwei Fingern zoomen */
   .modal-back.ka-zback{padding:0}
@@ -1565,7 +1563,20 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .modal.ka-zmodal .ka-zhint{padding:0 16px;margin:0}
   .ka-zpan{flex:1;min-height:0;overflow:auto;touch-action:pan-x pan-y pinch-zoom;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;background:var(--bg2);padding-bottom:env(safe-area-inset-bottom,0px)}
   .ka-zpan .ka-zm{width:1100px;border-radius:0}
-  .ka-zpan .ka-mk{width:26px;height:26px;margin:-13px 0 0 -13px;font-size:12.5px}
+  .ka-zpan .ka-mk{width:26px;height:26px;margin:-13px 0 0 -13px;font-size:var(--fs-sm)}
+  /* Touch: Bedienflächen ≥ 40 px, Eingaben 16 px (UI_GUIDE Regel 17) */
+  @media (pointer:coarse){
+    .ka-form .input{height:40px}
+    .ka-form .seg{height:auto}
+    .ka-qty{grid-template-columns:40px minmax(0,1fr) 40px}
+    .ka-qty button{height:40px}
+    .ka-seg button,.ka-mode .seg button,.ka-zrow .seg button,.ka-duec .seg button{min-height:40px}
+    .ka-stf button{min-height:40px}
+    .ka-altb::after,.ka-mc:not(.ext)::after{content:'';position:absolute;inset:-9px -3px}
+    .ka-mk::after{content:'';position:absolute;inset:-11px;border-radius:50%}
+    .ka-recent .row{min-height:44px}
+    .ka-foot .btn,.ka-foot .btn.primary{height:auto}
+  }
   .ka-feat.flash{animation:kaFlash 1.6s ease}
   @keyframes kaFlash{0%,60%{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,var(--bg2));box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}100%{box-shadow:0 0 0 0 transparent}}
   @keyframes kaIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
@@ -2267,18 +2278,22 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   function terminHtml(anim) {
     const c = calc, sch = c.sch, now = S().t;
     const w = c.wunsch;
-    let wState, wC;
-    if (!w) { wState = 'kein Wunschtermin angegeben'; wC = 'var(--line2)'; }
-    else if (w <= now) { wState = 'liegt in der Vergangenheit'; wC = 'var(--st-wait)'; }
-    else if (w < sch.eta) { wState = `<b>nicht erreichbar</b> · ${fDurL(sch.eta - w)} zu spät`; wC = 'var(--st-fault)'; }
-    else if (w < c.zus) { wState = `<b>knapp</b> · Puffer ${fDurL(w - sch.eta)}`; wC = 'var(--st-wait)'; }
-    else { wState = `<b>erreichbar</b> · Puffer ${fDurL(w - sch.eta)}`; wC = 'var(--st-run)'; }
+    let wState, wCls = '';
+    if (!w) wState = 'kein Wunschtermin angegeben';
+    else if (w <= now) { wState = 'liegt in der Vergangenheit'; wCls = ' warn'; }
+    else if (w < sch.eta) { wState = `<b>nicht erreichbar</b> · ${fDurL(sch.eta - w)} zu spät`; wCls = ' crit'; }
+    else if (w < c.zus) { wState = `<b>knapp</b> · Puffer ${fDurL(w - sch.eta)}`; wCls = ' warn'; }
+    else wState = `<b>erreichbar</b> · Puffer ${fDurL(w - sch.eta)}`;
+    // Wert = Tag und Uhrzeit; „Folgewoche“ steht in der Zeile darunter (die Kennzahl bleibt einzeilig)
+    const wk = (t) => Math.floor(t / WEEK) !== Math.floor(now / WEEK);
+    const kv = (t) => esc(DAYS[Math.floor(t / DAY) % 7] + ' ' + fClock(t));
+    const ks = (t, txt) => (wk(t) ? 'Folgewoche · ' : '') + txt;
     const etaSub = sch.pickup > sch.eta + 60 ? `versandbereit ${fClock(sch.eta)} · Abholung ab ${fRel(sch.pickup)}` : `versandbereit · Durchlauf ${fDurL(sch.eta - now)}`;
-    const eil = c.schAlt && c.schAlt.eta < sch.eta - 1800 ? `<div class="s">Als Eilauftrag: <b>${esc(fDay(c.schAlt.eta))}</b></div>` : c.prio === 'eil' ? `<div class="s">Eilauftrag – zieht vor anderen Aufträgen ein</div>` : '';
+    const eil = c.schAlt && c.schAlt.eta < sch.eta - 1800 ? `<br>Als Eilauftrag: <b>${esc(fDay(c.schAlt.eta))}</b>` : c.prio === 'eil' ? '<br>Eilauftrag – zieht vor anderen Aufträgen ein' : '';
     const tiles = `<div class="ka-tiles">
-      <div class="ka-tile" style="--c:var(--accent)"><div class="l">Frühestens</div><div class="v">${esc(fDay(sch.eta))}</div><div class="s">${esc(etaSub)}</div>${eil}</div>
-      <div class="ka-tile" style="--c:${wC}"><div class="l">Wunschtermin</div><div class="v">${w ? esc(fDay(w)) : '–'}</div><div class="s">${wState}</div></div>
-      <div class="ka-tile" style="--c:var(--st-setup)"><div class="l">Zusage-Vorschlag</div><div class="v">${esc(fDay(c.zus))}</div><div class="s">inkl. Sicherheit ${fDurL(Math.max(0, c.zus - sch.eta))} · im Lieferfenster</div></div></div>`;
+      <div class="kpi"><div class="l">Frühestens</div><div class="v">${kv(sch.eta)}</div><div class="s">${esc(ks(sch.eta, etaSub))}${eil}</div></div>
+      <div class="kpi${wCls}"><div class="l">Wunschtermin</div><div class="v">${w ? kv(w) : '–'}</div><div class="s">${w && wk(w) ? 'Folgewoche · ' : ''}${wState}</div></div>
+      <div class="kpi"><div class="l">Zusage-Vorschlag</div><div class="v">${kv(c.zus)}</div><div class="s">${esc(ks(c.zus, 'inkl. Sicherheit ' + fDurL(Math.max(0, c.zus - sch.eta)) + ' · im Lieferfenster'))}</div></div></div>`;
     const W = Math.max(300, (R.sTermin.clientWidth || 640) - 28);
     const g = ganttSvg(c, W);
     const imp = c.imp.filter(x => x.delay >= 10 * 60);
@@ -2291,7 +2306,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     return `<div class="ka-sh"><span class="n">4</span><h3>Liefertermin</h3><span class="m">aus der Live-Belegung · Schichtkalender · Lieferfenster</span></div>
       ${tiles}
       <div class="ka-gantt${anim ? ' anim' : ''}" data-r2="gantt">${g}</div>
-      <div class="ka-glg"><span><i style="background:var(--line2)"></i>belegt durch andere Aufträge</span><span><i style="background:var(--st-setup)"></i>Rüsten · Erstteil</span><span><i style="background:var(--st-run)"></i>Bearbeitung</span><span><i style="background:color-mix(in srgb,var(--st-run) 28%,transparent)"></i>ohne Bediener (Pause/Nacht)</span><span><i style="background:transparent;border:1px dashed color-mix(in srgb,var(--st-run) 60%,transparent)"></i>wartet auf nächsten Behälter</span><span><i style="background:var(--mat)"></i>Fremdbearbeitung · Materialfluss</span></div>
+      <div class="ka-glg"><span><i style="background:var(--line2)"></i>belegt durch andere Aufträge</span><span><i style="background:var(--st-setup)"></i>Rüsten · Erstteil</span><span><i style="background:var(--st-run)"></i>Bearbeitung</span><span><i style="background:color-mix(in srgb,var(--st-run) 28%,transparent)"></i>ohne Bediener (Pause/Nacht)</span><span><i style="background:transparent;border:1px dashed color-mix(in srgb,var(--st-run) 60%,transparent)"></i>wartet auf nächsten Behälter</span><span><i style="background:var(--ext)"></i>Fremdbearbeitung</span><span><i style="background:var(--mat);height:2px"></i>Materialfluss</span></div>
       <div class="ka-imp"><div class="eyebrow">Auswirkung auf bestehende Aufträge</div>${impH}</div>
       <div class="ka-duec"><span>Termin für den Auftrag</span><div class="seg">${dc('auto', 'Automatisch')}${w && w > now ? dc('wunsch', 'Wunschtermin') : ''}${dc('zusage', 'Zusage-Vorschlag')}</div><span>→ <b style="color:var(--text)">${esc(fDay(c.dueT))}</b></span></div>`;
   }
@@ -2316,11 +2331,11 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     for (let d = Math.floor(t0 / DAY); d * DAY < t1; d++) {
       const a = Math.max(t0, d * DAY), b = Math.min(t1, (d + 1) * DAY), wpx = x(b) - x(a);
       if (d * DAY > t0) o.push(`<line x1="${x(d * DAY).toFixed(1)}" x2="${x(d * DAY).toFixed(1)}" y1="4" y2="${Hh}" style="stroke:var(--line2)" stroke-width="1"/>`);
-      if (wpx > 26) o.push(`<text x="${((x(a) + x(b)) / 2).toFixed(1)}" y="13" text-anchor="middle" class="lb" style="font-size:11px">${wpx > 70 ? DAYS_LONG[d % 7] : DAYS[d % 7]}</text>`);
+      if (wpx > 26) o.push(`<text x="${((x(a) + x(b)) / 2).toFixed(1)}" y="13" text-anchor="middle" class="lb" style="font-size:11.5px">${wpx > 70 ? DAYS_LONG[d % 7] : DAYS[d % 7]}</text>`);
       for (const hh of [6, 14, 22]) {
         const t = d * DAY + hh * 3600; if (t <= t0 || t >= t1) continue;
         const px = x(t);
-        if ((X1 - X0) / (span / 3600) * 8 > 30) o.push(`<text x="${px.toFixed(1)}" y="25" text-anchor="middle" style="font-size:9.5px;fill:var(--faint)">${String(hh).padStart(2, '0')}</text>`);
+        if ((X1 - X0) / (span / 3600) * 8 > 30) o.push(`<text x="${px.toFixed(1)}" y="25" text-anchor="middle" style="font-size:10.5px;fill:var(--faint)">${String(hh).padStart(2, '0')}</text>`);
         o.push(`<line x1="${px.toFixed(1)}" x2="${px.toFixed(1)}" y1="${top - 3}" y2="${Hh}" style="stroke:var(--line)" stroke-width="1" stroke-dasharray="2 3"/>`);
       }
     }
@@ -2360,8 +2375,8 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
       } else if (s.kind === 'ext') {
         const tip2 = `<b>${esc(r.op)}</b> · ${esc(s.partner || '')}<br>Bereitstellung ab ${esc(fRel(s.ready))}, Abholung ${esc(fRel(s.pickup))}<br>zurück ${esc(fRel(s.firstRet))}${s.lastRet > s.firstRet ? ' bis ' + esc(fRel(s.lastRet)) : ''}`;
         o.push(`<g class="ka-gb" data-tip="${esc(tip2)}" style="animation-delay:${i * 90}ms">`);
-        if (s.pickup - s.ready > 300) o.push(rect(s.ready, s.pickup, by + 2, bh - 4, 'transparent', ' style="fill:transparent;stroke:var(--mat)" stroke-dasharray="3 2"'));
-        o.push(rect(s.pickup, s.lastRet, by, bh, 'color-mix(in srgb,var(--mat) 80%,transparent)'));
+        if (s.pickup - s.ready > 300) o.push(rect(s.ready, s.pickup, by + 2, bh - 4, 'transparent', ' style="fill:transparent;stroke:var(--ext)" stroke-dasharray="3 2"'));
+        o.push(rect(s.pickup, s.lastRet, by, bh, 'color-mix(in srgb,var(--ext) 80%,transparent)'));
         if (x(s.lastRet) - x(s.pickup) > 92) o.push(`<text x="${(x(s.pickup) + 6).toFixed(1)}" y="${by + bh / 2 + 3.5}" class="bt">${esc((s.partner || '').replace(/\s*\(Beispiel\)/, '').replace(/ GmbH/, ''))}</text>`);
         o.push('</g>');
       } else {
