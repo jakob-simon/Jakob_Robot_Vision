@@ -2527,7 +2527,7 @@
     g.setAttribute('aCol', new THREE.BufferAttribute(col, 3).setUsage(THREE.DynamicDrawUsage));
     const mat = new THREE.ShaderMaterial({
       uniforms: { uScale: { value: 400 } },
-      vertexShader: 'attribute float aSize; attribute float aAlpha; attribute vec3 aCol; varying float vA; varying vec3 vC; uniform float uScale; void main(){ vA = aAlpha; vC = aCol; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = max(2.0, aSize * uScale / -mv.z); gl_Position = projectionMatrix * mv; }',
+      vertexShader: 'attribute float aSize; attribute float aAlpha; attribute vec3 aCol; varying float vA; varying vec3 vC; uniform float uScale; void main(){ vA = aAlpha; vC = aCol; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = clamp(aSize * uScale / -mv.z, 2.0, uScale * 0.02); gl_Position = projectionMatrix * mv; }',
       fragmentShader: 'varying float vA; varying vec3 vC; void main(){ vec2 c = gl_PointCoord - 0.5; float d = length(c); float a = smoothstep(0.5, 0.0, d); float core = smoothstep(0.18, 0.0, d); if (vA <= 0.001) discard; gl_FragColor = vec4(vC * (0.6 + a) + vec3(core * 0.8), a * a * vA); }',
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
     });
@@ -2745,16 +2745,17 @@
   /** Faktor für den Kameraabstand, wenn der Detail-Drawer rechts einen Teil der Fläche verdeckt */
   function drawerK() {
     if (R.mobile) return 1;
-    const dr = document.getElementById('drawer'), dw = dr && dr.classList.contains('open') ? dr.getBoundingClientRect().width : 0;
-    if (dw !== (R.drawerW || 0)) { R.drawerW = dw; R.root.style.setProperty('--dw', dw + 'px'); R.root.classList.toggle('narrow', R.w - dw < 1060); }
-    const vis = clamp((R.w - dw) / R.w, 0.35, 1), asp = (R.w - dw) / R.h;
+    syncDrawer();
+    const dw = R.drawerW || 0, vis = clamp((R.w - dw) / R.w, 0.35, 1), asp = (R.w - dw) / R.h;
     return Math.pow(1 / vis, 0.8) * (asp < 1.3 ? 1.12 : 1);
   }
   function preset(id, instant) {
     const p = PRESETS.find(x => x.id === id) || PRESETS[0];
     R.preset = p.id; R.follow = null;
     const dst = { tx: p.t[0], ty: p.t[1], tz: p.t[2], r: p.r * mobK(), phi: p.phi * DEG, th: p.th * DEG };
-    if (R.w / R.h < 0.8 && p.id === 'uebersicht') { dst.th = 74 * DEG; dst.phi = 50 * DEG; dst.r = 112; dst.tx = 33; dst.tz = 21; }
+    // Hochformat (Telefon, Tablet hochkant): Halle gedreht, damit die lange Seite in die Höhe läuft
+    const asp = R.w / R.h;
+    if (asp < 0.95 && p.id === 'uebersicht') { dst.th = 74 * DEG; dst.phi = 50 * DEG; dst.r = asp < 0.7 ? 112 : 112 - (asp - 0.7) * 60; dst.tx = 33; dst.tz = 21; }
     if (instant) { setCam(dst); R.controls.update(); } else goCam(dst);
     markPresets(); renderSelBar();
   }
@@ -3360,13 +3361,18 @@
     t.needsUpdate = true;
   }
 
+  /** Detail-Drawer rechts: Breite übernehmen (Werkzeugleiste rückt nach links, Kamera-Ausschnitt wird versetzt) */
+  function syncDrawer() {
+    if (!R.root) return;
+    const dr = document.getElementById('drawer'), dw = dr && dr.classList.contains('open') && !R.mobile ? Math.round(dr.getBoundingClientRect().width) : 0;
+    if (dw !== R.drawerW) { R.drawerW = dw; R.root.style.setProperty('--dw', dw + 'px'); R.root.classList.toggle('narrow', R.w - dw < 1060); closeMenus(); setTimeout(computeUiRects, 260); }
+  }
   // ================================================================== Aktualisierung 4×/s (Daten → Darstellung)
   function update() {
     if (!R.ok) return;
     const sim = WF.sim, S = sim.state; if (!S || !S.machines) return;
     const ui = R.ui.st, sh = sim.shift(), P = WF.profile;
-    const dr = document.getElementById('drawer'), dw = dr && dr.classList.contains('open') && !R.mobile ? Math.round(dr.getBoundingClientRect().width) : 0;
-    if (dw !== R.drawerW) { R.drawerW = dw; R.root.style.setProperty('--dw', dw + 'px'); R.root.classList.toggle('narrow', R.w - dw < 1060); closeMenus(); setTimeout(computeUiRects, 260); }
+    syncDrawer();
     let run = 0, flt = 0, wait = 0, setup = 0, idle = 0;
     for (const id of P.machines) { const st = S.machines[id] ? S.machines[id].state : 'idle', g = (WF.STATE[st] || {}).group; if (st === 'running') run++; else if (g === 'fault') flt++; else if (g === 'wait') wait++; else if (g === 'setup') setup++; else idle++; }
     let duty = 0, brk = 0, walk = 0;
@@ -3992,6 +3998,8 @@
     WF.bus.on('sim:event', onSimEvent);
     WF.bus.on('sim:notify', onNotify);
     WF.bus.on('select', (s) => { if (R.ok) applySelection(s); });
+    // Drawer öffnet/schließt → sofort nachziehen (nicht erst beim nächsten 4-Hz-Update)
+    { const dr = document.getElementById('drawer'); if (dr && window.MutationObserver) new MutationObserver(() => { if (R.ok) syncDrawer(); }).observe(dr, { attributes: true, attributeFilter: ['class', 'style'] }); }
     WF.bus.on('sim:reset', onReset);
     WF.bus.on('settings', () => { if (R.ok) setTimeout(() => { resize(true); }, 60); });
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (R.ok && !R.fontsDone) { R.fontsDone = true; R.redrawMarks(); for (const id in R.lb) R.lb[id].sizes = {}; } });

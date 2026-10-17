@@ -16,6 +16,7 @@
   @media (max-width:1180px){.an-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
   @media (max-width:640px){.an-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.an-kpis .kpi:last-child:nth-child(odd){grid-column:1/-1}}
   .an-flow{width:100%;display:block}
+  .an-pw{display:inline-flex;align-items:center;gap:8px;font-size:12px}.an-pw b{font:600 14px/1 var(--f-ui);font-variant-numeric:tabular-nums}
   .an-bars{display:grid;grid-template-columns:minmax(84px,max-content) minmax(60px,1fr) max-content max-content;gap:7px 12px;align-items:center}
   .an-row{display:contents}
   .an-row.click .an-l{cursor:pointer}.an-row.click:hover .an-l{color:var(--text)}
@@ -26,7 +27,8 @@
   .an-v{font:600 13px/1 var(--f-ui);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
   .an-m{color:var(--muted);font-size:11.8px;white-space:nowrap;font-variant-numeric:tabular-nums}
   @media (max-width:560px){.an-bars{grid-template-columns:minmax(70px,max-content) minmax(40px,1fr) max-content}.an-m{display:none}.an-l{font-size:12px}}
-  .an-grid>.card{align-self:start}
+  .an-grid>.card{align-self:stretch}
+  .an-subh{font:600 10.5px/1 var(--f-ui);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:14px 14px 10px;border-top:1px solid var(--line)}
   .an-chart{width:100%;display:block}
   .an-chart text{font-family:var(--f-ui);fill:var(--muted);font-size:11px}
   .an-chart .lbl{fill:var(--text2);font-size:12px}
@@ -42,10 +44,15 @@
   .an-matrix td.m{text-align:left;color:var(--text2);padding:0 8px 0 2px;white-space:nowrap;cursor:pointer}
   .an-matrix td.m:hover{color:var(--text)}
   .an-matrix td.z{color:var(--faint)}
-  .an-matrix td.sum{font-weight:600;color:var(--text);background:var(--card2)}
-  .an-reco{display:grid;gap:10px;grid-template-columns:repeat(3,minmax(0,1fr))}
-  @media (max-width:1100px){.an-reco{grid-template-columns:minmax(0,1fr)}}
-  .an-rc{--c:var(--accent);background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;box-shadow:inset 3px 0 0 var(--c);display:flex;flex-direction:column;gap:6px}
+  .an-matrix td.sum{font-weight:600;color:var(--text);text-align:right;padding:0 8px;position:relative;min-width:84px}
+  .an-matrix td.sum i{position:absolute;left:8px;bottom:4px;height:2px;border-radius:1px;background:var(--accent);opacity:.7;max-width:calc(100% - 16px)}
+  .an-matrix td.hi{color:var(--accent-ink);font-weight:600}
+  .an-reco{display:flex;flex-direction:column;border-top:1px solid var(--line)}
+  .an-rc{--c:var(--accent);padding:12px 14px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:5px;box-shadow:inset 3px 0 0 var(--c)}
+  .an-rc:last-child{border-bottom:0}
+  .an-rk{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;background:var(--raise);color:var(--text2);font:600 11px/1 var(--f-ui);margin-right:8px;vertical-align:1px}
+  .an-rc .acts{justify-content:space-between;align-items:center}
+  .an-rc .acts .muted{font-size:12px}
   .an-rc .h{display:flex;align-items:baseline;gap:8px;justify-content:space-between}
   .an-rc .h b{font:600 15px/1.2 var(--f-ui)}
   .an-rc .h span{font:600 18px/1 var(--f-cond);color:var(--c);white-space:nowrap}
@@ -57,17 +64,17 @@
   `, 'analyse');
 
   // Verlustursachen = nicht produktive Zustände mit eingeplantem Auftrag
+  // Ursachenfarben ausschließlich aus Zustands-Tokens (eine Farbwelt mit Leitstand und Halle)
   const LOSS = [
-    { key: 'starved',      label: 'Wartet auf Material',  color: 'var(--st-wait)' },
-    { key: 'waitOperator', label: 'Wartet auf Bediener',  color: '#e7a93a' },
+    { key: 'starved',      label: 'Wartet auf Material',  color: 'var(--mat)' },
+    { key: 'waitOperator', label: 'Wartet auf Bediener',  color: 'var(--st-wait)' },
     { key: 'setup',        label: 'Rüsten',               color: 'var(--st-setup)' },
-    { key: 'firstPiece',   label: 'Erstteilprüfung',      color: '#7fb4fb' },
+    { key: 'firstPiece',   label: 'Erstteilprüfung',      color: 'var(--info)' },
     { key: 'toolchange',   label: 'Werkzeugwechsel',      color: 'var(--st-tool)' },
-    { key: 'waitTool',     label: 'Wartet auf Werkzeug',  color: '#c9a7ff' },
+    { key: 'waitTool',     label: 'Wartet auf Werkzeug',  color: 'color-mix(in srgb, var(--st-tool) 55%, var(--st-wait))' },
     { key: 'fault',        label: 'Störung',              color: 'var(--st-fault)' },
-    { key: 'blocked',      label: 'Ausgang voll',         color: '#d8b04a' },
+    { key: 'blocked',      label: 'Ausgang voll',         color: 'var(--st-idle)' },
   ];
-  const LOSS_HEX = { starved: '#fbbf24', waitOperator: '#e7a93a', setup: '#60a5fa', firstPiece: '#7fb4fb', toolchange: '#b18cff', waitTool: '#c9a7ff', fault: '#f87171', blocked: '#d8b04a' };
   const RECO = {
     starved: 'Material kommt zu spät an der Maschine an. Transporte früher anstoßen, Weitergabemenge (Behältergröße) verkleinern oder Vorgänger-Arbeitsgang priorisieren.',
     waitOperator: 'Maschinen warten auf Personal – meist in Pausen und bei Mehrmaschinenbedienung. Pausen staffeln oder Einlegen/Rüsten über die Schicht verteilen.',
@@ -157,51 +164,47 @@
     return (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * p;
   }
   /** Ausstoß je Stunde (Gutteile aller Arbeitsgänge) + Leistungsaufnahme als Linie. */
+  /** Gutteile je Stunde über den ganzen Arbeitstag 06–22 Uhr: vergangene Stunden voll, laufende schraffiert,
+      künftige als leere Plätze – so wirkt der Tag nie wie ein Platzhalter. */
   function flowSvg() {
-    const h = S().history, t0 = U.dayStart(S().t) + 6 * 3600, now = S().t;
-    const hours = [];
-    for (let t = t0; t < now; t += 3600) hours.push({ t, good: 0, kw: [], oee: null });
+    const h = S().history, d0 = U.dayStart(S().t), t0 = d0 + 6 * 3600, now = S().t;
+    const slots = [];
+    for (let k = 0; k < 16; k++) slots.push({ t: t0 + k * 3600, good: 0 });
     for (let i = 0; i < h.t.length; i++) {
       const t = h.t[i]; if (t <= t0 || t > now + 1) continue;
-      const k = Math.floor((t - 1 - t0) / 3600); if (!hours[k]) continue;
-      hours[k].good += h.good[i] || 0; hours[k].kw.push(h.powerKw[i]); if (h.oee[i] != null) hours[k].oee = h.oee[i];
+      const k = Math.floor((t - 1 - t0) / 3600); if (slots[k]) slots[k].good += h.good[i] || 0;
     }
-    if (!hours.length) return '<div class="empty">Die Schicht hat gerade erst begonnen.</div>';
-    const W = Math.max(300, Math.round(flowW || 640)), H = W < 480 ? 190 : 210, left = 40, right = 44, top = 26, bottom = 26;
-    const maxG = Math.max(10, ...hours.map(x => x.good)), gStep = niceStep(maxG / 4), gMax = Math.ceil(maxG / gStep) * gStep;
-    const kws = hours.map(x => x.kw.length ? x.kw.reduce((a, b) => a + b, 0) / x.kw.length : null);
-    const maxK = Math.max(50, ...kws.filter(v => v != null)), kStep = niceStep(maxK / 4), kMax = Math.ceil(maxK / kStep) * kStep;
-    const bw = (W - left - right) / hours.length;
-    const y = (v) => top + (H - top - bottom) * (1 - v / gMax), yk = (v) => top + (H - top - bottom) * (1 - v / kMax);
-    let g = '';
+    const W = Math.max(300, Math.round(flowW || 640)), H = W < 480 ? 180 : 200, left = 38, right = 8, top = 16, bottom = 24;
+    const maxG = Math.max(10, ...slots.map(x => x.good)), gStep = niceStep(maxG / 4), gMax = Math.ceil(maxG / gStep) * gStep;
+    const sw = (W - left - right) / slots.length, bw = Math.min(24, sw * 0.62);
+    const y = (v) => top + (H - top - bottom) * (1 - v / gMax);
+    let g = `<defs><pattern id="an-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" style="fill:var(--st-run)" opacity=".35"/><line x1="0" y1="0" x2="0" y2="6" style="stroke:var(--st-run)" stroke-width="3"/></pattern></defs>`;
     for (let v = 0; v <= gMax + 1e-6; v += gStep) g += `<line class="grid" x1="${left}" y1="${y(v)}" x2="${W - right}" y2="${y(v)}"/><text x="${left - 6}" y="${y(v) + 4}" text-anchor="end">${U.fmtNum(v)}</text>`;
-    for (let v = 0; v <= kMax + 1e-6; v += kStep) g += `<text x="${W - right + 6}" y="${yk(v) + 4}">${U.fmtNum(v)}</text>`;
-    hours.forEach((x, i) => {
-      const bx = left + i * bw + bw * 0.18, w = bw * 0.64;
-      const partial = x.t + 3600 > now;
-      g += `<rect x="${bx}" y="${y(x.good)}" width="${w}" height="${Math.max(0, y(0) - y(x.good))}" rx="3" style="fill:var(--st-run)" opacity="${partial ? 0.45 : 0.85}"/>`;
-      g += `<text x="${bx + w / 2}" y="${H - 8}" text-anchor="middle">${U.fmtClock(x.t).slice(0, 2)}</text>`;
-      g += `<rect class="hit" data-tip="${U.fmtClock(x.t)}–${U.fmtClock(x.t + 3600)}: ${U.fmtNum(x.good)} Gutteile (alle Arbeitsgänge)${kws[i] != null ? ', Ø ' + U.fmtNum(kws[i]) + ' kW' : ''}${partial ? ' – laufende Stunde' : ''}" x="${left + i * bw}" y="${top}" width="${bw}" height="${H - top - bottom}"/>`;
+    const shiftX = left + 8 * sw;
+    g += `<line class="axis" x1="${shiftX}" y1="${top - 6}" x2="${shiftX}" y2="${H - bottom}" stroke-dasharray="2 3"/><text x="${shiftX + 4}" y="${top - 4}">Spätschicht</text><text x="${left + 4}" y="${top - 4}">Frühschicht</text>`;
+    slots.forEach((x, i) => {
+      const cx = left + i * sw + sw / 2, bx = cx - bw / 2;
+      const past = x.t + 3600 <= now, cur = !past && x.t <= now;
+      if (past || cur) g += `<rect x="${bx}" y="${y(x.good)}" width="${bw}" height="${Math.max(0, y(0) - y(x.good))}" rx="3" style="fill:${cur ? 'url(#an-hatch)' : 'var(--st-run)'}" opacity="${cur ? 1 : 0.88}"/>`;
+      else g += `<rect x="${bx}" y="${top + 2}" width="${bw}" height="${H - top - bottom - 2}" rx="3" style="fill:none;stroke:var(--line)" stroke-dasharray="2 3"/>`;
+      if (i % 2 === 0) g += `<text x="${cx}" y="${H - 7}" text-anchor="middle">${U.fmtClock(x.t)}</text>`;
+      if (past || cur) g += `<rect class="hit" data-tip="${U.fmtClock(x.t)}–${U.fmtClock(x.t + 3600)}: ${U.fmtNum(x.good)} Gutteile (alle Arbeitsgänge)${cur ? ' – laufende Stunde' : ''}" x="${left + i * sw}" y="${top}" width="${sw}" height="${H - top - bottom}"/>`;
     });
-    const pts = kws.map((v, i) => v == null ? null : `${(left + i * bw + bw / 2).toFixed(1)},${yk(v).toFixed(1)}`).filter(Boolean);
-    if (pts.length > 1) g += `<polyline points="${pts.join(' ')}" style="fill:none;stroke:var(--info)" stroke-width="2" stroke-linejoin="round"/>`;
-    const lastI = kws.map((v, i) => v != null ? i : -1).filter(i => i >= 0).pop();
-    if (lastI != null) g += `<circle cx="${left + lastI * bw + bw / 2}" cy="${yk(kws[lastI])}" r="3.5" style="fill:var(--info)"/>`;
-    return `<svg class="an-chart an-flow" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Ausstoß und Leistung je Stunde">${g}
-      <text x="${left}" y="10">Gutteile/h</text><text x="${W - right + 6}" y="10">kW</text></svg>`;
+    return `<svg class="an-chart an-flow" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Gutteile je Stunde heute">${g}</svg>`;
   }
   function matrixHtml(rows) {
     const used = LOSS.filter(l => rows.some(r => r.cells[l.key].eur > 0.5));
     if (!used.length) return '<div class="empty">Noch keine Verluste in diesem Zeitraum.</div>';
     const max = Math.max(1, ...rows.flatMap(r => used.map(l => r.cells[l.key].eur)));
     const sorted = rows.slice().sort((a, b) => b.eur - a.eur);
+    const maxRow = Math.max(1, ...rows.map(r => r.eur));
     const head = `<tr><th class="m">Maschine</th>${used.map(l => `<th title="${esc(l.label)}">${esc(l.label.replace('Wartet auf ', 'Wart. '))}</th>`).join('')}<th>Summe</th></tr>`;
     const body = sorted.map(r => `<tr><td class="m" data-id="${r.id}">${esc(r.short)}</td>${used.map(l => {
       const v = r.cells[l.key].eur;
       if (v < 0.5) return '<td class="z">·</td>';
       const a = 0.12 + 0.7 * Math.sqrt(v / max);
-      return `<td style="background:color-mix(in srgb, ${LOSS_HEX[l.key]} ${Math.round(a * 100)}%, var(--card))" title="${esc(r.short)} · ${esc(l.label)}: ${esc(U.fmtEur(v))} (${esc(U.fmtDur(r.cells[l.key].sec))})">${U.fmtNum(v)}</td>`;
-    }).join('')}<td class="sum">${U.fmtNum(r.eur)} €</td></tr>`).join('');
+      return `<td class="${a > 0.5 ? 'hi' : ''}" style="background:color-mix(in srgb, var(--accent) ${Math.round(a * 85)}%, transparent)" title="${esc(r.short)} · ${esc(l.label)}: ${esc(U.fmtEur(v))} (${esc(U.fmtDur(r.cells[l.key].sec))})">${U.fmtNum(v)}</td>`;
+    }).join('')}<td class="sum"><span>${U.fmtNum(r.eur)} €</span><i style="width:${(r.eur / maxRow * 100).toFixed(1)}%"></i></td></tr>`).join('');
     return `<div class="tbl-wrap"><table class="an-matrix">${head}${body}</table></div>`;
   }
   function recos(rows, par) {
@@ -211,12 +214,11 @@
       out.push({ it, worst });
     }
     if (!out.length) return '<div class="empty">Keine nennenswerten Verluste – die Schicht läuft rund.</div>';
-    return `<div class="an-reco">${out.map(({ it, worst }) => `
+    return `<div class="an-reco">${out.map(({ it, worst }, n) => `
       <div class="an-rc" style="--c:${it.color}">
-        <div class="h"><b>${esc(it.label)}</b><span>${U.fmtEur(it.eur)}</span></div>
+        <div class="h"><b><span class="an-rk">${n + 1}</span>${esc(it.label)}</b><span>${U.fmtEur(it.eur)}</span></div>
         <p>${esc(RECO[it.key] || '')}</p>
-        <p class="muted" style="font-size:12px">Am stärksten betroffen: <button class="link" data-id="${worst.id}">${esc(worst.short)}</button> mit ${U.fmtEur(worst.cells[it.key].eur)} (${U.fmtDur(worst.cells[it.key].sec)}).</p>
-        <div class="acts">${WF.ai ? `<button class="btn sm" data-ask="${esc(it.label)}|${worst.id}">${icon('sparkles', 14)} Copilot: Ursachen analysieren</button>` : ''}</div>
+        <div class="acts"><span class="muted">Stärkster Posten: <button class="link" data-id="${worst.id}">${esc(worst.short)}</button> · ${U.fmtEur(worst.cells[it.key].eur)} · ${U.fmtDur(worst.cells[it.key].sec)}</span>${WF.ai ? `<button class="btn sm ghost" data-ask="${esc(it.label)}|${worst.id}">${icon('sparkles', 14)} Analysieren</button>` : ''}</div>
       </div>`).join('')}</div>`;
   }
 
@@ -243,15 +245,15 @@
         <div class="kpi"><div class="l">Engpass</div><div class="v" style="font-size:22px">${bott ? esc(bott.short) : '–'}</div><div class="s">${bott ? esc(bott.why) : 'kein eindeutiger Engpass'}</div></div>
         <div class="kpi"><div class="l">Energie je Fertigteil</div><div class="v">${energyPerPart != null ? U.fmtNum(energyPerPart, 2) : '–'}<small>kWh</small></div><div class="s">${U.fmtNum(machEnergy)} kWh Maschinen · ${U.fmtNum(k.goodFinished)} Fertigteile</div></div>
       </div>
-      <div class="an-sec an-grid">
-        <div class="card"><div class="card-h"><h3>Wo verlieren wir Geld? – Verlustursachen</h3><span class="muted">€ · Maschinenzeit · kumuliert</span></div><div class="card-b">${paretoSvg(par)}</div></div>
+      <div class="an-sec an-grid an-top">
+        <div class="card"><div class="card-h"><h3>Wo verlieren wir Geld? – Verlustursachen</h3><span class="muted">€ · Maschinenzeit · kumuliert</span></div><div class="card-b">${paretoSvg(par)}</div>
+          <div class="an-subh">Empfehlungen aus den größten Verlusten</div>${recos(rows, par)}</div>
         <div class="card"><div class="card-h"><h3>OEE je Maschine</h3><span class="muted">Verfügbarkeit × Leistung × Qualität</span></div><div class="card-b">${oeeSvg(oee)}</div></div>
       </div>
-      <div class="an-sec"><div class="eyebrow" style="margin:4px 0 8px">Empfehlungen aus den größten Verlusten</div>${recos(rows, par)}</div>
       <div class="an-sec card"><div class="card-h"><h3>Verlustmatrix Maschine × Ursache</h3><span class="muted">Euro ${range === 'ks' ? 'laufende Schicht' : 'heute'} · dunkler = mehr</span></div><div class="card-b">${matrixHtml(rows)}</div></div>
       <div class="an-sec an-grid even">
-        <div class="card"><div class="card-h"><h3>Ausstoß und Leistung im Tagesverlauf</h3><div class="an-legend"><span><i style="background:var(--st-run)"></i>Gutteile je Stunde</span><span><i style="background:var(--info)"></i>Ø Leistung kW</span></div></div><div class="card-b an-flowbox">${flowSvg()}</div></div>
-        <div class="card"><div class="card-h"><h3>Energie je Maschine heute</h3><span class="muted">kWh · je Gutteil</span></div><div class="card-b">${energySvg(oee)}</div></div>
+        <div class="card"><div class="card-h"><h3>Ausstoß im Tagesverlauf</h3><span class="muted">Gutteile je Stunde · alle Arbeitsgänge</span></div><div class="card-b an-flowbox">${flowSvg()}</div></div>
+        <div class="card"><div class="card-h"><h3>Energie je Maschine heute</h3><span class="an-pw">${WF.ui.spark((S().history.powerKw || []).slice(-96), { w: 110, h: 24, color: 'var(--info)' })}<b>${U.fmtNum(k.powerKw)} kW</b><span class="muted">jetzt</span></span></div><div class="card-b">${energySvg(oee)}</div></div>
       </div>`;
     // Diagramm in Pixelbreite des Containers zeichnen (Schrift bleibt auch auf dem Handy lesbar)
     const fb = root.querySelector('.an-flowbox');

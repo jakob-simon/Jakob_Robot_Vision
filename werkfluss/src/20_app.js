@@ -58,7 +58,7 @@
       </div>
       <div class="top-actions">
         <button class="icon-btn" id="t-bell" title="Benachrichtigungen" aria-label="Benachrichtigungen">${icon('bell')}<span class="count" id="t-count" hidden>0</span></button>
-        ${WF.tour ? `<button class="icon-btn" id="t-tour" title="Geführte Demo-Tour starten" aria-label="Demo-Tour">${icon('play', 16)}</button>` : ''}
+        ${WF.tour ? `<button class="btn ghost t-tour" id="t-tour" title="Geführte Demo-Tour starten (#tour)" aria-label="Demo-Tour">${icon('route', 16)}<span>Tour</span></button>` : ''}
         <button class="btn-ai" id="t-ai" title="KI-Copilot öffnen">${icon('sparkles', 17)}<span>Copilot</span></button>
         <button class="icon-btn" id="t-settings" title="Einstellungen" aria-label="Einstellungen">${icon('settings')}</button>
       </div>`;
@@ -150,7 +150,17 @@
     for (const v of WF.views) {
       if (!v.badge) continue;
       const b = document.querySelector(`[data-badge="${v.id}"]`);
-      if (b) { try { b.textContent = v.badge() || ''; } catch (e) { b.textContent = ''; } }
+      if (!b) continue;
+      let txt = ''; try { txt = String(v.badge() || ''); } catch (e) { txt = ''; }
+      if (b.dataset.raw === txt) continue;
+      b.dataset.raw = txt;
+      // Ein Stil: Verhältnis (11/13) gedämpft, sonst Zähler-Pill nach Schwere; Langtext im Tooltip
+      const num = (txt.match(/\d+/) || [''])[0];
+      const ratio = /^\s*\d+\s*\/\s*\d+\s*$/.test(txt);
+      const sev = /spät|Störung|kritisch/i.test(txt) ? 'crit' : 'warn';
+      b.className = 'badge' + (txt ? (ratio ? ' ratio' : ' pill-' + sev) : '');
+      b.textContent = ratio ? txt.replace(/\s+/g, '') : num;
+      b.title = txt ? v.title + ': ' + txt : '';
     }
   }
 
@@ -224,30 +234,33 @@
     npSig = '';
     renderNotifPanel(true);
   }
+  const SEV_LABEL = { crit: 'Kritisch', warn: 'Warnung', info: 'Info', ok: 'Erledigt' };
   function notifCard(n) {
     const S = WF.SEV[n.sev] || WF.SEV.info;
     const ent = n.entity && n.entity.id ? `<button class="link" data-ent="${esc(n.entity.kind)}|${esc(n.entity.id)}">${esc(app.entityLabel(n.entity))}</button>` : '';
-    const acts = (n.actions || []).map((a, i) => `<button class="btn sm" data-act="${i}">${esc(a.label)}</button>`).join('');
-    const status = n.status === 'ack' ? ' · quittiert' + (n.ackBy ? ' von ' + esc(n.ackBy) : '') : n.status === 'resolved' ? ' · erledigt' : '';
+    const acts = (n.actions || []).map((a, i) => `<button class="btn sm${i === 0 && n.status !== 'resolved' ? ' primary' : ''}" data-act="${i}">${esc(a.label)}</button>`).join('');
+    const status = n.status === 'ack' ? 'quittiert' + (n.ackBy ? ' von ' + esc(n.ackBy) : '') + ' · Ursache besteht noch' : n.status === 'resolved' ? 'erledigt' + (n.resolvedT ? ' ' + U.fmtClock(n.resolvedT) : '') : '';
     return `<div class="notif ${esc(n.status)}" style="--c:${S.color}" data-id="${esc(n.id)}">
-      <div class="n-top"><span>${U.fmtDayClock(n.t)}</span><span>·</span><span>${esc(n.role || '')}</span><span class="spacer"></span>${ent}</div>
+      <div class="n-top"><span class="n-sev" style="color:${S.color}">${SEV_LABEL[n.sev] || ''}</span><span>${U.fmtClock(n.updatedT || n.t)}</span><span>·</span><span>${esc(n.role || '')}</span><span class="spacer"></span>${ent}</div>
       <div class="n-t">${esc(n.title)}</div>
       ${n.body ? `<div class="n-b">${esc(n.body)}</div>` : ''}
-      ${n.suggestion ? `<div class="n-s"><b>Empfehlung:</b> ${esc(n.suggestion)}</div>` : ''}
-      <div class="n-a">${n.status === 'open' ? '<button class="btn sm" data-ack>Quittieren</button>' : ''}${acts}${WF.ai ? `<button class="btn sm ghost" data-ai>${icon('sparkles', 14)} Ursache analysieren</button>` : ''}<span class="muted" style="font-size:11.5px;align-self:center">${status}</span></div>
+      ${n.suggestion ? `<div class="n-s"><b>Empfehlung</b> ${esc(n.suggestion)}</div>` : ''}
+      <div class="n-a">${acts}${n.status === 'open' ? '<button class="btn sm ghost" data-ack>Quittieren</button>' : ''}<span class="spacer"></span>${status ? `<span class="muted" style="font-size:11.5px;align-self:center">${status}</span>` : ''}${WF.ai && n.status !== 'resolved' ? `<button class="btn sm ghost" data-ai>${icon('sparkles', 14)} Ursache analysieren</button>` : ''}</div>
     </div>`;
   }
+  const isImportant = (n) => n.sev === 'crit' || n.sev === 'warn';
   function renderNotifPanel(force) {
     if (!npEl || !WF.sim) return;
-    const all = (WF.sim.state.notifications || []).slice().sort((a, b) => b.t - a.t);
-    const list = npFilter === 'open' ? all.filter(n => n.status === 'open') : all.slice(0, 80);
+    const all = (WF.sim.state.notifications || []).slice().sort((a, b) => (b.updatedT || b.t) - (a.updatedT || a.t));
+    const imp = all.filter(n => n.status === 'open' && isImportant(n)), inf = all.filter(n => n.status === 'open' && !isImportant(n));
+    const list = npFilter === 'open' ? imp : npFilter === 'info' ? inf : all.slice(0, 80);
     const sig = npFilter + '|' + list.map(n => n.id + n.status).join(',');
     if (!force && sig === npSig) return;
     npSig = sig;
     npEl.innerHTML = `<div class="np-h"><strong>Benachrichtigungen</strong><span class="spacer"></span>
-      <div class="seg"><button data-f="open" class="${npFilter === 'open' ? 'on' : ''}">Offen (${all.filter(n => n.status === 'open').length})</button><button data-f="all" class="${npFilter === 'all' ? 'on' : ''}">Alle</button></div>
+      <div class="seg"><button data-f="open" class="${npFilter === 'open' ? 'on' : ''}">Wichtig (${imp.length})</button><button data-f="info" class="${npFilter === 'info' ? 'on' : ''}">Info (${inf.length})</button><button data-f="all" class="${npFilter === 'all' ? 'on' : ''}">Verlauf</button></div>
       <button class="icon-btn" data-close aria-label="Schließen">${icon('x')}</button></div>
-      <div class="notif-list">${list.length ? list.map(notifCard).join('') : '<div class="empty">Keine offenen Benachrichtigungen. Alles im grünen Bereich.</div>'}</div>`;
+      <div class="notif-list">${list.length ? list.map(notifCard).join('') : `<div class="empty">${npFilter === 'open' ? 'Keine offenen Warnungen – alles im grünen Bereich.' : npFilter === 'info' ? 'Keine offenen Hinweise.' : 'Noch keine Meldungen.'}</div>`}</div>`;
     npEl.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { npFilter = b.dataset.f; renderNotifPanel(true); });
     npEl.querySelector('[data-close]').onclick = () => toggleNotifPanel(false);
     npEl.querySelectorAll('.notif').forEach(card => {
@@ -275,10 +288,15 @@
     while (box.children.length > 4) box.firstChild.remove();
     setTimeout(() => t.remove(), opts.ms || 5200);
   };
+  const SEV_RANK = { info: 0, ok: 0, warn: 1, crit: 2 };
+  const toasted = new Map(); // key → höchste getoastete Schwere
+  function markExisting() { for (const n of (WF.sim && WF.sim.state && WF.sim.state.notifications) || []) toasted.set(n.key || n.id, SEV_RANK[n.sev] || 0); }
   function onNotify(n) {
     if (!n || n.status !== 'open' || (n.sev !== 'crit' && n.sev !== 'warn')) return;
     if (WF.tour && WF.tour.active && n.sev !== 'crit') return; // Tour nicht zudecken
-    if (n._toasted) return; n._toasted = true;
+    const key = n.key || n.id, rank = SEV_RANK[n.sev] || 0;
+    if (toasted.has(key) && toasted.get(key) >= rank) return; // bekannt und nicht schwerer geworden
+    toasted.set(key, rank);
     const now = performance.now();
     if (now - lastToast < 2500 && n.sev !== 'crit') return;
     lastToast = now;
@@ -330,6 +348,13 @@
     ] });
   }
 
+  css(`.nav-item .badge.ratio{color:var(--muted);font-size:11px}
+       .nav-item .badge.pill-warn,.nav-item .badge.pill-crit{min-width:18px;height:18px;padding:0 5px;border-radius:9px;font:700 10.5px/18px var(--f-ui);text-align:center;color:#1a1204;background:var(--st-wait)}
+       .nav-item .badge.pill-crit{background:var(--st-fault);color:#1b0606}
+       .t-tour{height:36px;padding:0 11px;gap:6px}
+       .notif .n-sev{font:700 10.5px/1 var(--f-ui);letter-spacing:.1em;text-transform:uppercase}
+       @media (max-width:1180px){.t-tour span{display:none}.t-tour{width:36px;padding:0}}`, 'app-badges');
+
   // ------------------------------------------------------------ TV-Modus (Leitstand an der Hallenwand)
   css(`.tv-exit{position:fixed;z-index:35;bottom:max(16px,env(safe-area-inset-bottom,0px));left:max(16px,env(safe-area-inset-left,0px));display:none;box-shadow:var(--shadow);opacity:.85}.tv-exit:hover{opacity:1}
        .app.tv ~ .tv-exit,.tv-exit.on{display:inline-flex}
@@ -375,8 +400,9 @@
     app.speed = settings.speed || WF.profile.sim.defaultSpeed;
     buildTop();
     buildNav();
+    markExisting();
     WF.bus.on('sim:notify', onNotify);
-    WF.bus.on('sim:reset', () => { tick(); });
+    WF.bus.on('sim:reset', () => { toasted.clear(); markExisting(); tick(); });
     WF.bus.on('navigate-request', ({ view, params }) => app.navigate(view, params));
     document.addEventListener('keydown', (e) => {
       const tag = (e.target && e.target.tagName) || '';

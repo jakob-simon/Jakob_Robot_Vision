@@ -1,0 +1,422 @@
+{
+  "summary": "Adversarial review lenses over the integrated werkfluss build (args = lens keys)",
+  "agentCount": 2,
+  "logs": [],
+  "result": [
+    {
+      "lens": "art-desktop",
+      "summary": "Art-director review of werkfluss on desktop (1440×900 and 1920×1080), built to /tmp/rv-art-desktop.html (rebuilt mid-review at about 02:17 after 30_hall3d.js and 60_ai.js changed). Screenshots are in /tmp/rv-art-desktop/.\n\nI covered all 10 views, scrolled to the bottom; the Plantafel; the machine, order, person, AGV, tool, material and container drawers; the notification panel; the Copilot (empty and with two answers); the settings modal; all 11 tour cards; and TV mode at both sizes. No console errors.\n\n**Overall:** one coherent dark design system. Tokens, the shared .kpi, .pill and .card components and the condensed headline face are used everywhere, and the strongest screens are close to best in class:\n- **Material & Logistik:** the flow map is the best \"felt connection\" visual in the product.\n- **Qualität:** the SPC chart with tool-change and correction markers.\n- **Anbindung:** the Maschine → Gateway → Server data-flow diagram.\n- **Aufträge:** order cards with the routing chain.\n- **KI-Auftrag:** the drawing → plan → price flow.\n\n**The three weakest screens, and how to lift them:**\n1. **Analyse** (weakest, and it is \"the dashboard\"). Problems: unbalanced two-column grid with holes; a placeholder-looking chart with 3 fat bars and two y-axes; a muddy olive heat-map; loss colours that cannot be told apart. Lift: lay it out as a Pareto list with the recommendation cards stacked under it; run the hourly chart over the whole shift; use one sequential colour for the heat-map; map loss colours to the state tokens. That brings it to Qualität's level of chart craft.\n2. **Personal.** Problems: text-heavy cards where the status text wraps under the pill; a stray \"…\" after the task chip; unlabelled durations; a Lageplan with 6 px labels; an orphan card; a 2,800 px page. Lift: rebuild the card as a strict grid with the pill on its own line; put Lageplan and open tasks in a band above five-column cards; collapse the late shift in the qualification matrix. That reaches the Aufträge card craft.\n3. **Halle 3D**, specifically the flow overlay. The 3D model is impressive, but the material and data flows the owner cares most about are hairline orange lines. They are drawn with additive blending on a light floor that has yellow lane paint, so they read as floor markings. The HUD is truncated and repeats the clock. Lift: thicker, opaque flow arcs and bigger pulses; a darker floor so the material orange owns the warm channel; the same visual language as the Material flow map.\n\n**Logic and consistency found along the way:**\n- The person drawer shows two different work-time totals side by side (for example 1 h 10 min next to 1 h 17 min).\n- The hero OEE and the KI-Schichtbriefing headline differ in the same viewport (71,8 % and 71,7 %).\n- Plant OEE jumps about 3 points when one long part finishes.\n- The bell badge says 2 while the notification panel's \"Offen\" tab says 5.\n\n**Demo-breaking:**\n- TV mode overflows at 1080p, against its own code comment, which promises all 13 workstations without scrolling.\n- With the Copilot open beside a drawer, toasts jump onto the sidebar and the tour card during the scripted tour.\n\nThere are 23 findings below, worst first.",
+      "findings": [
+        {
+          "severity": "high",
+          "file": "src/40_leitstand.js",
+          "title": "TV mode does not fit 1080p: third tile row is cut off, page scrolls, and the controls are still visible",
+          "evidence": "/tmp/rv-art-desktop/v2-tv-1920.png and /tmp/rv-art-desktop/tv-1920.png. With WF.app.setTv(true) at 1920×1080 the view has scrollHeight 1871 against clientHeight 1022. The bottom row (Waschanlage, Messraum, Montage) is cut at the screen edge, the KI-Schichtbriefing is below the fold, and 2 of the 5 grid cells in row 3 are empty. The top bar with speed buttons, bell, Copilot and settings is still shown (display:flex), although the code comment at line 226 promises 'keine Bedienelemente … alle 13 Arbeitsplätze ohne Scrollen'. Tile text stays at desktop size (about 13 px), so it cannot be read from a few metres.",
+          "fix": "(1) In 20_app.js, for .app.tv: hide .top, or replace it with a 44 px strip showing brand, clock and shift only. Also set grid-template-rows: 0 minmax(0,1fr). (2) In .ls-root.ls-tv: hide .ls-brief and 'Gerade passiert'. Make .ls-main a single column with the 'Jetzt wichtig' rail at 340px. Use .ls-grid{grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:1fr;height:calc(100vh - <header> - <kpi> - <chips>)}. (3) Drop the redundant cause line in TV tiles (see the tile-redundancy finding); this saves about 36 px per tile, so 3 rows fit: 3×247+20 = 761 px against about 820 px available. (4) Scale type for TV: tile name 24px, pill 15px, part counter 18px, tool row 14px. (5) Fill the 2 empty cells with a shift-summary tile (output against plan, next 3 events) instead of leaving holes."
+        },
+        {
+          "severity": "high",
+          "file": "src/30_hall3d.js",
+          "title": "Material and data flow in the 3D hall are nearly invisible (owner's top priority, and narrated by the tour)",
+          "evidence": "/tmp/rv-art-desktop/v2-1440-halle.png, /tmp/rv-art-desktop/z-v2hall.png, /tmp/rv-art-desktop/v2-1920-halle.png, /tmp/rv-art-desktop/z-net.png. The order-flow arcs (R.netMat) are 0.022–0.06 radius tubes with AdditiveBlending at opacity 0.24. On the light-grey concrete floor, next to the yellow lane paint rgba(247,186,24,.95) (line 864), they read as hair-thin floor markings. Data pulses (cyan) are not visible in a still frame. Tour step 4 (tour-3.png) says 'Orange: Materialfluss … Cyan: Datenfluss', but neither is legible. The bright floor also clashes with the deep-ink UI shell around it.",
+          "fix": "Flow arcs: MeshBasicMaterial with NormalBlending, opacity 0.6–0.7 (also update line 3604, R.netMat.opacity = 0.65*k), tube radius 0.05 + 0.02·min(4,n). Pulses: netPulses spawnPulse size 0.32 → 0.55, alpha 1.0. Make the active transport ribbon 0.6 wide. Floor: darken to about #2b3342–#343d4d (dark epoxy) and desaturate the lane paint to #b89a3e at 70 %, so --mat orange owns the warm channel and white machines gain contrast. When 'Materialfluss' is on, dim machine materials to 75 % luminance. Give the data layer a visible cyan glow line along the cable tray (emissive #3cc6f2, pulsing) plus pulses ≥0.35. Reuse the Material view's visual language (numbered count bubbles on arcs) so the two screens feel like one product."
+        },
+        {
+          "severity": "high",
+          "file": "src/60_ai.js",
+          "title": "Toasts jump onto the sidebar and the tour card when the Copilot is open beside a drawer (happens in tour step 7/8)",
+          "evidence": "/tmp/rv-art-desktop/tour-7.png: the toast 'Störung M02 INDEX G220: Kühlmitteldruck zu niedrig' sits at x≈125–505, on top of the navigation and the Demo-Tour card. Measured on the current build: #toasts right edge = 504px at 1440 wide. Cause: line 2417 `body.ai-open.ai-beside #toasts{right:calc(920px + 16px)}`. Toasts are z-index 70 and the tour card is 65, so the toast also covers the tour card.",
+          "fix": "Remove the right:936px rule. When the AI panel is open beside a drawer, show toasts top-centre below the header (top:calc(var(--top-h) + 12px); left:50%; transform:translateX(-50%)), or keep them right:16px with bottom offset above the drawer. While WF.tour.active, suppress non-critical toasts, or merge them into the tour card as a one-line 'Live:' notice, and give .tour-card z-index above #toasts."
+        },
+        {
+          "severity": "high",
+          "file": "src/47_people.js",
+          "title": "Person drawer shows two different work-time totals side by side",
+          "evidence": "/tmp/rv-art-desktop/d-person-P02-0.png, plus a probe on the current build (sim paused at Mo 08:40). The 'Arbeitszeit' tile and the 'Verlauf heute' legend 'Arbeitet' disagree: Ali Yilmaz 1 h 10 min vs 1 h 17 min; M. Gruber 35 min vs 40 min; L. Wagner 1 h 04 vs 57 min; J. Petrović 52 min vs 1 h. The comment at lines 25–26 claims the dark-green share matches the engine's workSec. This breaks UI_GUIDE rule 2 ('Eine Wahrheit') inside one panel.",
+          "fix": "Compute the legend totals from the same source as the tile. Either scale the band's 'work' segments so their sum equals p.workSec (move the difference into 'standby'), or derive both values from one timeline() pass and drop p.workSec in the drawer. Add a regression probe that compares the two numbers for all people."
+        },
+        {
+          "severity": "medium",
+          "file": "src/43_analyse.js",
+          "title": "Analyse (weakest screen): unbalanced grid, placeholder-looking chart, muddy heat-map, indistinguishable loss colours",
+          "evidence": "/tmp/rv-art-desktop/1440-analyse-0.png, -1.png, -2.png, /tmp/rv-art-desktop/1920-analyse-0.png. (a) The 'Wo verlieren wir Geld?' card ends at y≈455 while 'OEE je Maschine' ends at y≈610, leaving a 155 px hole. The bottom pair of cards also ends at different heights (780 and 870). (b) 'Ausstoß und Leistung' has only 3 bars, each about 100 px wide (06, 07, 08), two y-axes (Gutteile/h and kW), a floating kW line, the partial hour drawn on the same scale, and tick labels '06 07 08' without ':00'. (c) In the Verlustmatrix, cause colours mixed into --card give olive and brown tiles, and the Summe column carries chip backgrounds even for '0 €'. (d) The LOSS palette (lines 56–66) sets Rüsten #60a5fa next to Erstteilprüfung #7fb4fb, three ambers (#fbbf24, #e7a93a, #d8b04a) and two purples, all as hex literals, against UI_GUIDE rule 4.",
+          "fix": "Layout: put the loss Pareto on the left with the 3 'Empfehlungen' cards stacked beneath it as compact rows; keep 'OEE je Maschine' on the right; set align-items:stretch so both columns end flush. Chart: x-domain = whole shift 06:00–14:00 (8 slots); bar width ≤24px; future hours as faint ghost slots; current hour hatched with a 'läuft' label; ticks '06:00'. Drop the kW axis and give power its own small line in the 'Energie je Maschine' card. Heat-map: one sequential hue, background:color-mix(in srgb,var(--accent) a%,transparent) with a = 10–70 %, white text above 45 %. Summe as a right-aligned bold number with a thin inline bar and no chip. Palette, mapped only to tokens: setup → --st-setup, firstPiece → --info, toolchange → --st-tool, waitTool → --st-tool hatched, waitOperator → --st-wait, starved → --mat, blocked → --st-idle, fault → --st-fault."
+        },
+        {
+          "severity": "medium",
+          "file": "src/47_people.js",
+          "title": "Personal (second weakest screen): person cards wrap, truncate to '…', and leave holes; Lageplan labels unreadable",
+          "evidence": "/tmp/rv-art-desktop/1440-personal-0.png, /tmp/rv-art-desktop/z-pcard2.png, /tmp/rv-art-desktop/z-lageplan.png, /tmp/rv-art-desktop/1440-personal-1.png. (1) .pe-act puts the pill inline with the text, so 'wartet auf die nächste' wraps and 'Aufgabe' starts under the pill. (2) The AUFGABE row shows '[Werkzeugwechsel] …', a lone ellipsis. (3) The duration at the top right ('2 h 19 min', '< 1 min') has no label. (4) Lageplan zone labels are about 6 px. (5) 10 cards in 3 columns leave an orphan card and a large empty area at 1440 while the right rail continues. (6) The page is 2,843 px tall; the qualification matrix alone repeats 17 rows of dots.",
+          "fix": "Card as a strict grid: row 1 avatar + name/role + 'seit 2 h 19' (prefix 'seit'); row 2 the pill alone; row 3 activity text with -webkit-line-clamp:2 and min-height 40px, no inline pill. AUFGABE row: display:flex; min-width:0 on the text span, text-overflow on the text and never a standalone '…'; hide the span when it is empty. Move Lageplan + 'Offene Aufgaben' into a 2-column band above the cards, and give cards full width with grid-template-columns:repeat(5,minmax(0,1fr)) at ≥1280 px, so 10 people make 2 clean rows. Lageplan: minimum 10px labels, or IDs only; render at ≥420px wide. Matrix: Spätschicht collapsed by default (accordion header with the 'Klumpenrisiko' warning visible)."
+        },
+        {
+          "severity": "medium",
+          "file": "src/40_leitstand.js",
+          "title": "Machine tiles repeat themselves and leave holes; 13 tiles leave an orphan",
+          "evidence": "/tmp/rv-art-desktop/1440-leitstand-0.png, -2.png, /tmp/rv-art-desktop/1920-leitstand-0.png. The cause line 'Teil 39/80 FA-24122 AG 10 in Bearbeitung' restates the order block directly below ('FA-24122 … Teil 39 von 80 · fertig ca. 10:06'). Its reserved 2-line height leaves a gap of about 30 px in most tiles. Part counters use two formats ('39/80' and '39 von 80'). Buffer strip labels 'LAGER AUS', 'EIN ▮▮▮ AUS' are 9.5 px faint. 13 tiles in 3 columns (1440) or 4 columns (1920) leave a lone 'Montage' tile beside a 2–3 tile hole.",
+          "fix": "Render the cause line only when it adds information: state ≠ running, or the text does not start with 'Teil '. Examples worth keeping: 'wird eingelegt (M. Gruber)', 'Abrichten …', 'Frei – nächste Teile …'. Remove its min-height. Use 'Teil 39 von 80' everywhere. Buffer strip: 10.5px --muted, 'Eingang 3/3 · Ausgang 1/3' with title tooltips. Grid: group tiles by area with small eyebrow headers (Dreherei 4 · Fräserei 2 · Sonderbearbeitung/Verzahnung 2 · Schleiferei 2 · Reinigung/QS/Montage 3), so short rows read as intentional groups. Or render Waschanlage, Messraum and Montage as a compact secondary row of 3 smaller tiles."
+        },
+        {
+          "severity": "medium",
+          "file": "src/20_app.js",
+          "title": "Notification panel and 'Jetzt wichtig' draw the same object two ways; badge 2 vs 'Offen (5)'",
+          "evidence": "/tmp/rv-art-desktop/notif.png compared with /tmp/rv-art-desktop/1440-leitstand-0.png. The panel card has no severity eyebrow, all its buttons are secondary, and 'Quittieren' comes first. The Leitstand card shows a 'WARNUNG' eyebrow, the domain action as a filled cyan primary first, and 'Quittieren' last. The bell badge and KPI say 2 while the panel tab says 'Offen (5)', because 3 info tool-change notices are counted there.",
+          "fix": "Create one shared renderer (WF.ui.notifCard) and use it in both places. Layout: severity eyebrow + time + role, with the entity link on the right; title; body; 'Empfehlung' box. Actions: primary domain action (filled), other actions (default), 'Quittieren' (ghost), and 'Ursache analysieren' (ghost + sparkles) right-aligned. Split the panel tabs into 'Wichtig (2)' and 'Info (3)', or make the badge and the tab count the same set."
+        },
+        {
+          "severity": "medium",
+          "file": "src/42_machine.js",
+          "title": "Live-signal sparklines are stubs on first open",
+          "evidence": "/tmp/rv-art-desktop/d-machine-M05-1.png: a 15 px squiggle in the right corner of 'Spindeldrehzahl', 'Spindellast' and 'Leistung'. /tmp/rv-art-desktop/d-m05-spark-after12s.png: still only the right ~40 % drawn after 12 s. SAMPLES (lines 177–195) only records since page load, while timeSpark (line 204) fixes the x-domain to at least 300 s back. A prospect clicking a machine right after the splash sees empty charts.",
+          "fix": "At boot, pre-fill SAMPLES for each connected machine with the last SPARK_WIN, derived from WF.sim.state history or synthesised from the current signal with the machine-state band (cycle-shaped noise for rpm and load). Alternatively, while the buffer is younger than SPARK_WIN, set t0 = pts[0].t so the trace spans the full width. Add an end-point dot and a tiny 'letzte 5 min' caption."
+        },
+        {
+          "severity": "medium",
+          "file": "src/70_tour.js",
+          "title": "Tour card covers what the step is about",
+          "evidence": "/tmp/rv-art-desktop/v2-tour-copilot.png: the step 8/11 card ('Der Copilot kennt jede Zahl'), at x 410–1030 and y 652–882, sits over the Copilot answer and its input. It also overlaps the machine drawer, which starts at x=960. /tmp/rv-art-desktop/tour-6.png: the step 7 card covers the drawer's left edge, the order chain and 'Teil 16 von 60'.",
+          "fix": "In render(), measure free space: drawer rect (.drawer.open) and Copilot panel rect. If either is open, dock the card into the content area at left:calc(var(--side-w) + 16px); bottom:16px; width:min(520px, <free width> - 32px), never intersecting those rects. Add a compact variant (title + 2 lines, body expandable) for steps that open panels (machine, fault, copilot)."
+        },
+        {
+          "severity": "medium",
+          "file": "src/60_ai.js",
+          "title": "Copilot opening beside a drawer squeezes the content to about 300 px at 1440",
+          "evidence": "/tmp/rv-art-desktop/copilot-1.png, /tmp/rv-art-desktop/copilot-2.png. With the INDEX G220 drawer open, the Copilot takes the middle 440 px; the Leitstand shows one clipped tile column and KPI cards cut mid-word ('F…', 'A…').",
+          "fix": "Below a 1600 px viewport, have the Copilot overlay the main area (position:absolute; right:480px; with shadow) instead of reflowing it. Or collapse the drawer to a 56 px rail (title vertical + expand button) while the Copilot is open. Keep the 'beside' layout only at ≥1680 px."
+        },
+        {
+          "severity": "medium",
+          "file": "src/styles.css",
+          "title": "No type scale: 37 distinct font sizes and 110 declarations at or below 10 px",
+          "evidence": "grep across src/*.js: sizes 8.5, 9, 9.5, 10, 10.5, 10.8, 11, 11.3, 11.5, 11.8, 12, 12.2, 12.3, 12.5, 12.8, 13, 13.5, 14, 14.5, 15, 16, 17 px and more. Declarations ≤10px per file: 45_material 23, 46_tools 14, 50_connect 14, 60_ai 13, 47_people 9, 40_leitstand 8, 61_ki_auftrag 8. Visible as unreadable eyebrows and tile footers (for example 'LAGER AUS' in 1440-leitstand-0.png and Lageplan labels in z-lageplan.png), and the rhythm differs from module to module.",
+          "fix": "Add tokens to :root: --fs-micro:10.5px (uppercase eyebrows only), --fs-xs:11.5px, --fs-sm:12.5px, --fs-md:13.5px, --fs-lg:16px, --fs-xl:21px, --fs-2xl:26px, --fs-kpi:28px, --fs-hero:34px. Map existing literals: ≤10.8 → micro, 11–11.8 → xs, 12–12.8 → sm, 13–14 → md. Forbid anything below 10.5px (SVG axis text included). Document this in UI_GUIDE §5."
+        },
+        {
+          "severity": "medium",
+          "file": "src/10_sim.js",
+          "title": "Plant OEE jumps about 3 points when one long-cycle part finishes",
+          "evidence": "Probe on the current build: stepping WF.sim.advance(15) from 08:40, OEE goes 71,0 % → 73,8 % in one 15 s step at 08:43. M04 (WFL M80, 30-min cycle) goes from good 2 → 3 and its performance from 0.60 → 0.90. The hero KPI and its sparkline show a sawtooth that looks like noise to a production manager.",
+          "fix": "Credit in-progress work in the performance term: ideal cycle × fraction of the current part completed, or use time-based performance (ideal runtime of produced parts plus the elapsed share of the running part). Then OEE moves continuously and only ticks at part ends."
+        },
+        {
+          "severity": "medium",
+          "file": "src/40_leitstand.js",
+          "title": "Hero OEE and KI-Schichtbriefing headline disagree in the same viewport",
+          "evidence": "Sim paused at Mo 08:40: KPI 'OEE HEUTE 71,8 %' and briefing 'OEE 71,7 % unter Ziel 75 %' (1440-leitstand-0.png and 1440-leitstand-1.png). The briefing is cached for up to 15 sim-minutes (refreshBrief). Also 'V 87 % × L 84 % × Q 98,7 %' in the Leitstand against 'Q 99 %' in Analyse (1440-analyse-0.png).",
+          "fix": "Re-render numeric tokens in the briefing headline from WF.sim.kpis() on every update, keeping only the prose cached. Or state the snapshot time next to the number ('OEE 71,7 % (08:25)'). Use the same formatter and precision (fmtPct(x,1)) for V, L and Q in every view."
+        },
+        {
+          "severity": "medium",
+          "file": "src/61_ki_auftrag.js",
+          "title": "Sticky result footer floats above the viewport bottom; content shows underneath it",
+          "evidence": "/tmp/rv-art-desktop/ki-result-2.png and /tmp/rv-art-desktop/z-kisticky.png. The .ka-foot bar (Menge / Angebot netto / Auftragstermin / Auftrag einlasten) sticks about 28 px above the bottom, and cut-off lines ('Wendeschneidplatte 3,17 € · Fräser 2,50 € …') scroll visibly below it.",
+          "fix": "Line 1485: make the bar flush with the viewport by setting bottom:-28px, which cancels the view's padding-block-end of 28px. Or remove the view's bottom padding for this view and add a 28px spacer after the result. Add a 24px top fade (linear-gradient from transparent to var(--bg)) above the bar so content slides under it cleanly."
+        },
+        {
+          "severity": "low",
+          "file": "src/30_hall3d.js",
+          "title": "Hall HUD is truncated, repeats the top-bar clock, and machine labels are inconsistent",
+          "evidence": "/tmp/rv-art-desktop/z-hud3.png: 'IN PRODUKT…', '1 Rüsten · 1 b…', '1 Stapler · 1 w…', and a second 22px 'Mo 08:44' clock next to the top-bar clock. /tmp/rv-art-desktop/v2-1440-halle.png: M01, M03, M05, M07, M09 and M13 show only the ID, while neighbours show 'M02 INDEX G220 16/60'.",
+          "fix": "Widen the HUD to 320px, or use the label 'Produktion' with the sub-line on 2 lines. Replace the HUD clock with a shift-progress bar ('Frühschicht · noch 5 h 20'). Make label LOD consistent: in overview, all machines show 'ID + counter'; the full name appears on hover or zoom."
+        },
+        {
+          "severity": "low",
+          "file": "src/20_app.js",
+          "title": "Two identical 'play' icons in the top bar",
+          "evidence": "/tmp/rv-art-desktop/d-person-P02-0.png (sim paused): the speed group shows ▷ (resume) and the tour button next to the bell is also ▷.",
+          "fix": "Use a distinct tour icon ('presentation' or 'route') with a visible label 'Tour', or move it into a 'Demo' menu together with TV mode and settings."
+        },
+        {
+          "severity": "low",
+          "file": "src/20_app.js",
+          "title": "Nav badges mix semantics: '1 spät', bare '1', '4'/'5', '11/13'",
+          "evidence": "Sidebar in any screenshot, for example /tmp/rv-art-desktop/1440-werkzeuge-0.png. There is no colour coding and no explanation of what '5' next to Werkzeuge means.",
+          "fix": "One badge style: a count pill coloured by severity (crit --st-fault, warn --st-wait, neutral --line2), with a title tooltip ('5 Werkzeugwechsel geplant'). Render 'Anbindung 11/13' as a muted ratio without the pill. Drop the word 'spät' from the badge and keep it in the tooltip."
+        },
+        {
+          "severity": "low",
+          "file": "src/45_material.js",
+          "title": "Identical action button on every table row (8× 'Nachbestellen'); same pattern in Anbindung (9× 'Verbessern')",
+          "evidence": "/tmp/rv-art-desktop/1440-material-2.png (Rohmaterial table) and /tmp/rv-art-desktop/1440-anbindung-1.png (50_connect.js). The one row that matters (AlMgSi1 under minimum, Okamoto L0) gets lost in a column of identical buttons.",
+          "fix": "Show the button only on actionable rows (below minimum, or open demand above stock; machine levels L0/L1), and reveal a ghost button on row hover for the rest. Keep the filled primary only on critical rows."
+        },
+        {
+          "severity": "low",
+          "file": "src/48_quality.js",
+          "title": "Prüflos queue: '‹' separators look like carousel back buttons; 4th card is hard-clipped",
+          "evidence": "/tmp/rv-art-desktop/1440-qualitaet-0.png: 'FA-24120 ‹ FA-24126 ‹ FA-24117 ‹ FA-2412…', with the last card cut at the panel edge ('Prü…').",
+          "fix": "Use a subtle '→' or no separator, with left = next in line. Add a right-edge fade mask (mask-image: linear-gradient(90deg,#000 85%,transparent)) and a '+1' counter chip instead of clipping a card."
+        },
+        {
+          "severity": "low",
+          "file": "src/45_material.js",
+          "title": "Container drawer says the same thing three times and has an empty history",
+          "evidence": "/tmp/rv-art-desktop/d-container-BH-0002-0.png: pill 'Im Versand', tag 'Versand' and sentence 'Im Versand' stacked. The Verlauf shows only '06:00 Behälter angelegt an Messraum', although the container went AG 10 → AG 40.",
+          "fix": "Keep the pill plus one location line ('Versand · Fertigteillager'). Back-fill the Verlauf from the routing, marking pre-start steps as 'vor Simulationsstart', or hide the section when it has fewer than 2 entries."
+        },
+        {
+          "severity": "low",
+          "file": "src/40_leitstand.js",
+          "title": "Page title sits 18 px lower in Leitstand than in every other view",
+          "evidence": "DOM probe: .view-t top = 94px in Leitstand and 76px in all other views (1440). The title jumps when clicking through the nav; the shift info block on the right pushes it down.",
+          "fix": "Set .view-h{align-items:flex-start} for the Leitstand header, or vertically centre the shift block on the title row, so every view's title starts at the same y."
+        },
+        {
+          "severity": "low",
+          "file": "src/46_tools.js",
+          "title": "Werkzeuge page runs about 5 screens (4,258 px) at 1440",
+          "evidence": "/tmp/rv-art-desktop/1440-werkzeuge-0.png through -5.png: Wechselplan → a 19-row tool table (2 screens) → Werkzeugausgabe/Kosten → Bestand → Wechselhistorie. The first screen is strong, but the rest is hard to present.",
+          "fix": "Default the tool table to 'Dringlichste zuerst', showing the top 8 with an 'Alle 19 anzeigen' toggle. Put Bestand Werkzeugausgabe and Wechselhistorie into one tabbed card ('Bestand | Historie'). Target: two screens at 1440."
+        }
+      ]
+    },
+    {
+      "lens": "prospect",
+      "summary": "I ran the prospect walkthrough on /tmp/rv-prospect.html: the README demo script, the full 11-step tour, the sim at 09:10, 13:55, 16:00, 22:30, Tue 07:00 and on to Wed 22:00, a fault on M04 and M02 (with and without tool break), FA-24122 set as rush order from the Leitstand button, the Flanschwelle example in KI-Auftrag analysed and einlastet, and M10 connected through all 5 wizard steps. I checked numbers across the Leitstand, drawer, Werkzeuge, Analyse, Aufträge/Plantafel, Halle, the notification panel and the Copilot. There were no console errors and no horizontal overflow. The base polish is high: the Leitstand tiles, KI-Auftrag (with its delivery-date Gantt) and the Anbindung wizard look strong.\n\nThese would hurt most in front of a real production manager or a jury:\n1. **The order book only lasts about a day.** From Monday afternoon 7 of 13 machines sit at 'Bereit · Kein Arbeitsgang eingeplant'. By Wed 20:26 every order is finished and the whole hall stands still, which would show quickly in TV-Modus or at 600×.\n2. **Leitstand and Copilot give opposite advice on the late order.** The Leitstand's one-click 'Als Eilauftrag' for FA-24122 contradicts the Copilot, which advises against it. The click also makes FA-24119 22 h late with no preview and no warning.\n3. **Scrap after the first step quietly becomes a short delivery.** FA-24119 ships 59 of 60, and FA-24118 ships 11 of 12 after the demo tool break. The problem is only reported when the order finishes.\n4. **The tour's fault is random.** It is often a 'Werkzeugbruch' right after the tour says 'kein Bruch'. It also lands on a machine where no delivery date moves, so 'die Prognose rechnet neu' shows nothing.\n5. **Visible glitch in the Live-Test.** A stretched spinner rotates over the text in the Anbindung wow step.\n6. **Wrong number at night.** The OEE tile reads 'Geisterschicht 100 %' while 6 machines are waiting.\n\nFurther findings cover tour layout (the tour card covers the drawer and the Copilot answer; the wow moments are never shown), stale or contradictory notifications and toasts, two different 'Engpass' answers at once, the 'one tool rule' explained inconsistently, Qualität showing 'kein Trend' at Cpk 0.73, order-follow in the 3D hall, the layout at projector size 1280×720, and pitch claims that don't match each other. Screenshots are in /tmp/rv-prospect/ and the probe scripts are in /tmp/claude-0/-home-user-Jakob-Robot-Vision/6ef6b142-22da-5500-b3f8-4cbdfc06f256/scratchpad/rv/.",
+      "findings": [
+        {
+          "severity": "high",
+          "file": "src/05_profile.js",
+          "title": "Auftragsvorrat reicht nur ~1 Tag – Halle läuft ab Montagnachmittag leer, Mi 20:26 komplett still",
+          "evidence": "Plantafel Mo 08:40 (/tmp/rv-prospect/40-plantafel.png): M01 Säge leer nach 10:06, M04 nach 14:17, M05 nach 17:50, M10 nach 08:45. Mo 13:55 Leitstand '2 Produktion · 7 Bereit', Säge 'Kein Arbeitsgang eingeplant seit 3 h 58 min' (30-1355-leitstand.png). Di 07:00: Säge Bereit seit 21 h, WFL M80 17 h, DMU 65 14 h (30-di0700-leitstand.png). Alle 12 Aufträge fertig um Mi 20:26; Mi 22:00 alle 13 Stationen 'Bereit · Kein Arbeitsgang eingeplant', Säge 'seit 60 h' (97-leitstand-mi2200.png). Personal 14:03: 7/8 Personen 'verfügbar', Ø Auslastung 18 %. Der OEE bleibt dabei bei ~80 %, weil Leerlauf ohne Auftrag nicht zählt – ein Produktionsleiter sieht 'OEE 80 % bei 7 stehenden Maschinen' als Widerspruch. Ein echter Lohnfertiger hat 2–6 Wochen Vorrat.",
+          "fix": "Im Profil 12–20 weitere freigegebene Aufträge ergänzen (Termine Do bis nächste Woche Fr, Mischung der vorhandenen Kunden, auch über M01/M04/M05/M06/M10/M13 geroutet), sodass jede Maschine mindestens 1–2 Tage Warteschlange hat. Dazu einen deterministischen Auftragszufluss (z. B. 1–2 neue Aufträge je Schicht über addOrder, Quelle 'ERP' oder 'Angebot angenommen'), damit TV-Modus und 600× nie leerlaufen. Im Leitstand neben OEE eine Kennzahl 'Belegung: Maschinen mit Auftrag x/13 · Vorrat y Tage' zeigen."
+        },
+        {
+          "severity": "high",
+          "file": "src/10_sim.js",
+          "title": "'Als Eilauftrag' wird empfohlen, obwohl der Copilot abrät – der Klick macht FA-24119 22 h zu spät, ohne Vorschau",
+          "evidence": "Mo 08:40: 'Jetzt wichtig' schlägt für FA-24122 'Als Eilauftrag kennzeichnen' mit Primär-Button vor (10_sim.js:2931; 01-leitstand.png). Der Copilot sagt zur selben Zeit: 'Ein Eilauftrag würde den Verzug nur verschieben … FA-24119 würde ~12 h 14 min spät. Besser: Überstunden am Engpass M07 …'. Der Klick setzt die Priorität sofort, ohne Bestätigung; es kommt nur der Toast 'FA-24122 ist jetzt Eilauftrag' (61-rush-after.png). 10 min später: FA-24122 Mi 20:05 → Mi 14:32 (knapp), aber FA-24119 Mi 09:49 → Do 08:05, 'Verspätet 22 h 06 min' (62-rush-auftraege.png). Zwei Produktteile widersprechen sich, und die Prognose des Copiloten (12 h) weicht auch noch vom Ergebnis (22 h) ab.",
+          "fix": "Den Vorschlag der late-Meldung (10_sim.js:2931) aus derselben Was-wäre-wenn-Logik ableiten wie orderAdvice in 60_ai.js (~Z. 260). 'Als Eilauftrag' nur als Aktion anbieten, wenn kein anderer Auftrag dadurch spät wird; sonst Überstunden am Engpass, Teillieferung oder moveOp. setPriority('eil') über ein Bestätigungs-Modal laufen lassen, das Vorher/Nachher-ETA aller betroffenen Aufträge zeigt (Prognose auf geklontem Plan). Der Erfolgs-Toast nennt Nebenwirkungen ('FA-24119 dadurch Do 08:05 – 22 h zu spät')."
+        },
+        {
+          "severity": "high",
+          "file": "src/10_sim.js",
+          "title": "Ausschuss in Folge-Arbeitsgängen wird still zur Teillieferung – Warnung erst bei Auftragsende",
+          "evidence": "Normallauf: Ausschuss FA-24119 AG 20 an M02 um Mo 10:43 → Sollmenge ab AG 30 nur noch 59. Die einzige Meldung kommt Mi 09:01: 'Auftrag FA-24119 fertig – Teillieferung … 59 von 60' (46 h später). Demo-Störung ALM 4410 an M04 (README Schritt 4): FA-24118 AG 20 Ausschuss 1 → AG 30–70 Soll 11. Die Auftragszeile zeigt weiter '12 Stk · Knapp · Puffer 25 min', nur der kleine Text 'Tiefbohren 1/11 gut' verrät es (25-order-24118-toolbreak.png). Der Copilot antwortet auf 'Was bedeutet das für FA-24118?' mit '12 Stk … Termin hält knapp' (21-copilot-fa24118.png) und bei der Tour-Störung an M02 mit '16/60 fertig'. Teillieferung erst Di 14:19. Für eine Bahnachse von AlpenRail ist das genau der Fall, den ein Produktionsleiter sofort sehen will.",
+          "fix": "Bei Ausschuss in einem Arbeitsgang nach dem ersten entweder automatisch eine Nachfertigung ab AG 10 einplanen (Rohmaterial prüfen, in die Prognose aufnehmen) oder sofort eine Warnung 'Menge gefährdet: FA-24118 nur 11/12 – Nachfertigung ab Säge einplanen (42CrMo4 Ø110 vorhanden)' mit Aktion ausgeben. orderView soll expectedQty bzw. ein Mengenrisiko liefern, damit Liste, Drawer, Leitstand und Copilot '11/12' zeigen."
+        },
+        {
+          "severity": "high",
+          "file": "src/70_tour.js",
+          "title": "Tour-Störung ist Zufall: oft Werkzeugbruch direkt nach 'kein Bruch' – und ohne sichtbare Terminwirkung",
+          "evidence": "pickFaultMachine() nimmt M02, und triggerFault(id) ohne Code wählt zufällig aus dem Katalog. Im Tour-Lauf kam 'ALM 4410 Werkzeugbruch' (10-tour-07.png) – direkt nach Schritt 6 'Kein … Bruch durch Überziehen'. Er verschrottet ein Teil (FA-24119 → 59/60). Mit einer Nicht-Bruch-Störung an M02 ändert sich kein Termin (Test: nur ±1 min bei fremden Aufträgen), also zeigt 'die Prognose rechnet die Termine neu' nichts. Dieselbe Störung an M07 verschiebt FA-24118 um +20 min (Puffer 25 → 5 min) und FA-24122 um +20 min. Auch README Schritt 4 (M04) bewegt FA-24118 nicht (Di 15:35 → 15:34).",
+          "fix": "In der Tour M07 wählen (Engpass des in Schritt 5 verfolgten FA-24118) oder allgemein die Engpassmaschine des knappsten Auftrags, mit festem Nicht-Bruch-Code (z. B. 'ALM 1021' Kühlmitteldruck). Vor dem Auslösen orderView(eta) merken und im Schrittext Vorher/Nachher zeigen ('FA-24118: Puffer 25 → 5 min'). Für den Schritt die Simulation laufen lassen, damit der Instandhalter sichtbar losläuft. Das README-Drehbuch entsprechend anpassen."
+        },
+        {
+          "severity": "high",
+          "file": "src/50_connect.js",
+          "title": "Live-Test: Spinner wird zur riesigen rotierenden Ellipse über dem Text",
+          "evidence": "Anbindung M10, Schritt 4 'Live-Test': Eine dünne cyanfarbene Ellipse läuft quer durch die Karte 'Aus den Signalen erkannt' über 'Produktion' und 'FA-24126' (/tmp/rv-prospect/80-conn-step4.png, Ausschnitt 80-conn-step4-crop.png). Ursache: '.cn-det-m>span{flex:1;min-width:0}' (Z. 439) ist spezifischer als '.cn-spin{…flex:none}' (Z. 34). Der 14-px-Spinner wird auf volle Breite gestreckt und dreht sich – genau im Wow-Schritt der Anbindung.",
+          "fix": "Selektor auf '.cn-det-m>span:not(.cn-spin){flex:1;min-width:0}' ändern oder '.cn-det-m>.cn-spin{flex:0 0 14px;width:14px;height:14px}' ergänzen. Andere '.cn-spin'-Stellen in flex-Containern auf dasselbe Muster prüfen."
+        },
+        {
+          "severity": "high",
+          "file": "src/10_sim.js",
+          "title": "OEE-Kachel zeigt 'Geisterschicht 100 %', während autonome Maschinen stehen",
+          "evidence": "Mo 22:30 Leitstand: 'Ziel 75 % · +3,5 Pkt. · Geisterschicht 100 %', gleichzeitig Statusleiste '1 Produktion · 6 Wartet' und M03 'Wartet auf Werkzeug seit 17 min' (30-2230-leitstand.png). kpis().oeeShift = 1. Text in 40_leitstand.js:792. Falsche Zahl genau in dem Moment, in dem die Geisterschicht-Geschichte (Stopp vorhersagen) erzählt wird.",
+          "fix": "In kpis() bei shift=null die OEE über Maschinen mit loading 'auto' und aktivem Arbeitsgang rechnen und waitTool/blocked/starved als Verfügbarkeitsverlust zählen (für Autonome ist die Geisterschicht geplante Zeit). Alternativ in 40_leitstand.js statt der Prozentzahl 'Geisterschicht: 1 von 3 autonomen Maschinen läuft · 2 gestoppt' anzeigen."
+        },
+        {
+          "severity": "medium",
+          "file": "src/70_tour.js",
+          "title": "Tour-Karte verdeckt den Drawer und die Copilot-Antwort, über die sie spricht",
+          "evidence": "Schritt 3 verdeckt die Werkzeugtabelle im M04-Drawer (10-tour-03.png). Schritt 7 verdeckt 'Auftrag & Fortschritt' (10-tour-07.png). Schritt 8 verdeckt die Copilot-Antwort, und drei Ebenen überlappen (10-tour-08.png). Bei 1280×720 (Beamer) bedeckt die Karte den halben Drawer (A1-1280-tour3.png). 'ring' ist in keinem Schritt gesetzt, es wird also nie etwas hervorgehoben.",
+          "fix": "Bei offenem Drawer oder Copilot die Karte im freien linken Bereich zentrieren: left = Sidebar + (Viewport − Sidebar − Drawerbreite)/2, Breite min(560px, verfügbar − 32px), oder links oben andocken. In Schritt 8 zu einer kompakten Leiste verkleinern. Je Schritt einen 'ring'-Selektor setzen (Werkzeugtabelle, Störungsbox, Copilot-Antwort)."
+        },
+        {
+          "severity": "medium",
+          "file": "src/70_tour.js",
+          "title": "Tour zeigt die Wow-Momente nicht: Anbindung bleibt auf Schritt 1, KI-Auftrag wird nicht analysiert",
+          "evidence": "Schritt 9 öffnet den Assistenten auf 'Welche Maschine soll angebunden werden?'; die Tour-Karte verdeckt sogar 'Weiter: Anbindungsweg' (10-tour-09.png). KI-Zuordnung, Live-Test und 'jetzt digital angebunden' sieht der Zuschauer nie. Schritt 10 zeigt KI-Auftrag vor dem Klick auf 'Analysieren' (10-tour-11.png). Arbeitsplan, Preis 85,34 €/Stk und die Liefertermin-Gantt (71-ki-result-s3.png) – das Stärkste der Demo – bleiben unsichtbar. Schritt 5 ist eine statische Route, kein 'Verfolgen'.",
+          "fix": "Schritt 9 run(): Assistent direkt in Schritt 3/4 öffnen (KI-Zuordnung, dann Live-Test) oder per Timer durchklicken; am Ende den L1-Erfolg zeigen. Schritt 10 run(): data-act='go' auslösen, nach dem Ergebnis zu 'Liefertermin' und 'Auswirkung auf bestehende Aufträge' scrollen. Optional ein Schritt 'Einlasten' mit neuem FA in der Plantafel. In Schritt 5 einen Behälter im Zeitraffer entlang der Route animieren."
+        },
+        {
+          "severity": "medium",
+          "file": "src/10_sim.js",
+          "title": "Werkzeug-Meldung zeigt veraltete Uhrzeit (08:37, liegt in der Vergangenheit), die Kachel sagt 08:43",
+          "evidence": "Mo 08:40 Benachrichtigungen: 'Werkzeugwechsel geplant – M04 WFL M80 … Wechsel nach Teil 7 · ca. 08:37 … Danach CNMG nach Teil 9 · ca. 10:40', zuletzt aktualisiert 07:50 (98-bell.png). Auf demselben Bildschirm zeigen die M04-Kachel und 'Als Nächstes' 'Wechsel ca. 08:43'; im Werkzeuge-Plan steht CNMG bei 10:46. Die Meldung wird offenbar nur beim Teilwechsel neu berechnet; während des 48-min-Teils driftet die Zeit.",
+          "fix": "Die Planung bzw. Meldung tool:<id> jede Sim-Minute aus dem aktuellen plannedChange.etaT neu formulieren (die Signatur enthält die ETA-Minute bereits – nur der Aufruf fehlt außerhalb der Teilegrenze) oder die Uhrzeit in der UI live aus machineView rendern. Nie eine Zeit vor 'jetzt' anzeigen ('nach Teilende, ca. …')."
+        },
+        {
+          "severity": "medium",
+          "file": "src/10_sim.js",
+          "title": "Empfehlung bei Pause und nach Schichtende falsch: 'niemand im Dienst … vor Schichtende … Rufbereitschaft'",
+          "evidence": "tool:M02 um 12:00: '…frühestens 12:30 (Frühschicht, nach der Pause) – Maschine steht ab ca. 12:17', Empfehlung: 'Bis zum Stopp ist niemand mit Werkzeugwechsel-Qualifikation im Dienst. Empfehlung: vor Schichtende vorbeugend wechseln oder Rufbereitschaft einplanen' (10_sim.js:1945). Das Personal ist im Dienst, nur in der Mittagspause, und Rufbereitschaft für 30 min ist absurd. Gleich um 19:11 (Pause 19:30). Um 22:05 und 22:12 – nach Schichtende – steht weiter 'vor Schichtende vorbeugend wechseln' (Jetzt-wichtig-Karte in 30-2230-leitstand.png).",
+          "fix": "Nach Grund von staffNote verzweigen. Pause: 'In der Pause 12:00–12:30 ist niemand verfügbar – vor der Pause wechseln (ca. 11:55) oder Pausenablösung einplanen'. Nach Schichtende: 'M02 steht bis Di 06:00 (ca. 7 h 25 min) – Hinweis kam um 21:00 (Geisterschicht-Check)'. 'im Dienst' durch 'verfügbar' ersetzen."
+        },
+        {
+          "severity": "medium",
+          "file": "src/43_analyse.js",
+          "title": "Zwei verschiedene 'Engpässe' zur selben Zeit (Analyse: Studer S33, Briefing: M07)",
+          "evidence": "Mo 08:40 Analyse-Kennzahl 'Engpass Studer S33 – am längsten verplant bis Mi 19:05' (02-analyse.png). KI-Schichtbriefing im Leitstand: 'Engpass M07 Tiefbohren: Arbeitsinhalt ca. 29 h, belegt bis Mi 10:52' (95-leitstand-scroll-1100.png). Dazu je Auftrag ein eigenes 'ENGPASS'-Badge. 43_analyse.js:260–268 nimmt das späteste 'bis', 60_ai.js:714/1965 den größten Arbeitsinhalt. Ein Interessent fragt: 'Was ist denn jetzt mein Engpass?'",
+          "fix": "Eine gemeinsame Funktion (z. B. WF.sim.bottleneck() oder Helfer in 10_sim) mit einer Definition, etwa größte geplante Restarbeit im Horizont, bei Gleichstand das spätere 'belegt bis'. Analyse, Briefing und Copilot nutzen sie. Pro Auftrag 'Engpass für FA-…' formulieren."
+        },
+        {
+          "severity": "medium",
+          "file": "src/42_machine.js",
+          "title": "Die 'eine Regel' für Werkzeuge wird an derselben Stelle widersprüchlich erklärt",
+          "evidence": "M05-Drawer 10:30: 'Wechselgrenze ≤ 0 Teile Reststandzeit (ab ca. 80 % Verschleiß)' und direkt darunter 'Regel: … gewechselt wird … sobald höchstens 2 Teile (bzw. 10 % der Standzeit) übrig sind' (50-m05-drawer.png). Werkzeuge-Liste M03 'Planung … bei ≤ 3 Teilen Rest', M02 '≤ 2 Teilen Rest'. Karte 'So plant werkfluss': 'Wechselgrenze 0 Teile' neben 'Angekündigt bei ≤ 2 Teilen Rest' (02-werkzeuge.png). Das README verspricht 'die eine, nachvollziehbare Regel' – ein Einrichter findet hier vier Zahlen.",
+          "fix": "Regeltext in 42_machine.js und 46_tools.js aus zwei sauber benannten Größen bauen, überall gleich: 'Ankündigung: N Teile vorher (Vorlauf zum Holen)' = planHorizonParts und 'Wechsel: an der letzten Teilegrenze, an der die Standzeit noch für ein ganzes Teil reicht (Wechselgrenze = changeAtParts)'. Den festen Satz 'höchstens 2 Teile (bzw. 10 %)' streichen bzw. pro Werkzeug mit dessen Werten füllen."
+        },
+        {
+          "severity": "medium",
+          "file": "src/48_quality.js",
+          "title": "Qualität meldet 'kein Trend' bei Cpk 0,73 und 3 Ausschussteilen am selben Merkmal",
+          "evidence": "Mo 08:40 (02-qualitaet.png): Kachel SPC-Warnungen '0 offen · kein Trend · 4 Merkmale Cpk < 1,33'. Gleichzeitig M03 Ø 8 h6: Cpk 0,73, n.i.O. 5 (8,3 %), Eingriffsgrenze UEG unter der Toleranzgrenze USG. 'Gerade passiert' zeigt 3 Ausschussteile 08:16–08:28. Das KI-Briefing sagt 'SPC-Trend an M03 Citizen L20 heute 3×'. Ein QM-Leiter liest 'kein Trend' als falsch (Text in Z. 425).",
+          "fix": "Kachel in den Warnzustand (amber/rot) setzen, sobald ein Merkmal Cpk < 1,0 hat oder heute Trends auftraten: 'M03 Ø8 h6: Cpk 0,73 – nicht fähig · 3 Trends heute, korrigiert'. Mit einer Empfehlung verlinken (Korrekturintervall verkürzen, Schwesterwerkzeug, früherer Wechsel). 'kein Trend' nur zeigen, wenn heute wirklich keiner war und alle Cpk ≥ 1,33."
+        },
+        {
+          "severity": "medium",
+          "file": "src/30_hall3d.js",
+          "title": "'Auftrag in der Halle verfolgen': falsche Zähler, fehlende Stationen, Route hinter dem Drawer",
+          "evidence": "focusOrder('FA-24118') (90-hall-focus-24118.png): Die Hinweise für AG 30 Tiefbohren und AG 50 Studer fehlen (überdeckt bzw. ausgeblendet). Das hervorgehobene Label 'M09 Studer S33 30/36' zeigt den Zähler von FA-24127, nicht von FA-24118. Mit offenem Auftrags-Drawer (91-hall-focus-24118-drawer.png, 10-tour-05.png) verschwinden alle Hinweise; Messraum und Versand liegen hinter dem Drawer, die Kamera passt sich nicht an.",
+          "fix": "Im Fokusmodus die Stationslabels der Route durch auftragsbezogene ersetzen ('AG 50 · ab 16:31 · 0/12'). Alle AG-Hinweise immer anzeigen und Kollisionen mit Versatz bzw. Führungslinien lösen statt ausblenden. Kamera auf die Bounding-Box der Route über Viewportbreite minus Drawerbreite ausrichten und beim Öffnen des Drawers neu ausrichten."
+        },
+        {
+          "severity": "medium",
+          "file": "src/40_leitstand.js",
+          "title": "Am Beamer (1280×720) ist keine einzige Maschinenkachel sichtbar",
+          "evidence": "/tmp/rv-prospect/A0-1280-leitstand.png: Kopf mit Schicht/Schichtleitung/Personal und 6 KPI-Kacheln in zwei Reihen à 3 reichen bis y≈530. Darunter nur Statuschips und die oberen ~150 px von zwei Maschinenkacheln. 'Die ganze Halle auf einen Blick' (Tour Schritt 2) stimmt bei typischer Präsentationsauflösung nicht.",
+          "fix": "Bei ≤ 1440 px Breite oder ≤ 800 px Höhe die KPIs als eine Reihe mit 6 kompakten Kacheln (~84 px hoch, Sparkline klein oder ausgeblendet) zeigen und die Schicht/Personal-Chips in die Titelzeile ziehen. Ziel: bei 1280×720 mindestens eine volle Reihe mit 3 Maschinenkacheln über dem Falz. Alternativ den TV-Modus bei kleiner Höhe vorschlagen."
+        },
+        {
+          "severity": "medium",
+          "file": "src/20_app.js",
+          "title": "Nach 'Als Eilauftrag' poppt der alte Toast 'Termin gefährdet FA-24122 – 2 h 05 min Verzug' auf",
+          "evidence": "62-rush-auftraege.png: Nach dem Eilauftrag erscheint der Toast 'Termin gefährdet: FA-24122 … Prognose fertig Mi 20:05 … 2 h 05 min Verzug', obwohl FA-24122 jetzt Mi 14:32/knapp ist. Trace: late:FA-24122 entstand im Warm-up (nie getoastet), wird um 08:45 mit unveränderter Begründung erneut 'open' gesendet und um 08:50 erledigt. onNotify (20_app.js:269–276) toastet jede warn-Meldung beim ersten Senden nach dem Boot.",
+          "fix": "Beim Boot bzw. sim:reset alle vorhandenen Meldungen als _toasted markieren; Aktualisierungen bekannter Keys nur toasten, wenn die Schwere steigt. In der late-Prüfung (10_sim) den Text vor dem Senden aus der aktuellen ETA neu bauen bzw. die Meldung bei Prioritätswechsel sofort neu bewerten oder erledigen."
+        },
+        {
+          "severity": "medium",
+          "file": "src/70_tour.js",
+          "title": "Widersprüchliche Versprechen zur Anbindungsdauer, schwacher Nutzen-Abschluss ohne Zahlen",
+          "evidence": "Tour-Intro: 'bindet jede Maschine in Stunden an'. Hero-Kachel: '1 Tag bis zur ersten Live-Kennzahl'. Nutzen-Folie: 'Start in einem Tag'. Anbindung-Untertitel: 'in Minuten statt Monaten'. Assistent: 'ca. 20 min Montage'. Copilot (60_ai.js:1280): 'Montage in ca. 1 Stunde'. Hero '13 Stationen … angebunden oder anbindbar' ist tautologisch, '0 Papier' schwach. Die Nutzen-Folie (10-tour-11.png) nennt außer '420 € Stillstand' keine Zahl: kein ROI, kein Preisanker – für eine Jury zu dünn.",
+          "fix": "Ein Satz Aussagen überall gleich verwenden (z. B. 'Altmaschine in ~20 min nachgerüstet, ganzes Werk an 1 Tag live'), auch in 50_connect- und 60_ai-Texten. Hero-Kacheln aus Live-Daten bauen ('11/13 Stationen live', '420 € Stillstand heute sichtbar', 'FA-24122: Verzug 2 Tage vorher erkannt'). Auf der Nutzen-Folie eine ROI-Zeile aus den Stundensätzen rechnen ('+5 Pkt OEE ≈ X €/Jahr bei 13 Maschinen') und einen Preisanker nennen ('ab … € je Maschine/Monat')."
+        },
+        {
+          "severity": "low",
+          "file": "src/46_tools.js",
+          "title": "Kopf 'Nächster Wechsel 10:47' ignoriert einen früheren voraussichtlichen Wechsel (10:43)",
+          "evidence": "Mo 10:30 Werkzeuge: Kopfkarte und KPI 'Nächster Wechsel · nach Teil 34 · Haas VF-4 (M06) · 10:47 / nächster 10:47 an M06'. Im Wechselplan steht M08 'WF m1,5 ca. 10:43' (voraussichtlich) – früher (cross-Lauf, Wechselplan-Liste).",
+          "fix": "Kopf als 'Nächster angekündigter Wechsel' beschriften oder voraussichtliche Wechsel einbeziehen und als 'voraussichtlich' markieren."
+        },
+        {
+          "severity": "low",
+          "file": "src/60_ai.js",
+          "title": "Copilot: keine Antwort auf 'Warum sind so viele Maschinen frei?'; Übergabe listet Frühschicht-Wechsel als Spätschicht",
+          "evidence": "Mo 13:50 offline: 'Warum sind so viele Maschinen frei?' → 'Dazu habe ich im Offline-Modus keine passende Auswertung' – genau die Frage eines Interessenten, wenn 7 Maschinen stehen. 'Schreib mir die Schichtübergabe' um 13:50 führt unter 'Werkzeugwechsel Spätschicht (14:00–22:00)' Wechsel von 13:51 und 13:53 auf.",
+          "fix": "Intent für 'frei|leer|steht|stillstand|nichts zu tun|auslastung' ergänzen: freie Maschinen mit Grund ('kein Auftrag eingeplant seit …', nächste eingeplante Teile) plus Auftragsvorrat in Stunden. In der Übergabe Wechsel nach t ≥ Schichtbeginn filtern; frühere als 'noch in dieser Schicht' ausweisen."
+        },
+        {
+          "severity": "low",
+          "file": "src/30_hall3d.js",
+          "title": "Halle: uneinheitliche Maschinenlabels und abgeschnittene HUD-Texte",
+          "evidence": "02-halle.png (08:40): M01, M03, M05, M07, M09, M13 zeigen nur die ID, die Nachbarn Name und Zähler ('M02 INDEX G220 16/60'). Das wirkt zufällig. HUD abgeschnitten: 'IN PRODUKT…', '1 Stapler · 1 w…', um 09:10 '5 wartend · 2 …' (31-0910-halle.png).",
+          "fix": "Für alle Maschinen eine kompakte Label-Variante mit ID + Zähler (Name erst beim Hover oder Zoom); Kollisionen per Höhenversatz lösen. HUD-Spalten 'PRODUKTION' / 'IM DIENST' / 'TRANSPORTE' kürzer beschriften, Unterzeilen umbrechen oder Karte auf ~300 px verbreitern."
+        },
+        {
+          "severity": "low",
+          "file": "src/20_app.js",
+          "title": "Zwei identische Play-Symbole in der Kopfzeile (Simulation und Demo-Tour)",
+          "evidence": "Kopfzeile: ▷ bei x≈1013 (Simulation läuft/Pause) und ▷ bei x≈1264 (id t-tour, icon('play'), Z. 61) neben der Glocke. Wer die Simulation fortsetzen will, startet womöglich die Tour.",
+          "fix": "Tour-Button mit Text 'Demo-Tour' oder anderem Symbol (z. B. Kompass/Präsentation), optisch abgesetzt von der Tempo-Gruppe."
+        },
+        {
+          "severity": "low",
+          "file": "src/20_app.js",
+          "title": "Zählerwidersprüche: Glocke 2, Panel 'Offen (5)', Leitstand 'Offene Meldungen 2'",
+          "evidence": "98-bell.png: Badge der Glocke '2', das Panel öffnet mit 'Offen (5)'; Leitstand-Kachel 'Offene Meldungen 2 · 2 Warnungen'. Die 2 zählen nur Warnungen, die 5 auch Info-Meldungen.",
+          "fix": "Badge und Kachel 'Warnungen' nennen oder im Panel getrennte Reiter 'Warnungen (2) · Info (3)'; gleiche Definition überall."
+        },
+        {
+          "severity": "low",
+          "file": "src/40_leitstand.js",
+          "title": "'Handlungsbedarf' sortiert die untätige Waschanlage ganz nach oben",
+          "evidence": "96-leitstand-handlungsbedarf.png: Platz 1 ist M11 Waschanlage 'Bereit · Kein Auftrag aktiv – nächste Teile 12:00' (nichts zu tun). Dahinter M04 mit Werkzeugwechsel in 3 min und M01 mit dem verspäteten FA-24122.",
+          "fix": "Dringlichkeitswert: Störung > Wartet (Material/Bediener/Werkzeug) > anstehender Werkzeugwechsel/Erstteil < 15 min > Maschine eines späten oder knappen Auftrags > frei mit Arbeit in der Warteschlange; frei ohne fällige Arbeit ganz unten."
+        },
+        {
+          "severity": "low",
+          "file": "src/10_sim.js",
+          "title": "Waschanlage bekommt beim Rüsten 'neue vermessene Werkzeuge'",
+          "evidence": "Gerade passiert 07:45: 'M11: Rüsten für FA-24117 AG 20 gestartet (M. Kaya, geplant 5 min) – neue vermessene Werkzeuge werden eingesetzt' (10_sim.js:1454). Eine Kammerreinigungsanlage hat keine Werkzeuge.",
+          "fix": "Den Werkzeug-Zusatz nur anhängen, wenn der Arbeitsgang Werkzeuge hat; für Waschanlage/QS/Montage 'Reinigungsprogramm/Korb eingestellt' bzw. 'Prüfplan geladen'."
+        },
+        {
+          "severity": "low",
+          "file": "src/41_orders.js",
+          "title": "Fortschritt-% wirkt aufgebläht, 'ENGPASS'-Badge auf jedem Auftrag",
+          "evidence": "02-auftraege.png: FA-24126 '97 %', obwohl 12/24 Stk noch auf den Messraum warten. 41-auftraege-scroll.png: FA-24127 '98 %' bei 24/36 versandt. Jeder Auftrag trägt ein 'ENGPASS'-Badge, auch 'Im Plan · Puffer 21 h 01 min' (FA-24128).",
+          "fix": "Als primären Fortschritt Stückzahl zeigen ('12/24 versandt'), den gewichteten Wert als 'Arbeitsinhalt 97 %' beschriften. Das Engpass-Badge nur bei Risiko ≠ ok zeigen, sonst dezent im Tooltip."
+        },
+        {
+          "severity": "low",
+          "file": "src/70_tour.js",
+          "title": "Tour-Schritt 3 nennt das falsche Werkzeug (10:46 statt des Wechsels um 08:43)",
+          "evidence": "pickToolMachine() wählt M04 wegen des DNMG-Wechsels um 08:43; der Text nimmt aber das erste Werkzeug mit plannedChange: 'WSP CNMG 190612: noch 3 Teile, Wechsel geplant ca. 10:46' (10-tour-03.png). Der spannendere Wechsel in 3 min wird nicht erwähnt.",
+          "fix": "Im Schrittext das Werkzeug mit dem kleinsten plannedChange.etaT verwenden (gleiches Kriterium wie in pickToolMachine)."
+        },
+        {
+          "severity": "low",
+          "file": "src/05_profile.js",
+          "title": "Wendeplatten-Handling unrealistisch: Einrichter läuft für jede Schneide zur Ausgabe, Platten bei 70 % verschrottet",
+          "evidence": "M02: WSP CNMG 120408 Standzeit 32 min bei 2,2 min/Teil → Wechsel alle ~14 Teile, jeweils mit Gang zur Werkzeugausgabe und 5–6 min Stopp. Bis 10:30 sind es '15 Werkzeuge in 11 Stopps'; Werkzeugwechsel ist mit 111 € die zweitgrößte Verlustursache. Gerade passiert: 'WSP VNMG 160404 … mitgewechselt … Verschleiß 70 % → verschrottet'. Ein Produktionsleiter: Bediener wenden Platten in 1–2 min selbst, eine Platte hat mehrere Schneiden.",
+          "fix": "Für kind 'insert' das Wenden durch den Bediener an der Maschine modellieren (kein Gang zur Ausgabe, 1–2 min). 'Schneide 2/4' führen und erst die letzte Schneide verschrotten. Standzeiten für CNMG in Stahl auf ~45–60 min anheben, damit Werkzeugwechsel nicht zum Hauptverlust wird."
+        }
+      ]
+    }
+  ],
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Review"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "review:art-desktop",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "a22e8084c845cc32a",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1792201758128,
+      "queuedAt": 1792201758104,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Art-director review of werkfluss on desktop (1440×900 and 1…",
+      "promptPreview": "You review \"werkfluss\", an AI-native MES demo for Austrian SME manufacturers (fictional Vienna job shop, simulated live). It will be shown to real prospects and at a startup program; the product owner's top priority now is VISUAL quality (\"vor allem optisches Improvement\"), plus clear dashboards, felt connection between machines (material + information flow), insight into machines/tools/stock/peop…",
+      "promptFramed": true,
+      "lastProgressAt": 1792204557423,
+      "tokens": 358940,
+      "toolCalls": 323,
+      "durationMs": 2794294,
+      "resultPreview": "{\"summary\":\"Art-director review of werkfluss on desktop (1440×900 and 1920×1080), built to /tmp/rv-art-desktop.html (rebuilt mid-review at about 02:17 after 30_hall3d.js and 60_ai.js changed). Screenshots are in /tmp/rv-art-desktop/.\\n\\nI covered all 10 views, scrolled to the bottom; the Plantafel; the machine, order, person, AGV, tool, material and container drawers; the notification panel; the C…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "review:prospect",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "ace4e6b8b35a1f749",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1792201758128,
+      "queuedAt": 1792201758104,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "I ran the prospect walkthrough on /tmp/rv-prospect.html: th…",
+      "promptPreview": "You review \"werkfluss\", an AI-native MES demo for Austrian SME manufacturers (fictional Vienna job shop, simulated live). It will be shown to real prospects and at a startup program; the product owner's top priority now is VISUAL quality (\"vor allem optisches Improvement\"), plus clear dashboards, felt connection between machines (material + information flow), insight into machines/tools/stock/peop…",
+      "promptFramed": true,
+      "lastProgressAt": 1792203731130,
+      "tokens": 368911,
+      "toolCalls": 112,
+      "durationMs": 1967972,
+      "resultPreview": "{\"summary\":\"I ran the prospect walkthrough on /tmp/rv-prospect.html: the README demo script, the full 11-step tour, the sim at 09:10, 13:55, 16:00, 22:30, Tue 07:00 and on to Wed 22:00, a fault on M04 and M02 (with and without tool break), FA-24122 set as rush order from the Leitstand button, the Flanschwelle example in KI-Auftrag analysed and einlastet, and M10 connected through all 5 wizard step…"
+    }
+  ],
+  "totalTokens": 727851,
+  "totalToolCalls": 435
+}
