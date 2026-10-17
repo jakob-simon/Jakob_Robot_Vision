@@ -128,11 +128,11 @@
 .h3-lg i.arc{width:16px;height:8px;border-radius:9px 9px 0 0;background:transparent;border:2.5px solid var(--c);border-bottom:0}
 .h3-lg i.dsh{width:16px;height:0;border-radius:0;background:transparent;border-top:2.5px dashed var(--c)}
 .h3-lg i.stp{width:11px;height:11px;border-radius:50%;background:linear-gradient(var(--bg) 0 0) center/6px 2px no-repeat,var(--c)}
-.h3-lg i.vest{width:8px;height:11px;border-radius:3px 3px 2px 2px}
+.h3-lg i.vest{width:9px;height:11px;border-radius:4px 4px 2px 2px;box-shadow:inset 0 0 0 1px color-mix(in srgb,white 28%,transparent)}
 .h3-sleg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px 8px;margin-top:10px;font-size:var(--fs-xs);color:var(--muted)}
 .h3-sleg span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .h3-sleg i{width:8px;height:8px;border-radius:50%;background:var(--c);flex:none;box-shadow:0 0 5px color-mix(in srgb,var(--c) 70%,transparent)}
-.h3-sheet{left:8px;right:8px;bottom:62px;padding:12px 10px;max-height:calc(100% - 150px);overflow:auto}
+.h3-sheet{left:8px;right:8px;bottom:70px;padding:12px 10px;max-height:calc(100% - 150px);overflow:auto}
 .h3-sheet .h3-leg{padding:0 4px}
 .h3-sheet .h3-eb~.h3-eb{padding-top:10px}
 .h3-sheet .h3-pre{display:grid;grid-template-columns:1fr 1fr}
@@ -201,6 +201,8 @@
 /* Auftragsroute: Nummer, Arbeitsgang, Station; Führungslinie zur Maschine */
 .h3-lb.rt{--c:var(--text);background:color-mix(in srgb,var(--bg) 90%,transparent);border-color:color-mix(in srgb,var(--rc) 60%,transparent);padding:4px 10px 5px 4px;cursor:default}
 .h3-lb.rt::after,.h3-lb.wt::after{display:none}
+/* Route- und Warte-Etiketten sind reine Information: Klicks gehen an die Halle darunter */
+.h3-lb.rt,.h3-lb.wt{pointer-events:none}
 .h3-lb.rt .r1{gap:7px}
 .h3-lb.rt .n{display:inline-grid;place-items:center;min-width:21px;height:21px;border-radius:11px;background:var(--rc);color:var(--bg);font:700 var(--fs-xs)/1 var(--f-ui);padding:0 5px;flex:none}
 .h3-lb.rt .o{font-size:var(--fs-sm);color:var(--text);font-weight:600}
@@ -263,9 +265,9 @@
 .h3-root.m .h3-tb{display:none}
 .h3-root.m .h3-lay{grid-template-columns:1fr 1fr}
 .h3-root.m .h3-mbar{display:flex}
-.h3-root.m .h3-sel{bottom:62px;left:calc((100% - var(--dw, 0px)) / 2);max-width:calc(100% - 16px - var(--dw, 0px))}
+.h3-root.m .h3-sel{bottom:70px;left:calc((100% - var(--dw, 0px)) / 2);max-width:calc(100% - 16px - var(--dw, 0px))}
 .h3-root.m .h3-sheet{right:calc(8px + var(--dw, 0px))}
-.h3-root.m .h3-hint{bottom:62px;white-space:normal;width:max-content;max-width:min(360px,calc(100% - 24px - var(--dw, 0px)))}
+.h3-root.m .h3-hint{bottom:70px;white-space:normal;width:max-content;max-width:min(360px,calc(100% - 24px - var(--dw, 0px)))}
 .h3-root.m .h3-tip{display:none}
 .h3-root.m.sheet .h3-sel{display:none}
 .h3-root.xs .h3-mbar button span,.h3-root.xs .h3-sel .k{display:none}
@@ -668,11 +670,42 @@
     for (let i = 0; i < 8; i++) { const y = 6 + i * 31; g.fillStyle = 'rgba(0,0,0,.30)'; g.fillRect(3, y + 27, 122, 3); g.fillStyle = 'rgba(255,255,255,.10)'; g.fillRect(3, y, 122, 2); g.fillStyle = '#c9d2dc'; g.fillRect(40, y + 11, 48, 5); g.fillStyle = 'rgba(255,255,255,.75)'; g.fillRect(14, y + 9, 16, 9); }
     return tex(c);
   }
-  /** Teile im Behälter (Draufsicht): glänzende Rundteile */
+  /** abgerundetes Rechteck als Pfad (ohne ctx.roundRect – ältere Safari-Versionen) */
+  function rrPath(g, x, y, w, h, r) {
+    r = Math.max(0, Math.min(r, w / 2, h / 2));
+    g.moveTo(x + r, y); g.lineTo(x + w - r, y); g.quadraticCurveTo(x + w, y, x + w, y + r); g.lineTo(x + w, y + h - r);
+    g.quadraticCurveTo(x + w, y + h, x + w - r, y + h); g.lineTo(x + r, y + h); g.quadraticCurveTo(x, y + h, x, y + h - r);
+    g.lineTo(x, y + r); g.quadraticCurveTo(x, y, x + r, y); g.closePath();
+  }
+  /** Teile im Behälter (Draufsicht): gedrehte Stahlteile – liegende Wellen/Bolzen mit Absatz und Flansche/Ringe mit
+      Bohrung, matter Stahl mit Glanzkante und dunkler Kontur (keine „Eier“) */
   function texParts() {
-    const N = 128, c = cnv(N, N), g = c.getContext('2d'), rnd = U.rng(5);
-    g.fillStyle = '#3f464c'; g.fillRect(0, 0, N, N);
-    for (let i = 0; i < 80; i++) { const x = rnd.range(0, N), y = rnd.range(0, N), r = rnd.range(5, 9); const gr = g.createRadialGradient(x - r / 3, y - r / 3, 1, x, y, r); gr.addColorStop(0, '#f2f5f7'); gr.addColorStop(0.55, '#9aa4ad'); gr.addColorStop(1, '#30363c'); g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); }
+    const N = 256, c = cnv(N, N), g = c.getContext('2d'), rnd = U.rng(5);
+    g.fillStyle = '#3c4249'; g.fillRect(0, 0, N, N);
+    const steel = (x0, y0, x1, y1) => { const gr = g.createLinearGradient(x0, y0, x1, y1); gr.addColorStop(0, '#5f676f'); gr.addColorStop(0.42, '#c9d0d6'); gr.addColorStop(0.58, '#aab2ba'); gr.addColorStop(1, '#6d757d'); return gr; };
+    const shaft = (x, y, a, L, w) => {
+      g.save(); g.translate(x, y); g.rotate(a);
+      // Schattenfuge unter dem Teil
+      g.fillStyle = 'rgba(10,12,15,.45)'; g.beginPath(); rrPath(g, -L / 2 + 2, -w / 2 + 3, L, w, w * 0.3); g.fill();
+      g.fillStyle = steel(0, -w / 2, 0, w / 2); g.strokeStyle = '#30363c'; g.lineWidth = 1.2;
+      g.beginPath(); rrPath(g, -L / 2, -w / 2, L * 0.62, w, w * 0.18); g.fill(); g.stroke();                 // Hauptdurchmesser
+      const w2 = w * 0.68; g.beginPath(); rrPath(g, -L / 2 + L * 0.6, -w2 / 2, L * 0.4, w2, w2 * 0.25); g.fill(); g.stroke();  // Absatz
+      g.fillStyle = 'rgba(255,255,255,.55)'; g.fillRect(-L / 2 + 3, -w * 0.12, L * 0.56, 1.4);              // Glanzlinie
+      g.fillStyle = 'rgba(30,34,38,.55)'; g.fillRect(-L / 2 + L * 0.3, -w / 2, 1.2, w);                      // Einstich
+      g.restore();
+    };
+    const ring = (x, y, r) => {
+      g.fillStyle = 'rgba(10,12,15,.45)'; g.beginPath(); g.arc(x + 2, y + 3, r, 0, TAU); g.fill();
+      const gr = g.createRadialGradient(x - r * 0.35, y - r * 0.35, r * 0.1, x, y, r); gr.addColorStop(0, '#d3d9de'); gr.addColorStop(0.6, '#98a1a9'); gr.addColorStop(1, '#5c646c');
+      g.fillStyle = gr; g.strokeStyle = '#30363c'; g.lineWidth = 1.2; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); g.stroke();
+      g.strokeStyle = 'rgba(40,46,52,.55)'; g.lineWidth = 1; g.beginPath(); g.arc(x, y, r * 0.72, 0, TAU); g.stroke();   // Fase/Bund
+      g.fillStyle = '#1d2226'; g.beginPath(); g.arc(x, y, r * 0.34, 0, TAU); g.fill();                                   // Bohrung
+      g.strokeStyle = 'rgba(220,226,232,.7)'; g.lineWidth = 1; g.beginPath(); g.arc(x, y, r * 0.34, PI * 0.9, PI * 1.6); g.stroke();
+    };
+    // untere Lage dicht mit Wellen, darüber Flansche/Ringe – wirkt wie ein geschütteter Behälter
+    for (let i = 0; i < 26; i++) shaft(rnd.range(0, N), rnd.range(0, N), rnd.range(-0.5, 0.5) + (i % 3 === 0 ? PI / 2 : 0), rnd.range(54, 86), rnd.range(14, 20));
+    for (let i = 0; i < 22; i++) ring(rnd.range(10, N - 10), rnd.range(10, N - 10), rnd.range(10, 16));
+    for (let i = 0; i < 10; i++) shaft(rnd.range(0, N), rnd.range(0, N), rnd.range(0, PI), rnd.range(50, 80), rnd.range(13, 18));
     return tex(c);
   }
   function texGlow() {
@@ -767,7 +800,9 @@
       chain: std(0x3a3f45, 0.5, 0.8),
       screenFrame: std(0x101418, 0.3, 0.2),
       winGlass: std(0xa9c1d6, 0.06, 0.1, { emissive: 0xbfd7ef, emissiveIntensity: 0.55, envMapIntensity: 1.2 }),
-      glass: std(0x14202a, 0.04, 0.0, { transparent: true, opacity: 0.3, depthWrite: false, envMapIntensity: 1.6 }),
+      // Maschinenscheiben: hell getönt und klar – der Arbeitsraum (Spindel, Wälzfräser, Schleifscheibe) bleibt sichtbar
+      glass: std(0x9fb4c4, 0.04, 0.0, { transparent: true, opacity: 0.18, depthWrite: false, envMapIntensity: 0.8 }),
+      ledStrip: basic(0xfff6e8),
       glassRoom: std(0xb8ccd8, 0.03, 0.05, { transparent: true, opacity: 0.12, depthWrite: false, envMapIntensity: 1.5, side: THREE.DoubleSide }),
       screen: basic(0xffffff, { map: texHMI(0) }),
       screen2: basic(0xffffff, { map: texHMI(1) }),
@@ -777,7 +812,7 @@
       gitter: std(0xffffff, 0.42, 0.75, { map: texMesh('#9aa3ab', true, 21), transparent: true, alphaTest: 0.4, side: THREE.DoubleSide }),
       drawers: std(0xffffff, 0.48, 0.2, { map: texDrawers('#3d6a99') }),
       drawersR: std(0xffffff, 0.48, 0.2, { map: texDrawers('#a53a32') }),
-      parts: std(0xffffff, 0.32, 0.65, { map: texParts() }),
+      parts: std(0xd2d7dc, 0.4, 0.55, { map: texParts() }),
       hazard: std(0xffffff, 0.55, 0, { map: texStripes('#f2b707', '#1d2024', 6) }),
       vc: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62 }),
       lens: basic(0xffffff),
@@ -788,6 +823,7 @@
       ledG: basic(0x34d399), ledB: basic(0x3cc6f2), ledR: basic(0xf87171), ledY: basic(0xfbbf24),
     };
     M.lens.color.setRGB(2.4, 2.4, 2.25);
+    M.ledStrip.color.multiplyScalar(2);
     for (const k in M) { const m = M[k]; if (m && m.isMeshStandardMaterial && !m.map && !m.transparent && !m.vertexColors && m.emissive && m.emissive.getHex() === 0) m.userData.batch = true; }
     M.batch = batchMaterial();
     M.ledG.color.multiplyScalar(1.6); M.ledB.color.multiplyScalar(1.6);
@@ -832,21 +868,35 @@
     pm.dispose(); geo.dispose();
     return env;
   }
+  /** Hallenlicht: Oberlicht/Lichtbänder wirken fast senkrecht – Hauptlicht hoch (≈ 72°), weich, kurze Schatten;
+      Hemisphäre und Gegenlicht tragen das Umgebungslicht (keine langen Sonnenstreifen in einer geschlossenen Halle). */
+  const LIGHT = { sun: 0.95, hemi: 0.75, fill: 0.26 };
   function buildLights() {
     const sc = R.scene, P = WF.profile.hall, cx = P.w / 2, cz = P.d / 2;
-    R.hemi = new THREE.HemisphereLight(0xe9effc, 0x3c424b, 0.5);
+    R.hemi = new THREE.HemisphereLight(0xeef2fb, 0x4a505a, LIGHT.hemi);
     sc.add(R.hemi);
-    const sun = new THREE.DirectionalLight(0xfff5e8, 1.22);
-    sun.position.set(cx - 26, 58, cz + 30); sun.target.position.set(cx, 0, cz);
+    const sun = new THREE.DirectionalLight(0xfff6ea, LIGHT.sun);
+    sun.position.set(cx - 12, 70, cz + 16); sun.target.position.set(cx, 0, cz);
     sun.castShadow = true;
-    const big = R.renderer.capabilities.maxTextureSize >= 8192 && !R.mobile;
-    sun.shadow.mapSize.set(big ? 4096 : 2048, big ? 4096 : 2048);
-    const c = sun.shadow.camera; c.left = -46; c.right = 46; c.top = 34; c.bottom = -34; c.near = 20; c.far = 150;
-    sun.shadow.bias = -0.00035; sun.shadow.normalBias = 0.028;
+    // Schattenkarte: 4096² nur auf starken Grafikkarten, sonst 2048² (wird bei Leistungsmangel auch nachträglich verkleinert)
+    R.shadowBig = R.renderer.capabilities.maxTextureSize >= 16384 && !R.mobile;
+    const ms = R.shadowBig ? 4096 : 2048;
+    sun.shadow.mapSize.set(ms, ms);
+    // Ausschnitt eng um die Halle (Licht fast von oben)
+    const c = sun.shadow.camera; c.left = -38; c.right = 38; c.top = 28; c.bottom = -28; c.near = 30; c.far = 120;
+    sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.03;
     sc.add(sun, sun.target);
-    const fill = new THREE.DirectionalLight(0xcfe0ff, 0.3); fill.position.set(cx + 50, 22, cz + 34); fill.target.position.set(cx, 0, cz);
+    const fill = new THREE.DirectionalLight(0xd6e4ff, LIGHT.fill); fill.position.set(cx + 40, 30, cz + 40); fill.target.position.set(cx, 0, cz);
     sc.add(fill, fill.target);
     R.sun = sun; R.fill = fill;
+  }
+  /** Schattenkarte auf 2048² verkleinern (adaptPerf: Bildrate zu niedrig) */
+  function shrinkShadows() {
+    if (!R.shadowBig || !R.sun) return;
+    R.shadowBig = false;
+    const s = R.sun.shadow; s.mapSize.set(2048, 2048);
+    if (s.map) { s.map.dispose(); s.map = null; }
+    R.shadowDirty = true;
   }
 
   // ================================================================== Boden: Estrich + Markierungen + Umgebungsverdeckung
@@ -1270,7 +1320,7 @@
   function std2(c, r, m) { return new THREE.MeshStandardMaterial({ color: c, roughness: r == null ? 0.6 : r, metalness: m || 0 }); }
 
   // ================================================================== Maschinen – gemeinsame Baugruppen (lokal: +z = Bedienseite)
-  const TYPE_H = { saw: 2.6, lathe: 3.4, swiss: 1.95, biglathe: 2.9, deephole: 1.9, hobber: 2.75, mill5: 3.0, mill3: 2.7, cylgrinder: 2.35, surfgrinder: 2.2, washer: 2.4, cmm: 2.8, assembly: 2.2 };
+  const TYPE_H = { saw: 2.6, lathe: 3.4, swiss: 1.95, biglathe: 2.9, deephole: 1.9, hobber: 2.8, mill5: 3.0, mill3: 2.9, cylgrinder: 2.7, surfgrinder: 2.2, washer: 2.4, cmm: 2.8, assembly: 2.2 };
   const FACE_RY = { S: 0, N: PI, W: -PI / 2, E: PI / 2 };
   /** Zylinder entlang der Blickrichtung ry (lokale +z gedreht), Start bei (x,y,z) */
   Builder.prototype.cylF = function (mat, r, len, x, y, z, ry, seg) { return this.add(gCyl(seg || 16), mat, xf(x, y, z, PI / 2, ry || 0, 0, r, len, r)); };
@@ -1382,10 +1432,18 @@
     const sideP = [[zi - 0.01, pl], [zf, pl], [zf, h, r], [zi - 0.01, h]];
     b.side(Pm, key + 'side', sideP, t, x0 + t / 2, 0, 0, 0, 0.008);
     b.side(Pm, key + 'side', sideP, t, x1 - t / 2, 0, 0, 0, 0.008);
-    // Dach als Schale entlang der Rundung
+    // Dach als Schale entlang der Rundung – mit roofGlass als Sichtscheibe (Blick von oben in den Arbeitsraum)
     const yEnd = Math.max(o.win.y1 + 0.12, h - r - 0.02);
     const shell = [[zi - 0.01, h - t], [zi - 0.01, h], [zf, h, r], [zf, yEnd], [zf - t, yEnd], [zf - t, h - t, Math.max(0.01, r - t)]];
-    b.side(Pm, key + 'roof|' + yEnd.toFixed(3), shell, W - 2 * t + 0.002, cx, 0, 0, 0, 0);
+    if (o.roofGlass) {
+      const gl = [[zi + 0.06, h - 0.012], [zi + 0.06, h], [zf, h, r], [zf, yEnd + 0.06], [zf - 0.012, yEnd + 0.06], [zf - 0.012, h - 0.012, Math.max(0.01, r - 0.012)]];
+      b.side(M.glass, key + 'roofG|' + yEnd.toFixed(3), gl, W - 2 * t + 0.002, cx, 0, 0, 0, 0);
+      // Rahmen: Quersprosse hinten, an der Rundung und unten an der Front, Längssprossen über den Seitenwänden
+      b.box(Pm, W - 0.02, 0.05, 0.08, cx, h - 0.05, zi + 0.03);
+      b.box(Pm, W - 2 * t, 0.045, 0.06, cx, h - 0.045, zf - r * 0.62);
+      b.box(Pm, W - 2 * t, 0.06, t, cx, yEnd, zf - t / 2);
+      if (W > 2.6) b.box(Pm, 0.05, 0.045, zf - zi - r * 0.6, cx, h - 0.045, (zi + zf - r * 0.6) / 2);
+    } else b.side(Pm, key + 'roof|' + yEnd.toFixed(3), shell, W - 2 * t + 0.002, cx, 0, 0, 0, 0);
     // Front um den Fensterausschnitt
     const W0 = o.win.x0, W1 = o.win.x1, wy0 = o.win.y0, wy1 = o.win.y1, m = 0.06;
     b.box(Pm, W - 2 * t, wy0 - m - pl, t, cx, pl, zf - t / 2);
@@ -1397,7 +1455,10 @@
     b.box(inn, iw, h - pl - 0.12, 0.02, cx, pl + 0.04, zi + 0.012);
     b.box(inn, 0.015, h - pl - 0.15, idp, x0 + t + 0.008, pl + 0.04, ic);
     b.box(inn, 0.015, h - pl - 0.15, idp, x1 - t - 0.008, pl + 0.04, ic);
-    b.box(inn, iw, 0.015, idp, cx, h - t - 0.03, ic);
+    if (!o.roofGlass) b.box(inn, iw, 0.015, idp, cx, h - t - 0.03, ic);
+    // LED-Lichtleiste innen an der oberen Frontkante: der Arbeitsraum ist immer ausgeleuchtet
+    b.box(M.ledStrip, iw - 0.12, 0.028, 0.028, cx, Math.min(h - t - 0.07, yEnd - 0.04), zf - t - 0.05);
+    if (o.roofGlass) b.box(M.ledStrip, iw - 0.12, 0.028, 0.028, cx, h - t - 0.06, zi + 0.08);
     b.tilt(M.steelDark, iw, 0.03, idp * 0.7, cx, wy0 - 0.22, ic + idp * 0.1, 0, 0.32);
     b.box(M.steelDark, iw, 0.03, idp, cx, pl + 0.02, ic);
     // Rückseite: Servicepaneele mit Fugen und Griffen, Lüftungsgitter, Warnschild; auf dem Dach ein Ölnebelabscheider
@@ -1414,8 +1475,15 @@
         b.cyl(Pm, 0.19, 0.38, mx, h - 0.01, mz, 20); b.cyl(M.dark, 0.2, 0.05, mx, h + 0.37, mz, 20); b.cyl(M.darker, 0.07, 0.06, mx, h + 0.42, mz, 12);
         b.box(M.darker, 0.12, 0.12, 0.3, mx - 0.28, h - 0.01, mz); b.box(M.darker, 0.2, 0.06, 0.06, mx - 0.18, h + 0.08, mz);
       } }
+    if (o.band) {   // zweifarbig: dunkler Unterbau bis zur Brüstung, darüber helle Haube
+      const bh = o.band.h, bm = o.band.mat || M.dark;
+      b.box(bm, W + 0.012, bh - pl, 0.006, cx, pl, zf + 0.004);
+      b.box(bm, 0.006, bh - pl, zf - zb + 0.012, x0 - 0.003, pl, (zb + zf) / 2); b.box(bm, 0.006, bh - pl, zf - zb + 0.012, x1 + 0.003, pl, (zb + zf) / 2);
+      b.box(bm, W + 0.012, bh - pl, 0.006, cx, pl, zb - 0.004);
+      b.box(M.accent, W + 0.014, 0.035, 0.008, cx, bh - 0.035, zf + 0.006);
+    }
     // Akzentleiste + Typenschild-Fläche
-    b.box(M.accent, W - 0.2, 0.045, 0.012, cx, Math.min(h - r - 0.08, yEnd - 0.06), zf + 0.004);
+    if (!o.band) b.box(M.accent, W - 0.2, 0.045, 0.012, cx, Math.min(h - r - 0.08, yEnd - 0.06), zf + 0.004);
     b.box(M.black, 0.42, 0.11, 0.008, x0 + 0.38, Math.min(h - r - 0.2, yEnd - 0.2), zf + 0.004);
     // Schiebetür(en) mit Fenster – breite Fenster: zwei gegenläufige Flügel
     const dwAll = (W1 - W0) + 0.16, dh = (wy1 - wy0) + 0.16, ft = 0.04;
@@ -1518,7 +1586,7 @@
 
   // ---------- Drehfräszentrum mit Portallader ----------
   TB.lathe = (mo, b) => {
-    const c = cabin(mo, b, { x0: -3.3, x1: 1.1, zb: -1.2, zf: 1.25, h: 2.45, r: 0.48, pl: 0.22, intD: 1.3, win: { x0: -2.45, x1: 0.15, y0: 1.0, y1: 1.92 }, split: true });
+    const c = cabin(mo, b, { x0: -3.3, x1: 1.1, zb: -1.2, zf: 1.25, h: 2.45, r: 0.48, pl: 0.22, intD: 1.3, win: { x0: -2.45, x1: 0.15, y0: 1.0, y1: 1.92 }, split: true, roofGlass: true });
     const fy = c.floorY, iz = c.ic - 0.1, ay = fy + 0.62;
     // Arbeitsraum: Spindelkasten, Hauptspindel, Gegenspindel, Revolver
     b.box(M.mid, 0.55, 0.95, 0.9, -2.95, fy, iz - 0.1); b.box(M.mid, 0.45, 0.7, 0.75, 0.75, fy, iz - 0.1);
@@ -1709,40 +1777,69 @@
     mo.conn = [2.4, 2.05, -1.25];
   };
 
-  // ---------- Wälzfräsmaschine ----------
+  // ---------- Wälzfräsmaschine (Bauart Liebherr LC): Maschinentisch mit Gegenständer, Fräskopf mit um 30° geschwenktem
+  //            Wälzfräser am Ständer, Ringlader auf der +x-Seite, Glasdach und großes Frontfenster ----------
   TB.hobber = (mo, b) => {
-    const c = cabin(mo, b, { x0: -1.6, x1: 1.6, zb: -0.75, zf: 2.0, h: 2.62, r: 0.32, pl: 0.2, intD: 1.4, win: { x0: -1.2, x1: 0.6, y0: 1.0, y1: 2.0 }, slide: 1 });
-    const fy = c.floorY, iz = c.ic;
-    b.box(M.mid, 0.62, 1.7, 0.75, 0.82, fy, iz - 0.25);
-    b.box(M.mid, 0.95, 0.35, 0.95, -0.35, fy, iz - 0.05);
-    const table = grp(-0.35, fy + 0.35, iz - 0.05), tbb = new Builder();
-    tbb.latheY(M.steelDark, 'hobT', [[0, 0], [0.32, 0], [0.32, 0.12], [0.16, 0.14], [0.16, 0.2], [0, 0.2]], 0, 0, 0, 32);
-    for (let i = 0; i < 38; i++) { const a = i * TAU / 38; tbb.boxC(M.steel, 0.018, 0.05, 0.03, Math.cos(a) * 0.165, 0.225, Math.sin(a) * 0.165, -a); }
-    tbb.cyl(M.steel, 0.15, 0.05, 0, 0.2, 0, 32);
+    const P = mo.mPaint;
+    const c = cabin(mo, b, { x0: -1.62, x1: 0.92, zb: -0.75, zf: 2.0, h: 2.78, r: 0.3, pl: 0.2, intD: 1.8, win: { x0: -1.34, x1: 0.64, y0: 0.86, y1: 2.24 }, split: true, roofGlass: true });
+    const fy = c.floorY, tx = -0.5, tz = c.ic + 0.05;
+    b.box(M.mid, 2.3, 0.3, 1.55, -0.35, fy, tz - 0.05);                                   // Maschinenbett
+    // Maschinentisch (C-Achse) mit Spannvorrichtung und Zahnrad-Rohling
+    const table = grp(tx, fy + 0.3, tz), tbb = new Builder();
+    tbb.latheY(M.steelDark, 'hobT2', [[0, 0], [0.36, 0], [0.36, 0.16], [0.3, 0.2], [0, 0.2]], 0, 0, 0, 36);
+    tbb.latheY(M.chuck, 'hobFx', [[0, 0], [0.11, 0], [0.11, 0.04], [0.05, 0.04], [0.05, 0.18], [0, 0.18]], 0, 0.2, 0, 22);
+    tbb.latheY(M.steel, 'hobGear', [[0.05, 0], [0.165, 0], [0.165, 0.09], [0.05, 0.09]], 0, 0.24, 0, 36);
+    for (let i = 0; i < 34; i++) { const a = i * TAU / 34; tbb.boxC(M.steel, 0.022, 0.09, 0.016, Math.cos(a) * 0.172, 0.285, Math.sin(a) * 0.172, -a); }
     tbb.build(table); mo.group.add(table);
-    b.box(M.mid, 0.3, 0.32, 0.3, -0.35, fy + 1.3, iz - 0.05); b.box(M.mid, 0.34, 1.0, 0.3, -0.35, fy + 0.62, iz - 0.5); b.box(M.mid, 0.3, 0.12, 0.5, -0.35, fy + 1.5, iz - 0.25);
-    b.cyl(M.steel, 0.05, 0.62, -0.35, fy + 0.8, iz - 0.05, 14);
-    const head = grp(0.42, fy + 0.85, iz - 0.05), hb = new Builder();
-    hb.boxC(M.mid, 0.46, 0.34, 0.46, 0.12, 0, 0); hb.cylX(M.dark, 0.08, 0.2, -0.32, 0, 0, 12);
+    // Gegenständer mit Ausleger und Reitstockspitze von oben
+    b.box(M.mid, 0.46, 1.62, 0.36, tx, fy + 0.3, tz - 0.66);
+    b.box(M.mid, 0.3, 0.24, 0.72, tx, fy + 1.66, tz - 0.32);
+    b.cyl(M.steelDark, 0.05, 0.92, tx, fy + 0.74, tz, 16); b.latheY(M.steel, 'hobTail', [[0, 0], [0.042, 0.06], [0, 0.06]], tx, fy + 0.68, tz, 14);
+    b.box(M.accent, 0.31, 0.03, 0.73, tx, fy + 1.82, tz - 0.32);
+    // Fräserständer rechts; Fräskopf (fährt senkrecht) mit Schwenkscheibe und Fräserlagerung
+    b.box(M.mid, 0.56, 1.9, 0.82, 0.5, fy + 0.3, tz - 0.12);
+    b.box(M.steelDark, 0.04, 1.6, 0.06, 0.2, fy + 0.4, tz - 0.38); b.box(M.steelDark, 0.04, 1.6, 0.06, 0.2, fy + 0.4, tz + 0.14);
+    const hy0 = fy + 0.3 + 0.24 + 0.045;
+    const head = grp(0.12, hy0, tz), hb = new Builder();
+    hb.rbox(M.mid, 0.2, 0.62, 0.66, 0.03, 0.02, -0.31, -0.12);
+    hb.latheX(M.steelDark, 'hobSw', [[0, 0], [0.31, 0], [0.31, 0.07], [0, 0.07]], -0.08, 0, -0.12, 32, -1);
     hb.build(head); mo.group.add(head);
-    const hobT = grp(-0.42, 0, 0); head.add(hobT); hobT.rotation.z = 0.32;
+    const hobT = grp(-0.35, 0, -0.06); head.add(hobT); hobT.rotation.x = 0.52;      // Schwenkwinkel (Steigung des Fräsers)
+    const tb2 = new Builder();
+    tb2.box(M.mid, 0.2, 0.2, 0.86, 0.12, 0.06, 0);                                       // Fräserschlitten
+    for (const z of [-0.33, 0.33]) tb2.box(M.mid, 0.17, 0.2, 0.08, 0.04, -0.1, z);       // Lagerböcke
+    tb2.cylZ(M.steelDark, 0.03, 0.74, 0, 0, -0.37, 14);                                  // Fräsdorn
+    tb2.build(hobT);
     const hob = grp(0, 0, 0); hobT.add(hob);
-    const hb2 = new Builder(); hb2.latheX(M.hob, 'hob', [[0, -0.14], [0.065, -0.14], [0.065, 0.14], [0, 0.14]], 0, 0, 0, 20);
-    for (let i = 0; i < 10; i++) hb2.add(new THREE.TorusGeometry(0.066, 0.009, 4, 18), M.hob, xf(-0.12 + i * 0.027, 0, 0, 0, PI / 2, 0)); hb2.build(hob);
-    // hinten: Schaltschrank, Hydraulik, Späne; vorne: Pult
+    const hb3 = new Builder();
+    hb3.latheZ(M.hob, 'hob2', [[0, -0.17], [0.098, -0.17], [0.104, -0.16], [0.104, 0.16], [0.098, 0.17], [0, 0.17]], 0, 0, 0, 24);
+    for (let i = 0; i < 12; i++) hb3.add(new THREE.TorusGeometry(0.106, 0.011, 4, 20), M.hob, xf(0, 0, -0.15 + i * 0.0273, 0, 0, 0));
+    for (let i = 0; i < 8; i++) { const a = i * TAU / 8; hb3.boxC(M.darker, 0.012, 0.02, 0.33, Math.cos(a) * 0.1, Math.sin(a) * 0.1, 0, 0, 0, a); }   // Spannuten
+    hb3.build(hob);
+    // Ringlader (+x): Drehring mit Rohlingen unter Glashaube, Übergabe in den Arbeitsraum
+    const rx = 1.33, rz = 0.95;
+    b.cyl(P, 0.4, 0.98, rx, 0, rz, 32); b.cyl(M.dark, 0.42, 0.06, rx, 0, rz, 32); b.cyl(M.accent, 0.405, 0.04, rx, 0.86, rz, 32);
+    b.add(new THREE.CylinderGeometry(0.4, 0.4, 0.36, 32, 1, true), M.glass, xf(rx, 1.16, rz));
+    b.cyl(P, 0.41, 0.05, rx, 1.34, rz, 32); b.cyl(M.dark, 0.1, 0.14, rx, 1.39, rz, 16);
+    b.box(P, 0.22, 0.9, 0.5, 0.98, 0.2, rz);
+    const ring = grp(rx, 0.98, rz), rgb = new Builder();
+    rgb.latheY(M.steelDark, 'ringL', [[0.12, 0], [0.37, 0], [0.37, 0.03], [0.12, 0.03]], 0, 0, 0, 32);
+    for (let i = 0; i < 8; i++) { const a = i * TAU / 8; rgb.cyl(M.steel, 0.075, 0.05, Math.cos(a) * 0.26, 0.03, Math.sin(a) * 0.26, 18); rgb.cyl(M.darker, 0.022, 0.052, Math.cos(a) * 0.26, 0.03, Math.sin(a) * 0.26, 10); }
+    rgb.build(ring); mo.group.add(ring);
+    // hinten: Schaltschrank, Hydraulik, Späne; vorne rechts: Pult am Schwenkarm
     elCab(b, -0.95, -1.62, 1.3, 2.1, 0.55, 0);
     coolTank(b, 0.35, -1.6, 0.9, 0.55, 1.0, 0);
     chipCart(b, 1.25, -1.55, 0);
-    swivelArm(b, 1.52, 2.05, 1.05, 1.68, 1.22, 2.22);
-    hmi(b, 1.22, 1.05, 2.22, -0.3);
-    mo.a = { table, head, hob, fy };
-    tower(mo, 1.35, 2.62, -0.45);
+    swivelArm(b, 0.88, 2.06, 1.05, 1.7, 1.28, 2.32);
+    hmi(b, 1.28, 1.06, 2.32, -0.3);
+    mo.a = { table, head, hob, ring, fy, hy0, ringA: 0, ringT: 0 };
+    tower(mo, 0.72, 2.78, -0.45);
     mo.conn = [-0.95, 2.2, -1.62];
   };
 
   // ---------- 5-Achs-Bearbeitungszentrum mit Palettenwechsler ----------
   TB.mill5 = (mo, b) => {
-    const c = cabin(mo, b, { x0: -1.55, x1: 1.25, zb: -1.25, zf: 1.65, h: 2.95, r: 0.55, pl: 0.22, intD: 1.6, win: { x0: -1.05, x1: 0.75, y0: 0.95, y1: 2.2 }, slide: -1 });
+    const c = cabin(mo, b, { x0: -1.55, x1: 1.25, zb: -1.25, zf: 1.65, h: 2.95, r: 0.55, pl: 0.22, intD: 1.6, win: { x0: -1.05, x1: 0.75, y0: 0.95, y1: 2.2 }, slide: -1, roofGlass: true });
     const fy = c.floorY, iz = c.ic;
     // Arbeitsraum: Fahrständer mit Spindelkopf, Schwenkbrücke mit Rundtisch
     b.box(M.mid, 1.4, 1.75, 0.35, -0.15, fy, c.zi + 0.2);
@@ -1785,58 +1882,90 @@
     mo.conn = [-0.35, 2.25, -1.92];
   };
 
-  // ---------- Vertikal-Bearbeitungszentrum ----------
+  // ---------- Vertikal-Bearbeitungszentrum (Bauart Haas VF): kantige Verkleidung, große Doppeltür mit Fenstern,
+  //            Z-Ständer ragt als Buckel mit Spindelmotor über das Dach, Seiten-Werkzeugwechsler links,
+  //            Schwenkpult rechts vorne ----------
   TB.mill3 = (mo, b) => {
-    const c = cabin(mo, b, { x0: -1.6, x1: 1.6, zb: -0.95, zf: 1.2, h: 2.62, r: 0.5, pl: 0.25, intD: 1.25, win: { x0: -1.2, x1: 1.2, y0: 0.98, y1: 1.92 }, split: true });
-    const fy = c.floorY, iz = c.ic;
-    b.box(M.mid, 0.75, 1.55, 0.35, 0.0, fy, c.zi + 0.18);
+    const P = mo.mPaint;
+    const c = cabin(mo, b, { x0: -1.55, x1: 1.5, zb: -0.95, zf: 1.25, h: 2.42, r: 0.1, pl: 0.26, intD: 1.36, win: { x0: -1.26, x1: 1.21, y0: 0.98, y1: 1.98 }, split: true, roofGlass: true, mist: false, band: { h: 0.98, mat: M.darker } });
+    const fy = c.floorY, iz = c.ic, zc = c.zi + 0.2;
+    // Z-Ständer: Buckel über dem Dach mit Spindelmotor und Kabelkette
+    b.rbox(P, 0.86, 0.5, 0.72, 0.05, 0, 2.38, zc - 0.12, 0, 0.012);
+    b.box(M.darker, 0.87, 0.06, 0.73, 0, 2.38, zc - 0.12);
+    b.cyl(M.dark, 0.16, 0.24, 0, 2.88, zc - 0.12, 20); b.cyl(M.darker, 0.12, 0.05, 0, 3.12, zc - 0.12, 16);
+    b.box(M.darker, 0.12, 0.3, 0.12, 0.3, 2.86, zc - 0.32);
+    // Arbeitsraum: Ständer, Spindelkopf (fährt in Z), Sattel und T-Nuten-Tisch mit Schraubstock und Werkstück
+    b.box(M.mid, 0.82, 1.62, 0.36, 0.0, fy, zc);
     const spindle = grp(0.0, fy + 1.05, iz - 0.12), sb = new Builder();
-    sb.rbox(M.mid, 0.46, 0.68, 0.46, 0.05, 0, 0.0, -0.08); sb.latheY(M.steelDark, 'sp3', [[0, 0], [0.09, 0], [0.09, -0.06], [0.05, -0.1], [0, -0.1]], 0, 0, -0.04, 16);
+    sb.rbox(M.mid, 0.48, 0.7, 0.62, 0.05, 0, 0.0, -0.18); sb.latheY(M.steelDark, 'sp3b', [[0, 0], [0.1, 0], [0.1, -0.06], [0.055, -0.1], [0, -0.1]], 0, 0, -0.04, 18);
+    sb.box(M.accent, 0.485, 0.04, 0.01, 0, 0.5, 0.13);
     sb.build(spindle); mo.group.add(spindle);
     const tool = grp(0, -0.1, -0.04), tlb = new Builder(); tlb.latheY(M.steelDark, 'bt40', [[0, 0], [0.045, 0], [0.035, -0.07], [0.02, -0.09], [0, -0.09]], 0, 0, 0, 14); tlb.cyl(M.steel, 0.018, 0.15, 0, -0.24, 0, 10); tlb.build(tool); spindle.add(tool);
-    b.box(M.mid, 1.5, 0.15, 0.72, 0, fy, iz);
-    const table = grp(0, fy + 0.15, iz), tbb = new Builder();
-    tbb.rbox(M.steelDark, 1.6, 0.12, 0.6, 0.02, 0, 0, 0); for (let i = 0; i < 4; i++) tbb.box(M.darker, 1.58, 0.012, 0.03, 0, 0.115, -0.21 + i * 0.14);
-    tbb.box(M.dark, 0.34, 0.14, 0.2, 0, 0.12, 0); tbb.box(M.steel, 0.24, 0.1, 0.17, 0, 0.26, 0);
+    b.box(M.mid, 0.95, 0.16, 0.74, 0, fy, iz);
+    const table = grp(0, fy + 0.16, iz), tbb = new Builder();
+    tbb.rbox(M.steelDark, 1.7, 0.12, 0.58, 0.02, 0, 0, 0); for (let i = 0; i < 4; i++) tbb.box(M.darker, 1.68, 0.012, 0.03, 0, 0.115, -0.21 + i * 0.14);
+    tbb.box(M.dark, 0.36, 0.14, 0.22, -0.1, 0.12, 0); tbb.box(M.steel, 0.07, 0.12, 0.22, -0.31, 0.12, 0); tbb.box(M.alu, 0.26, 0.11, 0.17, -0.12, 0.26, 0);
+    tbb.box(M.dark, 0.3, 0.14, 0.22, 0.45, 0.12, 0); tbb.box(M.alu, 0.2, 0.08, 0.16, 0.45, 0.26, 0);
     tbb.build(table); mo.group.add(table);
-    // seitlicher Werkzeugwechsler (Schirm)
-    b.latheX(mo.mPaint, 'smtc', [[0, 0], [0.56, 0], [0.6, 0.06], [0.6, 0.3], [0, 0.34]], -1.6, 1.85, -0.18, 32, -1);
-    b.latheX(M.accent, 'smtcR', [[0.6, 0.18], [0.61, 0.18], [0.61, 0.22], [0.6, 0.22]], -1.6, 1.85, -0.18, 32, -1);
-    b.box(M.dark, 0.25, 0.25, 0.7, -1.72, 1.2, -0.18);
-    // hinten: Schaltschrank, Kühlmittel; Pult am Schwenkarm
-    elCab(b, -0.85, -1.22, 1.35, 1.75, 0.42, 0, { cool: false });
-    coolTank(b, 0.75, -1.22, 1.25, 0.48, 0.62, 0);
-    b.box(M.darker, 0.5, 0.3, 0.3, 1.65, 0, 0.3);
-    swivelArm(b, 1.55, 1.24, 1.25, 2.1, 1.72, 1.4);
-    hmi(b, 1.72, 1.15, 1.4, -0.35, { s: 1.05, handwheel: true });
+    // Seiten-Werkzeugwechsler (Karussell mit Haube) links
+    b.latheX(P, 'smtc2', [[0, 0], [0.5, 0], [0.54, 0.05], [0.54, 0.26], [0, 0.3]], -1.56, 1.72, zc + 0.05, 32, -1);
+    b.latheX(M.accent, 'smtcR2', [[0.54, 0.14], [0.55, 0.14], [0.55, 0.18], [0.54, 0.18]], -1.56, 1.72, zc + 0.05, 32, -1);
+    b.box(M.dark, 0.25, 0.28, 0.6, -1.66, 1.05, zc + 0.05);
+    // hinten: Schaltschrank, Kühlmitteltank; vorne rechts: großes Schwenkpult
+    elCab(b, -0.75, -1.2, 1.35, 1.75, 0.42, 0, { cool: false });
+    coolTank(b, 0.85, -1.2, 1.15, 0.48, 0.62, 0);
+    b.box(M.darker, 0.5, 0.3, 0.3, 1.66, 0, 0.3);
+    swivelArm(b, 1.46, 1.3, 1.25, 2.12, 1.72, 1.46);
+    hmi(b, 1.72, 1.12, 1.46, -0.35, { s: 1.12, handwheel: true });
     mo.a = { spindle, tool, table, tx: 0, tz: iz, sy: fy + 1.05 };
-    tower(mo, 1.32, 2.62, -0.55);
-    mo.conn = [-0.85, 1.85, -1.22];
+    tower(mo, 1.3, 2.42, -0.55);
+    mo.conn = [-0.75, 1.85, -1.2];
   };
 
-  // ---------- Rundschleifmaschine ----------
+  // ---------- Universal-Rundschleifmaschine (Bauart Studer S33): lange Verkleidung mit zwei Schiebetüren, dunkler
+  //            Unterbau, Haube über dem Schleifkopf hinten; innen Werkstückspindelstock, Reitstock, Welle zwischen den
+  //            Spitzen und große Schleifscheibe (Ø 500 mm) mit Schutzhaube ----------
   TB.cylgrinder = (mo, b) => {
-    const c = cabin(mo, b, { x0: -1.95, x1: 1.95, zb: -1.0, zf: 1.3, h: 2.25, r: 0.36, pl: 0.2, intD: 1.55, win: { x0: -1.5, x1: 1.3, y0: 0.96, y1: 1.8 }, split: true });
-    const fy = c.floorY, iz = c.ic;
-    b.box(M.granite, 3.5, 0.24, 1.15, 0, fy, iz - 0.12);
-    b.box(M.steelDark, 2.9, 0.08, 0.36, 0, fy + 0.24, iz + 0.16);
-    b.rbox(M.mid, 0.48, 0.44, 0.46, 0.04, -1.12, fy + 0.32, iz + 0.16); b.latheX(M.steel, 'whc', [[0, 0], [0.07, 0], [0.02, 0.1], [0, 0.1]], -0.88, fy + 0.6, iz + 0.16, 14);
-    const tailG = grp(1.05, fy + 0.32, iz + 0.16), tlb = new Builder(); tlb.rbox(M.mid, 0.4, 0.38, 0.4, 0.04, 0, 0, 0); tlb.latheX(M.steel, 'tlc', [[0, 0], [0.05, 0], [0.02, 0.1], [0, 0.1]], -0.2, 0.28, 0, 12, -1); tlb.build(tailG); mo.group.add(tailG);
-    const wy = fy + 0.6;
-    const work = mesh(gCylC(22), M.steel, 0, wy, iz + 0.16, 0.05, 1.6, 0.05); work.rotation.z = PI / 2; mo.group.add(work);
-    const head = grp(0.1, fy + 0.32, iz - 0.3), hb = new Builder();
-    hb.rbox(M.paintW, 0.8, 0.55, 0.6, 0.06, 0, 0, -0.2, 0, 0.012);
-    hb.add(new THREE.CylinderGeometry(0.3, 0.3, 0.13, 26, 1, false, PI / 2, PI).rotateZ(PI / 2), M.paintW, xf(0, 0.28, 0.12));
+    const P = mo.mPaint;
+    const c = cabin(mo, b, { x0: -2.35, x1: 2.0, zb: -1.05, zf: 1.3, h: 2.32, r: 0.28, pl: 0.18, intD: 1.75, win: { x0: -2.06, x1: 1.7, y0: 0.98, y1: 1.98 }, split: true, roofGlass: true, mist: false, band: { h: 0.98, mat: M.dark } });
+    const fy = c.floorY, wz = c.ic + 0.28, wy = fy + 0.64;
+    // Haube über dem Schleifkopf (ragt hinten über das Dach) mit Lüftungsschlitzen
+    b.rbox(P, 1.35, 0.4, 0.9, 0.14, 0.1, 2.3, -0.62, 0, 0.02);
+    for (let i = 0; i < 6; i++) b.box(M.darker, 0.9, 0.012, 0.01, 0.1, 2.42 + i * 0.045, -1.075);
+    b.box(M.granite, 3.95, 0.26, 1.5, -0.18, fy, c.ic - 0.05);                              // Granitbett
+    b.box(M.steelDark, 3.2, 0.09, 0.42, -0.18, fy + 0.26, wz);                               // Tisch (Z-Achse)
+    for (const sx of [-1, 1]) b.box(M.chrome, 3.0, 0.02, 0.03, -0.18, fy + 0.35, wz + sx * 0.17);
+    // Werkstückspindelstock links mit Mitnehmerscheibe und Spitze
+    b.rbox(M.mid, 0.6, 0.5, 0.52, 0.05, -1.5, fy + 0.35, wz, 0, 0.01);
+    b.latheX(M.chuck, 'grWh', [[0, 0], [0.13, 0], [0.13, 0.05], [0.04, 0.07], [0, 0.07]], -1.2, wy, wz, 22);
+    b.latheX(M.steel, 'grWc', [[0, 0], [0.035, 0], [0, 0.07]], -1.13, wy, wz, 12);
+    // Reitstock rechts (verschiebbar) mit Pinole und Spitze
+    const tailG = grp(1.02, fy + 0.35, wz), tlb = new Builder();
+    tlb.rbox(M.mid, 0.48, 0.4, 0.46, 0.05, 0.1, 0, 0, 0, 0.01); tlb.cylX(M.steelDark, 0.045, 0.2, -0.32, wy - fy - 0.35, 0, 14);
+    tlb.latheX(M.steel, 'grTc', [[0, 0], [0.035, 0], [0, 0.07]], -0.32, wy - fy - 0.35, 0, 12, -1);
+    tlb.build(tailG); mo.group.add(tailG);
+    const work = mesh(gCylC(22), M.steel, -0.08, wy, wz, 0.045, 2.0, 0.045); work.rotation.z = PI / 2; mo.group.add(work);
+    // Schleifkopf hinten (Querachse X → hier lokal z): Gehäuse, Scheibe Ø 500 mm mit Haube, Innenschleifspindel hochgeschwenkt
+    const hz = wz - 0.62;
+    const head = grp(-0.05, fy + 0.35, hz), hb = new Builder();
+    hb.rbox(P, 1.0, 0.62, 0.72, 0.06, 0.05, 0, -0.18, 0, 0.012);
+    hb.add(new THREE.CylinderGeometry(0.3, 0.3, 0.14, 28, 1, false, 0, PI).rotateZ(PI / 2), P, xf(0, wy - fy - 0.35, 0.33));   // Haube (obere Hälfte)
+    hb.box(P, 0.15, 0.3, 0.02, 0, wy - fy - 0.35, 0.03);
+    hb.cylX(M.steelDark, 0.07, 0.3, 0.07, wy - fy - 0.35, 0.33, 16);                                                    // Spindel
+    hb.add(gCyl(14), M.mid, xf(-0.38, 0.62, 0.0, -0.9, 0, 0, 0.07, 0.42, 0.07));                                          // Innenschleifspindel
+    hb.tube(M.steelDark, [[0.12, 0.6, 0.25], [0.15, 0.42, 0.5], [0.08, 0.32, 0.6]], 0.012, 6);                           // Kühlmitteldüse
     hb.build(head); mo.group.add(head);
-    const wheel = mesh(gCylC(30), M.wheel, 0, 0.28, 0.12, 0.26, 0.063, 0.26); wheel.rotation.z = PI / 2; head.add(wheel);
-    elCab(b, -1.0, -1.32, 1.45, 2.0, 0.55, 0);
-    coolTank(b, 1.15, -1.32, 1.45, 0.55, 0.9, 0);
-    b.rbox(M.paintW, 1.0, 0.4, 0.5, 0.03, 1.15, 0.9, -1.32); b.box(M.darker, 0.7, 0.02, 0.4, 1.15, 1.3, -1.32);
-    swivelArm(b, 1.88, 1.35, 1.0, 1.62, 2.12, 1.5);
-    hmi(b, 2.12, 0.95, 1.5, -0.3);
-    mo.a = { work, head, wheel, tailG, hz: iz - 0.3, wy };
-    tower(mo, 1.72, 2.25, -0.75);
-    mo.conn = [-1.0, 2.1, -1.32];
+    const wheel = mesh(gCylC(36), M.wheel, 0, wy - fy - 0.35, 0.33, 0.25, 0.08, 0.25); wheel.rotation.z = PI / 2; head.add(wheel);
+    const hub = mesh(gCylC(18), M.steelDark, 0, wy - fy - 0.35, 0.33, 0.09, 0.1, 0.09); hub.rotation.z = PI / 2; head.add(hub);
+    // hinten: Schaltschrank, Kühlmittelanlage mit Filter; vorne rechts: Pult am Schwenkarm
+    elCab(b, -1.2, -1.36, 1.5, 1.95, 0.45, 0);
+    coolTank(b, 1.15, -1.36, 1.35, 0.45, 0.8, 0);
+    b.rbox(M.paintW, 0.9, 0.36, 0.42, 0.03, 1.15, 0.8, -1.36);
+    swivelArm(b, 1.96, 1.36, 1.0, 1.64, 2.22, 1.5);
+    hmi(b, 2.22, 0.96, 1.5, -0.3);
+    mo.a = { work, head, wheel, tailG, hz, wy };
+    tower(mo, 1.78, 2.32, -0.85);
+    mo.conn = [-1.2, 2.05, -1.36];
   };
 
   // ---------- Flachschleifmaschine (Bestand, ohne Netzwerk) ----------
@@ -2015,7 +2144,10 @@
     mo.mBatch = batchMaterial();
     const b = new Builder();
     (TB[st.type] || TB.mill3)(mo, b);
-    b.build(mo.group, true, mo.mBatch);
+    const stat = new Set(b.build(mo.group, true, mo.mBatch));
+    // bewegte Baugruppen (Türen, Schlitten, Spindeln, Tische …) werfen keinen Kartenschatten – die Schattenkarte
+    // muss so nur bei Zustandswechseln neu gerechnet werden
+    for (const c of mo.group.children) if (!stat.has(c)) c.traverse(o => { if (o.isMesh) o.castShadow = false; });
     R.scene.add(mo.group);
     mo.group.updateMatrixWorld(true);
     // Zustandsrahmen am Boden
@@ -2126,6 +2258,15 @@
     }
     // Pausen-/Besprechungstisch (Pause im Leitstand)
     b.cyl(M.paintW, 0.62, 0.04, 59.5, 0.74, 5.5, 32); b.cyl(M.dark, 0.05, 0.74, 59.5, 0, 5.5, 10); b.cyl(M.dark, 0.3, 0.03, 59.5, 0, 5.5, 18);
+    // 8 Stühle = feste Sitzplätze (BREAK_SLOTS 0–7), Sitzfläche zum Tisch
+    for (let k = 0; k < 8; k++) {
+      const a = k * TAU / 8 + PI / 8, ry = a + PI, x = 59.5 + Math.sin(a) * 1.06, z = 5.5 + Math.cos(a) * 1.06;
+      const at = (lx, lz) => { const [ox, oz] = rotXZ(lx, lz, ry); return [x + ox, z + oz]; };
+      let q = at(0, 0); b.box(M.darker, 0.42, 0.05, 0.42, q[0], 0.41, q[1], ry);
+      q = at(0, -0.2); b.box(M.darker, 0.4, 0.34, 0.035, q[0], 0.5, q[1], ry);
+      for (const [lx, lz] of [[-0.18, -0.18], [0.18, -0.18], [-0.18, 0.18], [0.18, 0.18]]) { q = at(lx, lz); b.box(M.steel, 0.025, 0.41, 0.025, q[0], 0, q[1], ry); }
+      for (const lx of [-0.18, 0.18]) { q = at(lx, -0.2); b.box(M.steel, 0.022, 0.42, 0.022, q[0], 0.45, q[1], ry); }
+    }
     b.rbox(M.dark, 0.45, 0.9, 0.4, 0.03, 57.5, 0, 1.4); b.box(M.black, 0.3, 0.18, 0.02, 57.5, 0.95, 1.61);
     const sv = ST.OFFICE.server;
     b.rbox(M.darker, 0.65, 2.05, 1.0, 0.02, sv.x, 0, sv.z, 0, 0.01); b.box(M.glass, 0.6, 1.9, 0.01, sv.x, 0.08, sv.z + 0.51);
@@ -2212,13 +2353,24 @@
   }
 
   // ================================================================== Personen, AGVs, Stapler
+  /** Rollen: Arbeitskleidung einer Zerspanungs-Werkstatt (keine Bauhelme, Warnweste nur Logistik/Staplerfahrer).
+      Farben bewusst außerhalb der Zustandsfarben (--st-*), des Akzents und der Materialfarbe. */
   const ROLES = {
-    op: { label: 'Bedienung', vest: '#ff7a1f' }, setter: { label: 'Einrichter', vest: '#ffd21f' }, qs: { label: 'Qualitätsprüfung', vest: '#3d8bff' },
-    log: { label: 'Logistik', vest: '#6fdc3c' }, maint: { label: 'Instandhaltung', vest: '#e5484d' }, asm: { label: 'Montage', vest: '#a66bff' }, lead: { label: 'Schichtleitung', vest: '#f2f4f7' },
+    op: { label: 'Bedienung', col: '#3a5686', yoke: '#232a36' },
+    setter: { label: 'Einrichter', col: '#c3a674', yoke: '#3a3f47' },
+    qs: { label: 'Qualitätsprüfung', col: '#e6eaef', coat: true },
+    log: { label: 'Logistik', col: '#c8df3a', vest: true, jacket: '#2b3a55' },
+    maint: { label: 'Instandhaltung', col: '#8b5d3b', yoke: '#2a2e35' },
+    asm: { label: 'Montage', col: '#86597f', yoke: '#2a2e35' },
+    lead: { label: 'Schichtleitung', col: '#2b8186', jacket: true, cap: true },
   };
   const roleOf = (role) => /Schichtleit/.test(role) ? 'lead' : /Einricht/.test(role) ? 'setter' : /Qualit/.test(role) ? 'qs' : /Logist/.test(role) ? 'log' : /Instand/.test(role) ? 'maint' : /Monteur/.test(role) ? 'asm' : 'op';
   const SKIN = ['#e9c4a6', '#d8a883', '#b98463', '#f0cdb2', '#a87454'];
-  const skinOf = (id) => SKIN[(parseInt(String(id).slice(1), 10) * 7) % SKIN.length];
+  const HAIR = ['#2a1c13', '#14100d', '#5e4128', '#9c7a4c', '#77797d', '#3b2a1e'];
+  const pnum = (id) => parseInt(String(id).replace(/\D/g, ''), 10) || 0;
+  const skinOf = (id) => SKIN[(pnum(id) * 7) % SKIN.length];
+  const hairOf = (id) => HAIR[(pnum(id) * 5 + 2) % HAIR.length];
+  const femOf = (role) => /in$/.test(String(role || ''));
   function colored(list) {
     const g = mergeGeos(list.map(([geo, mx]) => [geo, mx]));
     const col = new Float32Array(g.attributes.position.count * 3), c = new THREE.Color();
@@ -2232,38 +2384,81 @@
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     return g;
   }
-  function personGeos(roleKey, skin) {
-    return cache('pg' + roleKey + skin, () => {
-      const vest = ROLES[roleKey].vest, shirt = roleKey === 'lead' ? '#3a4a66' : '#2a3549', pants = '#262d3b', shoe = '#15181c', hat = roleKey === 'lead' ? '#ffffff' : roleKey === 'setter' ? '#f4f4ee' : roleKey === 'maint' ? '#e8483f' : roleKey === 'qs' ? '#f4f4ee' : '#f2f2ec', refl = '#d6dbe0';
-      const torso = new THREE.CapsuleGeometry(0.165, 0.34, 4, 12);
-      const body = colored([
-        [torso, xf(0, 1.19, 0, 0, 0, 0, 1.12, 1, 0.68), shirt],
-        [new THREE.CapsuleGeometry(0.17, 0.27, 4, 12), xf(0, 1.17, 0, 0, 0, 0, 1.14, 1, 0.72), vest],
-        [new THREE.CylinderGeometry(0.197, 0.197, 0.04, 16, 1, true), xf(0, 1.06, 0, 0, 0, 0, 1, 1, 0.73), refl],
-        [new THREE.CylinderGeometry(0.197, 0.197, 0.04, 16, 1, true), xf(0, 1.22, 0, 0, 0, 0, 1, 1, 0.73), refl],
-        [new THREE.CylinderGeometry(0.15, 0.17, 0.12, 14), xf(0, 0.9, 0, 0, 0, 0, 1.12, 1, 0.7), pants],
-        [new THREE.CylinderGeometry(0.055, 0.065, 0.08, 10), xf(0, 1.52, 0), skin],
-        [new THREE.SphereGeometry(0.102, 16, 12), xf(0, 1.635, 0.005, 0, 0, 0, 1, 1.08, 1), skin],
-        [new THREE.SphereGeometry(0.122, 16, 8, 0, TAU, 0, PI / 2), xf(0, 1.68, 0, 0, 0, 0, 1, 0.92, 1.06), hat],
-        [new THREE.CylinderGeometry(0.135, 0.135, 0.014, 18), xf(0, 1.68, 0.035, 0, 0, 0, 1, 1, 1.1), hat],
-        [new THREE.BoxGeometry(0.14, 0.012, 0.06), xf(0, 1.676, 0.155), hat],
-      ]);
-      const leg = colored([[new THREE.CapsuleGeometry(0.068, 0.66, 3, 10), xf(0, -0.42, 0), pants], [new THREE.BoxGeometry(0.11, 0.075, 0.25), xf(0, -0.8, 0.045), shoe]]);
-      const arm = colored([[new THREE.CapsuleGeometry(0.05, 0.46, 3, 10), xf(0, -0.27, 0), shirt], [new THREE.SphereGeometry(0.048, 10, 8), xf(0, -0.56, 0.005), skin]]);
-      const seated = colored([
-        [torso, xf(0, 1.13, -0.05, -0.12, 0, 0, 1.12, 1, 0.68), shirt],
-        [new THREE.CapsuleGeometry(0.17, 0.27, 4, 12), xf(0, 1.11, -0.05, -0.12, 0, 0, 1.14, 1, 0.72), vest],
-        [new THREE.CylinderGeometry(0.197, 0.197, 0.04, 16, 1, true), xf(0, 1.0, -0.04, -0.12, 0, 0, 1, 1, 0.73), refl],
-        [new THREE.SphereGeometry(0.102, 16, 12), xf(0, 1.58, -0.1), skin],
-        [new THREE.SphereGeometry(0.122, 16, 8, 0, TAU, 0, PI / 2), xf(0, 1.62, -0.1, 0, 0, 0, 1, 0.92, 1.06), hat],
-        [new THREE.CapsuleGeometry(0.07, 0.36, 3, 8), xf(-0.1, 0.84, 0.15, PI / 2, 0, 0), pants],
-        [new THREE.CapsuleGeometry(0.07, 0.36, 3, 8), xf(0.1, 0.84, 0.15, PI / 2, 0, 0), pants],
-        [new THREE.CapsuleGeometry(0.065, 0.36, 3, 8), xf(-0.1, 0.5, 0.36), pants],
-        [new THREE.CapsuleGeometry(0.065, 0.36, 3, 8), xf(0.1, 0.5, 0.36), pants],
-        [new THREE.CapsuleGeometry(0.05, 0.38, 3, 8), xf(-0.21, 1.24, 0.12, 1.1, 0, 0), shirt],
-        [new THREE.CapsuleGeometry(0.05, 0.38, 3, 8), xf(0.21, 1.24, 0.12, 1.1, 0, 0), shirt],
-      ]);
-      return { body, leg, arm, seated };
+  const PANTS = '#272c35', SHOE = '#16181c', TOE = '#5d646d', BELT = '#1b1e23', GLASSES = '#1a1f26', REFL = '#d6dbe0';
+  /** Person je Rolle/Haut/Haar: stehend (Rumpf; Beine und Arme getrennt für die Animation), sitzend im Stapler,
+      sitzend am Pausentisch (ein Stück) */
+  function personGeos(roleKey, skin, hair, fem) {
+    return cache('pg' + roleKey + skin + hair + (fem ? 'f' : 'm'), () => {
+      const R0 = ROLES[roleKey], top = R0.vest ? R0.jacket : R0.col, yoke = R0.yoke || top;
+      const T = new THREE.Matrix4();
+      /** Oberkörper ab Hüfte (Hüfte bei y = 0), Liste [geo, Matrix, Farbe]; base = Platzierung (Höhe, Neigung) */
+      const upper = (base) => {
+        const L = [], add = (geo, mx, c) => L.push([geo, T.copy(base).multiply(mx).clone(), c]);
+        if (R0.coat) add(new THREE.CapsuleGeometry(0.172, 0.6, 4, 12), xf(0, 0.17, 0, 0, 0, 0, 1.12, 1, 0.7), top);   // Mantel bis zur Hüfte
+        else add(new THREE.CapsuleGeometry(0.165, 0.34, 4, 12), xf(0, 0.29, 0, 0, 0, 0, 1.12, 1, 0.68), top);
+        if (!R0.coat && !R0.vest) add(new THREE.SphereGeometry(0.19, 16, 6, 0, TAU, 0, PI * 0.5), xf(0, 0.42, 0, 0, 0, 0, 1.0, 0.5, 0.64), yoke);   // Schulterpasse
+        if (R0.vest) {
+          add(new THREE.CapsuleGeometry(0.17, 0.27, 4, 12), xf(0, 0.27, 0, 0, 0, 0, 1.14, 1, 0.72), R0.col);
+          add(new THREE.CylinderGeometry(0.197, 0.197, 0.035, 16, 1, true), xf(0, 0.16, 0, 0, 0, 0, 1, 1, 0.73), REFL);
+          add(new THREE.CylinderGeometry(0.197, 0.197, 0.035, 16, 1, true), xf(0, 0.32, 0, 0, 0, 0, 1, 1, 0.73), REFL);
+        }
+        add(new THREE.CylinderGeometry(0.068, 0.072, 0.05, 12), xf(0, 0.585, 0), R0.jacket === true ? '#eef1f4' : R0.coat ? '#e6eaef' : yoke);   // Kragen
+        if (!R0.coat) add(new THREE.CylinderGeometry(0.168, 0.168, 0.04, 16), xf(0, 0.07, 0, 0, 0, 0, 1.12, 1, 0.72), BELT);
+        add(new THREE.CylinderGeometry(0.055, 0.065, 0.08, 10), xf(0, 0.62, 0), skin);
+        add(new THREE.SphereGeometry(0.102, 16, 12), xf(0, 0.735, 0.005, 0, 0, 0, 1, 1.08, 1), skin);
+        // Haar (kurz) bzw. Kappe der Schichtleitung; Frauen mit gebundenem Haar (Dutt)
+        if (R0.cap) {
+          add(new THREE.SphereGeometry(0.112, 16, 8, 0, TAU, 0, PI * 0.5), xf(0, 0.755, -0.004, 0, 0, 0, 1, 0.78, 1.04), '#24304a');
+          add(new THREE.BoxGeometry(0.13, 0.012, 0.075), xf(0, 0.758, 0.125, -0.12, 0, 0), '#24304a');
+        } else add(new THREE.SphereGeometry(0.109, 16, 8, 0, TAU, 0, PI * 0.56), xf(0, 0.742, -0.012, 0, 0, 0, 1, 0.9, 1.04), hair);
+        if (fem) add(new THREE.SphereGeometry(0.048, 10, 8), xf(0, 0.76, -0.115), hair);
+        // Schutzbrille
+        for (const sx of [-1, 1]) add(new THREE.BoxGeometry(0.044, 0.024, 0.01), xf(sx * 0.037, 0.75, 0.098), GLASSES);
+        add(new THREE.BoxGeometry(0.12, 0.01, 0.01), xf(0, 0.762, 0.096), GLASSES);
+        return L;
+      };
+      const armParts = (L, base, swing) => {   // Arm ab Schulter, nach unten (y < 0); kurze Polo-Ärmel, sonst lange Ärmel
+        const longS = !!(R0.coat || R0.jacket || R0.vest), sleeve = R0.vest ? R0.jacket : R0.coat ? R0.col : R0.jacket === true ? R0.col : R0.col;
+        const add = (geo, mx, c) => L.push([geo, T.copy(base).multiply(swing || new THREE.Matrix4()).multiply(mx).clone(), c]);
+        if (longS) add(new THREE.CapsuleGeometry(0.05, 0.46, 3, 10), xf(0, -0.27, 0), sleeve);
+        else { add(new THREE.CapsuleGeometry(0.056, 0.14, 3, 10), xf(0, -0.1, 0), sleeve); add(new THREE.CapsuleGeometry(0.044, 0.3, 3, 10), xf(0, -0.33, 0), skin); }
+        add(new THREE.SphereGeometry(0.048, 10, 8), xf(0, -0.56, 0.005), skin);
+      };
+      const legParts = (L, base) => {
+        const add = (geo, mx, c) => L.push([geo, T.copy(base).multiply(mx).clone(), c]);
+        add(new THREE.CapsuleGeometry(0.068, 0.66, 3, 10), xf(0, -0.42, 0), PANTS);
+        add(new THREE.BoxGeometry(0.1, 0.12, 0.03), xf(0, -0.43, 0.06), '#353b46');           // Kniepolstertasche
+        add(new THREE.BoxGeometry(0.115, 0.075, 0.26), xf(0, -0.8, 0.045), SHOE);              // Sicherheitsschuh
+        add(new THREE.BoxGeometry(0.118, 0.05, 0.075), xf(0, -0.81, 0.15), TOE);               // Zehenschutzkappe
+        add(new THREE.BoxGeometry(0.12, 0.022, 0.27), xf(0, -0.84, 0.045), '#0d0f12');         // Sohle
+      };
+      const I = new THREE.Matrix4();
+      // stehend
+      const bodyL = upper(xf(0, 0.9, 0));
+      bodyL.push([new THREE.CylinderGeometry(0.15, 0.17, 0.12, 14), xf(0, 0.9, 0, 0, 0, 0, 1.12, 1, 0.7), R0.coat ? R0.col : PANTS]);
+      const body = colored(bodyL);
+      const legL = []; legParts(legL, I); const leg = colored(legL);
+      const armL = []; armParts(armL, I); const arm = colored(armL);
+      // sitzend im Stapler (Sitz ≈ 0,84 m), leicht zurückgelehnt
+      const sL = upper(xf(0, 0.84, -0.05, -0.12, 0, 0));
+      for (const sx of [-0.1, 0.1]) {
+        sL.push([new THREE.CapsuleGeometry(0.07, 0.36, 3, 8), xf(sx, 0.84, 0.15, PI / 2, 0, 0), PANTS]);
+        sL.push([new THREE.CapsuleGeometry(0.065, 0.36, 3, 8), xf(sx, 0.5, 0.36), PANTS]);
+        sL.push([new THREE.BoxGeometry(0.11, 0.07, 0.24), xf(sx, 0.24, 0.4), SHOE]);
+      }
+      for (const sx of [-1, 1]) armParts(sL, xf(sx * 0.21, 1.27, 0.0), xf(0, 0, 0, -1.1, 0, 0));
+      const seated = colored(sL);
+      // sitzend am Pausentisch (Sitzhöhe 0,46 m), Unterarme auf dem Tisch
+      const cL = upper(xf(0, 0.5, -0.02, -0.05, 0, 0));
+      for (const sx of [-0.1, 0.1]) {
+        cL.push([new THREE.CapsuleGeometry(0.07, 0.34, 3, 8), xf(sx, 0.52, 0.2, PI / 2, 0, 0), PANTS]);
+        cL.push([new THREE.CapsuleGeometry(0.064, 0.3, 3, 8), xf(sx, 0.27, 0.4), PANTS]);
+        cL.push([new THREE.BoxGeometry(0.11, 0.07, 0.25), xf(sx, 0.035, 0.45), SHOE]);
+        cL.push([new THREE.BoxGeometry(0.113, 0.045, 0.07), xf(sx, 0.03, 0.56), TOE]);
+      }
+      for (const sx of [-1, 1]) armParts(cL, xf(sx * 0.215, 0.98, -0.02), xf(0, 0, 0, -1.25, 0, -sx * 0.14));
+      const chair = colored(cL);
+      return { body, leg, arm, seated, chair };
     });
   }
   function blob(sx, sz) {
@@ -2273,7 +2468,7 @@
   function buildPeople() {
     const S = WF.sim.state;
     for (const pp of WF.profile.people) {
-      const rk = roleOf(pp.role), G = personGeos(rk, skinOf(pp.id));
+      const rk = roleOf(pp.role), G = personGeos(rk, skinOf(pp.id), hairOf(pp.id), femOf(pp.role));
       const g = new THREE.Group();
       const body = new THREE.Mesh(G.body, M.vc); body.castShadow = false;
       const legL = grp(-0.09, 0.88, 0), legR = grp(0.09, 0.88, 0), armL = grp(-0.235, 1.42, 0), armR = grp(0.235, 1.42, 0);
@@ -2284,11 +2479,12 @@
       if (rk === 'qs') { tb.box(M.black, 0.2, 0.012, 0.15, 0, -0.02, 0.05); tb.box(M.screen, 0.18, 0.004, 0.13, 0, -0.008, 0.05); }
       else { tb.latheY(M.steelDark, 'phsk', [[0, 0], [0.04, 0], [0.032, -0.06], [0.018, -0.08], [0, -0.08]], 0, 0, 0, 12); tb.cyl(M.steel, 0.012, 0.11, 0, -0.19, 0, 8); }
       tb.build(item, false); armR.add(item);
-      g.add(body, legL, legR, armL, armR, blob(0.8, 0.62));
+      const sit = new THREE.Mesh(G.chair, M.vc); sit.castShadow = false; sit.visible = false;
+      g.add(body, legL, legR, armL, armR, sit, blob(0.8, 0.62));
       const proxy = new THREE.Mesh(gBox(), M.hidden); proxy.scale.set(0.75, 1.85, 0.75); proxy.userData = { kind: 'person', id: pp.id }; g.add(proxy);
       g.visible = false; R.scene.add(g);
       const p = S.people[pp.id];
-      R.people[pp.id] = { id: pp.id, g, legL, legR, armL, armR, item, proxy, rk, x: p ? p.pos.x : pp.home.x, z: p ? p.pos.z : pp.home.z, h: 0, x0: 0, z0: 0, x1: 0, z1: 0, th: 0, phase: Math.random() * 6, vis: false, work: 0, walk: 0, idleT: 0 };
+      R.people[pp.id] = { id: pp.id, g, body, sit, legL, legR, armL, armR, item, proxy, rk, x: p ? p.pos.x : pp.home.x, z: p ? p.pos.z : pp.home.z, h: 0, x0: 0, z0: 0, x1: 0, z1: 0, th: 0, phase: Math.random() * 6, vis: false, work: 0, walk: 0, idleT: 0, seat: -1, seated: false, lt: null };
     }
   }
   function buildAgvs() {
@@ -2337,7 +2533,7 @@
     const bc = mesh(gCyl(12), beacon, 0.38, 2.16, -0.5, 0.05, 0.08, 0.05); bc.castShadow = false; g.add(bc);
     const spot = new THREE.Mesh(cache('spotg', () => new THREE.CircleGeometry(0.45, 24).rotateX(-PI / 2)), new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.6, depthWrite: false, blending: THREE.AdditiveBlending, map: M.glowT, toneMapped: false }));
     spot.position.set(0, 0.02, 3.0); g.add(spot);
-    const driver = new THREE.Mesh(personGeos('log', SKIN[1]).seated, M.vc); driver.position.set(0, -0.02, -0.27); driver.visible = false; driver.castShadow = false; g.add(driver);
+    const driver = new THREE.Mesh(personGeos('log', SKIN[1], HAIR[0], false).seated, M.vc); driver.position.set(0, -0.02, -0.27); driver.visible = false; driver.castShadow = false; g.add(driver);
     g.add(blob(1.7, 2.5));
     const proxy = new THREE.Mesh(gBox(), M.hidden); proxy.scale.set(1.2, 2.2, 2.7); proxy.position.z = 0.2; proxy.userData = { kind: 'forklift', id: 'STP1' }; g.add(proxy);
     g.traverse(o => { if (o.isMesh) o.castShadow = false; });
@@ -2348,26 +2544,33 @@
 
   // ================================================================== Behälter (instanziert)
   const CMAX = { klt: 160, gb: 90, rack: 30, wrap: 40 };
+  /** Kontaktschatten je Behälterart (Breite x, Tiefe z) */
+  const BLOB_SZ = { klt: [0.95, 0.72], gb: [1.18, 1.1], rack: [1.25, 1.9], wrap: [1.75, 1.3] };
   function buildContainers() {
     const sc = R.scene, C = R.C = { list: [], byInst: { klt: [], gb: [], rack: [], wrap: [] }, waits: [], vers: [] };
-    const inst = (geo, mat, n, shadow) => { const m = new THREE.InstancedMesh(geo, mat, n); m.count = 0; m.castShadow = shadow !== false; m.receiveShadow = true; m.frustumCulled = false; sc.add(m); return m; };
+    // Behälter bewegen sich mit den Fahrzeugen: kein Kartenschatten, stattdessen weiche Kontaktschatten (instanziert)
+    const inst = (geo, mat, n) => { const m = new THREE.InstancedMesh(geo, mat, n); m.count = 0; m.castShadow = false; m.receiveShadow = true; m.frustumCulled = false; sc.add(m); return m; };
+    C.blob = inst(gPlaneY(), M.blob, CMAX.klt + CMAX.gb + CMAX.rack + CMAX.wrap); C.blob.receiveShadow = false; C.blob.renderOrder = 0;
     C.klt = inst(cache('kltg', () => mergeGeos([[gOpenBox(0.6, 0.27, 0.4), new THREE.Matrix4()], [gBox(), xf(0, 0.235, 0.201, 0, 0, 0, 0.56, 0.035, 0.012)], [gBox(), xf(0, 0.235, -0.201, 0, 0, 0, 0.56, 0.035, 0.012)]])), M.klt, CMAX.klt);
     C.klt.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(CMAX.klt * 3), 3);
-    C.kltFill = inst(gBox(), M.parts, CMAX.klt, false);
+    C.kltFill = inst(gBox(), M.parts, CMAX.klt);
     C.gbBase = inst(cache('gbbase', () => mergeGeos([[gBox(), xf(0, 0, 0, 0, 0, 0, 0.82, 0.11, 0.76)], ...[[-0.39, -0.36], [0.39, -0.36], [-0.39, 0.36], [0.39, 0.36]].map(([x, z]) => [gBox(), xf(x, 0, z, 0, 0, 0, 0.045, 0.8, 0.045)])])), M.steelDark, CMAX.gb);
-    C.gb = inst(gOpenBox(0.8, 0.66, 0.74), M.gitter, CMAX.gb, false);
-    C.gbFill = inst(gBox(), M.parts, CMAX.gb, false);
+    C.gb = inst(gOpenBox(0.8, 0.66, 0.74), M.gitter, CMAX.gb);
+    C.gbFill = inst(gBox(), M.parts, CMAX.gb);
+    // Teile je Werkstoff leicht getönt (15 % der Materialfarbe aus dem Rohmaterial-Lager)
+    C.kltFill.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(CMAX.klt * 3), 3);
+    C.gbFill.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(CMAX.gb * 3), 3);
     C.rack = inst(cache('rackg', () => mergeGeos([
       [gBox(), xf(-0.36, 0, 0, 0, 0, 0, 0.06, 0.08, 1.4)], [gBox(), xf(0.36, 0, 0, 0, 0, 0, 0.06, 0.08, 1.4)],
       [gBox(), xf(0, 0.08, -0.5, 0, 0, 0, 0.82, 0.12, 0.1)], [gBox(), xf(0, 0.08, 0.5, 0, 0, 0, 0.82, 0.12, 0.1)],
       ...[[-0.36, -0.65], [0.36, -0.65], [-0.36, 0.65], [0.36, 0.65]].map(([x, z]) => [gBox(), xf(x, 0, z, 0, 0, 0, 0.06, 0.52, 0.06)])])), M.blueRack, CMAX.rack);
     C.shaft = inst(cache('shaftg', () => new THREE.CylinderGeometry(1, 1, 1, 22).rotateX(PI / 2)), M.steel, CMAX.rack * 3);
-    C.wrap = inst(gRBox(1.16, 1, 0.8, 0.05), M.film, CMAX.wrap, false); C.wrap.renderOrder = 2;
+    C.wrap = inst(gRBox(1.16, 1, 0.8, 0.05), M.film, CMAX.wrap); C.wrap.renderOrder = 2;
     C.pal = inst(cache('palg', () => { const b = new Builder(); palletStatic(b, 0, 0, 0, 0); const l = []; for (const v of b.map.values()) l.push(...v); b.map.clear(); return mergeGeos(l); }), M.wood, CMAX.wrap);
     C.box = inst(cache('ctnL', () => mergeGeos([[-0.29, -0.195], [0.29, -0.195], [-0.29, 0.195], [0.29, 0.195]].map(([x, z]) => [gRBox(0.56, 0.29, 0.37, 0.015), xf(x, 0, z)]))), M.carton, CMAX.wrap * 3);
     const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false });
-    C.ring = inst(cache('cring', () => new THREE.RingGeometry(0.6, 0.72, 40).rotateX(-PI / 2)), ringMat, 60, false); C.ring.renderOrder = 3; C.ring.receiveShadow = false;
-    C.wait = inst(cache('wring', () => new THREE.RingGeometry(0.5, 0.6, 36).rotateX(-PI / 2)), new THREE.MeshBasicMaterial({ color: 0xff9d3d, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false }), 40, false); C.wait.renderOrder = 3; C.wait.receiveShadow = false;
+    C.ring = inst(cache('cring', () => new THREE.RingGeometry(0.6, 0.72, 40).rotateX(-PI / 2)), ringMat, 60); C.ring.renderOrder = 3; C.ring.receiveShadow = false;
+    C.wait = inst(cache('wring', () => new THREE.RingGeometry(0.5, 0.6, 36).rotateX(-PI / 2)), new THREE.MeshBasicMaterial({ color: 0xff9d3d, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false }), 40); C.wait.renderOrder = 3; C.wait.receiveShadow = false;
     [C.klt, C.gb, C.rack, C.wrap].forEach((m, i) => { m.userData = { kind: 'container', inst: ['klt', 'gb', 'rack', 'wrap'][i] }; R.pick.push(m); });
     M.kltParts = new THREE.Color('#2f6fc4'); M.kltScrap = new THREE.Color('#c8392f'); M.kltRaw = new THREE.Color('#7f8a93');
   }
@@ -2392,7 +2595,7 @@
       const type = pw > 50 ? 'rack' : (c.qty * pw) >= 25 ? 'gb' : 'klt';
       const srcR = o && c.src >= 0 ? o.routing[c.src] : (o ? o.routing[0] : null);
       const cap = srcR && srcR.transferBatch ? srcR.transferBatch : Math.max(1, c.qty);
-      const e = { id, type, fill: clamp(c.qty / cap, 0.06, 1), scrap: c.kind === 'scrap', raw: c.kind === 'raw', qty: c.qty, carrier: null, x: 0, z: 0, ry: 0, order: c.orderId };
+      const e = { id, type, fill: clamp(c.qty / cap, 0.06, 1), scrap: c.kind === 'scrap', raw: c.kind === 'raw', qty: c.qty, carrier: null, x: 0, z: 0, ry: 0, order: c.orderId, tint: matTint(o) };
       if (l.kind === 'station') {
         const st = WF.profile.stationById[l.id]; if (!st) continue;
         const arr = S.stations[l.id] ? (l.slot === 'out' ? S.stations[l.id].out : S.stations[l.id].inp) : [];
@@ -2415,9 +2618,20 @@
     }
     C.waits = waits;
   }
+  const MAT_TINT = new Map();
+  /** Tönung der Teile nach Werkstoff des Auftrags (erster Arbeitsgang mit Material), sonst neutral */
+  function matTint(o) {
+    let id = '';
+    if (o && o.routing) for (const r of o.routing) if (r.material && r.material.id) { id = r.material.id; break; }
+    let c = MAT_TINT.get(id);
+    if (!c) { c = new THREE.Color(1, 1, 1); if (MAT_COL[id]) c.lerp(new THREE.Color(MAT_COL[id]), 0.15); MAT_TINT.set(id, c); }
+    return c;
+  }
   function writeContainers(t) {
     const C = R.C; if (!C) return;
     const n = { klt: 0, gb: 0, rack: 0, wrap: 0 }, sh = { n: 0 }, rings = { n: 0 }, boxes = { n: 0 };
+    let nb = 0;
+    const BLOB = BLOB_SZ;
     const hl = R.route && R.route.id, sel = R.selTarget && R.selTarget.kind === 'container' ? R.selTarget.id : null;
     for (const e of C.list) {
       let x = e.x, z = e.z, y = 0, ry = e.ry;
@@ -2431,13 +2645,14 @@
       const k = e.type;
       if (n[k] >= CMAX[k]) continue;
       const i = n[k]++;
+      if (!e.carrier) { const bs = BLOB[k]; ixf(C.blob, nb++, x, 0.011, z, ry, bs[0], 1, bs[1]); }
       C.byInst[k][i] = e.id;
       if (k === 'klt') {
         ixf(C.klt, i, x, y, z, ry, null, null, null); C.klt.setColorAt(i, e.scrap ? M.kltScrap : e.raw ? M.kltRaw : M.kltParts);
-        ixf(C.kltFill, i, x, y + 0.02 + e.fill * 0.22, z, ry, 0.56, 0.012, 0.36);
+        ixf(C.kltFill, i, x, y + 0.02 + e.fill * 0.22, z, ry, 0.56, 0.012, 0.36); C.kltFill.setColorAt(i, e.tint);
       } else if (k === 'gb') {
         ixf(C.gbBase, i, x, y, z, ry, null, null, null); ixf(C.gb, i, x, y + 0.11, z, ry, null, null, null);
-        ixf(C.gbFill, i, x, y + 0.13 + e.fill * 0.55, z, ry, 0.76, 0.012, 0.7);
+        ixf(C.gbFill, i, x, y + 0.13 + e.fill * 0.55, z, ry, 0.76, 0.012, 0.7); C.gbFill.setColorAt(i, e.tint);
       } else if (k === 'rack') {
         ixf(C.rack, i, x, y, z, ry, null, null, null);
         for (let s = 0; s < Math.min(3, e.qty); s++) { if (sh.n >= CMAX.rack * 3) break; const [ox, oz] = rotXZ(-0.22 + s * 0.22, 0, ry); ixf(C.shaft, sh.n++, x + ox, y + 0.28, z + oz, ry, 0.062, 0.062, 1.6); }
@@ -2449,12 +2664,15 @@
       const i = n.wrap++, p = v.slot, layers = clamp(Math.ceil(v.n / 2), 1, 3), hgt = layers * 0.3 + 0.03;
       C.byInst.wrap[i] = v.last;
       ixf(C.pal, i, p.x, 0, p.z, p.ry || 0, null, null, null); ixf(C.wrap, i, p.x, 0.142, p.z, p.ry || 0, 1, hgt, 1);
+      ixf(C.blob, nb++, p.x, 0.011, p.z, p.ry || 0, BLOB.wrap[0], 1, BLOB.wrap[1]);
       for (let L = 0; L < layers && boxes.n < CMAX.wrap * 3; L++) ixf(C.box, boxes.n++, p.x, 0.146 + L * 0.3, p.z, p.ry || 0, null, null, null);
       if (hl && v.order === hl && rings.n < 60) { const s = 1.5 + Math.sin(t * 4) * 0.08; ixf(C.ring, rings.n++, p.x, 0.03, p.z, 0, s, 1, s); }
     }
+    C.blob.count = nb; C.blob.instanceMatrix.needsUpdate = true;
     C.klt.count = C.kltFill.count = n.klt; C.gb.count = C.gbBase.count = C.gbFill.count = n.gb; C.rack.count = n.rack; C.shaft.count = sh.n; C.wrap.count = C.pal.count = n.wrap; C.box.count = boxes.n; C.ring.count = rings.n;
     for (const m of [C.klt, C.kltFill, C.gb, C.gbBase, C.gbFill, C.rack, C.shaft, C.wrap, C.pal, C.box, C.ring]) m.instanceMatrix.needsUpdate = true;
     if (C.klt.instanceColor) C.klt.instanceColor.needsUpdate = true;
+    C.kltFill.instanceColor.needsUpdate = true; C.gbFill.instanceColor.needsUpdate = true;
     for (const k in n) C.byInst[k].length = n[k];
     let w = 0;
     for (const e of C.waits) { if (w >= 40) break; const s = 1 + 0.18 * Math.sin(t * 3.5 + w); ixf(C.wait, w++, e.x, 0.035, e.z, 0, s * (e.type === 'rack' ? 1.4 : 1), 1, s * (e.type === 'rack' ? 1.4 : 1)); }
@@ -2632,7 +2850,9 @@
         R.ui.labels.append(lbEl);
         l = R.wtLb[key] = { el: lbEl, anchor: new THREE.Vector3(), wait: true, pri: 150, sizes: {}, x: -1, y: -1, shown: false, sig: '' };
       }
-      if (inSlot) l.anchor.set(inSlot.x, 1.95, inSlot.z); else l.anchor.set(g.e.x, 0.9, g.e.z);
+      // am Stoppmarker: Linie beginnt an dessen Oberkante (Höhe folgt der Markergröße, siehe frame)
+      l.stop = !!inSlot;
+      if (inSlot) l.anchor.set(inSlot.x, 1.55 + (R.stopS || 1.1) * 0.5, inSlot.z); else l.anchor.set(g.e.x, 0.9, g.e.z);
       const dur = U.fmtDur(g.age);
       const head = (WAIT_TXT[g.code] || g.reason) + (g.code === 'destFull' ? ' · seit ' + dur : ' · wartet ' + dur);
       const nIn = S.stations[g.to.id] ? S.stations[g.to.id].inp.length : null, cap = g.to.inCap;
@@ -3025,27 +3245,44 @@
       }
       return true;
     };
-    let best = null;
+    // Abstand des projizierten Inhalts von der Mitte des freien Bereichs (bei gleichem r: mittig gewinnt)
+    const fcx = (bx0 + bx1) / 2, fcy = (by0 + by1) / 2;
+    const offCenter = (tx, tz, r) => {
+      FC.position.set(tx + r * sp * st, r * cp, tz + r * sp * ct); FC.lookAt(tx, 0, tz); FC.updateMatrixWorld(true);
+      let a0 = 1e9, a1 = -1e9, b0 = 1e9, b1 = -1e9;
+      for (let i = 0; i < pts.length; i++) { FV.copy(pts[i]).project(FC); const sx = (FV.x + 1) / 2 * W, sy = (1 - FV.y) / 2 * H; a0 = Math.min(a0, sx); a1 = Math.max(a1, sx); b0 = Math.min(b0, sy); b1 = Math.max(b1, sy); }
+      return Math.hypot((a0 + a1) / 2 - fcx, (b0 + b1) / 2 - fcy);
+    };
+    const cands = [];
     const tryAt = (tx, tz) => {
       tx = clamp(tx, -2, HP.w + 2); tz = clamp(tz, -2, HP.d + 3);
       if (!ok(tx, tz, rMax)) return;
       let lo = rMin, hi = rMax;
       if (!ok(tx, tz, lo)) { for (let i = 0; i < 13; i++) { const mid = (lo + hi) / 2; if (ok(tx, tz, mid)) hi = mid; else lo = mid; } } else hi = lo;
-      if (!best || hi < best.r - 0.05) best = { tx, tz, r: hi };
+      cands.push({ tx, tz, r: hi });
     };
-    const G = [0, -0.1, 0.1, -0.2, 0.2, -0.3, 0.3, -0.42, 0.42];
-    for (const a of G) for (const b of G) tryAt(cx + a * span, cz + b * span);
-    if (best) { const b0 = best, s = span * 0.05; for (const a of [-1, -0.5, 0.5, 1]) for (const b of [-1, -0.5, 0, 0.5, 1]) tryAt(b0.tx + a * s, b0.tz + b * s); }
+    const pick = () => {
+      let b = null; for (const c of cands) if (!b || c.r < b.r) b = c;
+      if (!b) return null;
+      let best = null, bo = 1e9;
+      for (const c of cands) if (c.r <= b.r * 1.04 + 0.3) { const o = offCenter(c.tx, c.tz, c.r); if (o < bo) { bo = o; best = c; } }
+      return best;
+    };
+    // Raster in Bildrichtungen: u = rechts/links, v = zur Kamera/weg (≈ unten/oben im Bild)
+    const ux = ct, uz = -st, vx = st, vz = ct;
+    const G = [0, -0.08, 0.08, -0.16, 0.16, -0.25, 0.25, -0.35, 0.35, -0.45, 0.45];
+    for (const a of G) for (const b of G) tryAt(cx + (a * ux + b * vx) * span, cz + (a * uz + b * vz) * span);
+    let best = pick();
+    if (best) { const b0 = best, s = span * 0.04; for (const a of [-1, -0.5, 0, 0.5, 1]) for (const b of [-1, -0.5, 0, 0.5, 1]) if (a || b) tryAt(b0.tx + (a * ux + b * vx) * s, b0.tz + (a * uz + b * vz) * s); best = pick(); }
     if (!best) return { tx: clamp(cx, -2, HP.w + 2), tz: clamp(cz, -2, HP.d + 3), r: rMax };
-    best.r = Math.min(rMax, best.r * 1.03 + 0.4);
-    return best;
+    return { tx: best.tx, tz: best.tz, r: Math.min(rMax, best.r * 1.03 + 0.4) };
   }
   /** Einpass-Ziel einer Voreinstellung (Blickrichtung im Hochformat gedreht, damit die lange Hallenseite in die Höhe läuft) */
   function presetFit(p) {
     const P = WF.profile, pts = [], asp = (R.w - (R.drawerW || 0)) / R.h;
     let phi = p.phi, th = p.th;
     if (p.id === 'uebersicht') {
-      if (asp < 0.95) { th = 74; phi = 50; }
+      if (asp < 0.95) { th = 74; phi = asp < 0.7 ? 42 : 46; }
       // Hallenumriss alle ~8 m abtasten: keine Kante (und kein Lager an der Wand) verschwindet unter einem Bedienfeld
       const HW = P.hall.w, HD = P.hall.d, nx = Math.ceil(HW / 8), nz = Math.ceil(HD / 8);
       for (let i = 0; i <= nx; i++) { const x = HW * i / nx; pts.push(new THREE.Vector3(x, 0, 0), new THREE.Vector3(x, 0, HD)); }
@@ -3138,7 +3375,7 @@
     return `<div class="h3-eb">Maschinenzustand</div><div class="h3-leg">${sw('var(--st-run)', 'Produktion')}${sw('var(--st-setup)', 'Rüsten / Erstteil', '', 'Rüsten oder Erstteilprüfung läuft')}${sw('var(--st-tool)', 'Werkzeugwechsel')}${sw('var(--st-wait)', 'Wartet / Ausgang voll', '', 'Wartet auf Material, Werkzeug oder Bediener bzw. Ausgangspuffer voll')}${sw('var(--st-fault)', 'Störung')}${sw('var(--st-idle)', 'Bereit (kein Auftrag)')}</div>
       <div class="h3-eb">Materialfluss</div><div class="h3-leg">${sw('var(--mat)', 'Auftragsfluss', 'arc', 'Bögen zwischen aufeinanderfolgenden Arbeitsgängen offener Aufträge mit laufenden Punkten – je dicker, desto mehr Aufträge (aus der Übersicht)')}${sw('var(--mat)', 'Transport unterwegs', 'ln', 'Weg vom Fahrzeug über die Abholung zum Ziel')}${sw('var(--mat)', 'Wartet auf Transport', 'dsh', 'Gestrichelt vom Behälter zum Ziel; der Grund steht am Etikett, z. B. Ziel voll (Eingangspuffer begrenzt) oder kein Fahrzeug frei')}${sw('var(--mat)', 'Ziel voll', 'stp', 'Eingangspuffer der Zielmaschine ist voll – der Behälter fährt, sobald Platz ist')}${sw('var(--st-run)', 'Teil fertig', 'rg', 'Kurzer Puls am Ausgang, wenn ein Teil fertig wird')}</div>
       <div class="h3-eb">Datenfluss</div><div class="h3-leg">${sw('var(--info)', 'Daten → MES-Server', 'pt', 'Signale der angebundenen Maschinen laufen über die Kabeltrasse zum MES-Server – Warnungen gelb, Störungen rot')}${sw('var(--info)', 'Meldung an Person', 'rg', 'Benachrichtigung vom Server erreicht die zuständige Rolle – Farbe nach Dringlichkeit')}${sw('#5fb6e6', 'Tablet (ohne Anbindung)', '', 'Maschine ohne Datenschnittstelle – Rückmeldung per Tablet')}</div>
-      <div class="h3-eb">Personen</div><div class="h3-leg">${Object.values(ROLES).map(r => sw(r.vest, r.label, 'vest')).join('')}</div>`;
+      <div class="h3-eb">Personen</div><div class="h3-leg">${Object.values(ROLES).map(r => sw(r.col, r.label, 'vest')).join('')}</div>`;
   }
   const isTouch = () => !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
   /** Bedienhinweis passend zum Gerät (Maus vs. Gesten) */
@@ -3226,7 +3463,7 @@
     ui.sheet.innerHTML = `<div class="h3-eb">Arbeitsplan ${esc(r.id)}</div><div class="h3-steps">${r.steps.map((c, n) => {
       const col = OPC[c.op.state] || OPC.open, cnt = c.op.target ? `${fmtN(c.op.good)}/${fmtN(c.op.target)}` : '';
       const k = c.lim ? `<span class="k">${lim && lim.plant ? 'Engpass' : 'kritisch'}</span>` : '';
-      return `<button data-st="${esc(c.st.id)}" style="--rc:${col}"><span class="n">${n + 1}</span><span><b>AG ${c.op.seq} · ${esc(c.op.op || '')}${k}</b><small>${esc(stationTag(c.st))} ${esc(c.op.stationName || c.st.short)} · ${esc(c.op.stateLabel || '')}</small></span><span class="q">${cnt}</span></button>`;
+      return `<button data-st="${esc(c.st.id)}" style="--rc:${col}"><span class="n">${n + 1}</span><span><b>AG ${c.op.seq} · ${esc(c.op.op || '')}${k}</b><small>${esc((c.st.kind === 'machine' || c.st.id === 'QS' || c.st.id === 'M13' ? c.st.id + ' ' : '') + (c.op.stationName || c.st.short))} · ${esc(c.op.stateLabel || '')}</small></span><span class="q">${cnt}</span></button>`;
     }).join('')}</div>`;
     ui.sheet.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { const id = b.dataset.st; closeMenus(); if (WF.profile.stationById[id] && WF.profile.stationById[id].footprint) focusStation(id); });
   }
@@ -3265,6 +3502,10 @@
       out.push([b.left - rr.left - 6, b.top - rr.top - 6, b.right - rr.left + 6, b.bottom - rr.top + 6]);
     }
     if (R.drawerW) out.push([R.w - R.drawerW - 8, -10, R.w + 10, R.h + 10]);
+    // Tour-Karte (liegt außerhalb der Ansicht, fixiert): Etiketten weichen ihr aus
+    const tc = document.querySelector('.tour-card');
+    if (tc) { const b = tc.getBoundingClientRect(); if (b.width) out.push([b.left - rr.left - 6, b.top - rr.top - 6, b.right - rr.left + 6, b.bottom - rr.top + 6]); }
+    R.tourOn = !!tc;
     R.uiRects = out;
   }
   /** Layout nach freier Breite (Fläche minus Drawer): kompakt ≤ 640 px, schmal < 1060 px, Hallenplan erst ab 900 px;
@@ -3369,7 +3610,7 @@
     }
     R.ui.mmPeople = sv('g', {}, svg);
     R.ui.mmDots = {};
-    for (const pp of P.people) { const d = sv('circle', { r: 0.55, fill: ROLES[roleOf(pp.role)].vest, stroke: '#0b1120', 'stroke-width': 0.18, cx: -9, cy: -9 }, R.ui.mmPeople); R.ui.mmDots[pp.id] = d; }
+    for (const pp of P.people) { const d = sv('circle', { r: 0.55, fill: ROLES[roleOf(pp.role)].col, stroke: 'rgba(229,235,245,.8)', 'stroke-width': 0.2, cx: -9, cy: -9 }, R.ui.mmPeople); R.ui.mmDots[pp.id] = d; }
     for (const a of P.agvs) { const d = sv('rect', { width: 1.1, height: 1.1, rx: 0.25, fill: '#3cc6f2', stroke: '#0b1120', 'stroke-width': 0.18, x: -9, y: -9 }, R.ui.mmPeople); R.ui.mmDots[a.id] = d; }
     R.ui.mmFork = sv('rect', { width: 1.3, height: 1.3, rx: 0.2, fill: '#e8a317', stroke: '#0b1120', 'stroke-width': 0.18, x: -9, y: -9 }, R.ui.mmPeople);
     // Maschinennamen über den Personen-/Fahrzeugpunkten
@@ -3434,7 +3675,7 @@
       e.addEventListener('mouseenter', () => { R.lbHover = mo.id; setHover({ kind: 'machine', id: mo.id }, true); });
       e.addEventListener('mouseleave', () => { if (R.lbHover === mo.id) { R.lbHover = null; setHover(null); } });
       R.ui.labels.append(e);
-      R.lb[mo.id] = { el: e, mo, anchor: mo.anchor, sig: '', level: 1, sizes: {}, x: -1, y: -1, shown: false, pri: 0, done: 0 };
+      R.lb[mo.id] = { el: e, mo, anchor: mo.anchor, sig: '', level: 1, dl: 1, sizes: {}, x: -1, y: -1, shown: false, pri: 0, done: 0 };
     }
   }
   function critTool(v) {
@@ -3479,24 +3720,31 @@
     const st = v ? v.state : 'idle', g = (WF.STATE[st] || {}).group;
     return g === 'fault' ? 60 : g === 'wait' ? 40 : g === 'setup' ? 30 : g === 'prod' ? 20 : 10;
   }
-  const _rects = [], _all = [], _dry = [];
+  const _rects = [], _all = [], _dry = [], _pool = [];
+  let _pn = 0, _pxPerM = 1, _zone = null;
+  /** Rechteck aus dem Vorrat (keine Allokation im Bild-Takt) */
+  function prect(list, x0, y0, x1, y1) { const r = _pool[_pn] || (_pool[_pn] = [0, 0, 0, 0]); _pn++; r[0] = x0; r[1] = y0; r[2] = x1; r[3] = y1; list.push(r); }
   // Route-/Warte-Etiketten: 8 Lagen um den Ankerpunkt in zwei Abständen, Führungslinie zum Anker
   const FL_POS = [[1, 1], [1, -1], [-1, 1], [-1, -1], [0, -1], [0, 1], [1, 0], [-1, 0]], FL_RAD = [12, 40];
-  const ML_POS = ['a', 'b', 'r', 'l'];
+  const ML_POS = ['a', 'b', 'r', 'l'], LV_STR = ['0', '1', '2'], VARS_FC = ['f', 'c'], VARS_C = ['c'];
+  const byPri = (a, b) => b.p - a.p || a.sy - b.sy;
   function rectFree(rs, x0, y0, x1, y1, W, H) {
     if (x0 < 4 || y0 < 4 || x1 > W - 4 || y1 > H - 4) return false;
     for (let i = 0; i < rs.length; i++) { const r = rs[i]; if (x0 < r[2] && x1 > r[0] && y0 < r[3] && y1 > r[1]) return false; }
     return true;
   }
-  function measure(l, key, apply) {
+  function setLv(l, lv) { if (l.dl !== lv) { l.dl = lv; l.el.dataset.l = LV_STR[lv]; } }
+  function setVar(l, v) { if (l.v !== v) { l.v = v; l.el.classList.toggle('c', v === 'c'); } }
+  /** Größe je Stufe (Maschine: 0/1/2) bzw. Form (Route/Warten: 'f'/'c') – einmal gemessen, dann aus dem Speicher */
+  function measure(l, key) {
     let sz = l.sizes[key];
-    if (!sz) { apply(); sz = l.sizes[key] = { w: l.el.offsetWidth, h: l.el.offsetHeight }; }
+    if (!sz) { if (typeof key === 'number') setLv(l, key); else setVar(l, key); sz = l.sizes[key] = { w: l.el.offsetWidth, h: l.el.offsetHeight }; }
     return sz;
   }
   /** Maschinen-Etikett: Stufe want…0, je Stufe über/unter/rechts/links; Ergebnis in l._lv/_side/_x/_y */
   function placeMachine(l, want, rs, W, H) {
     for (let lv = want; lv >= 0; lv = lv === 2 ? 1 : lv - 1) {
-      const sz = measure(l, lv, () => { l.el.dataset.l = String(lv); });
+      const sz = measure(l, lv);
       for (let k = 0; k < 4; k++) {
         const side = ML_POS[k]; let x0, y0;
         if (side === 'a') { x0 = l.sx - sz.w / 2; y0 = l.sy - sz.h - 10; }
@@ -3511,9 +3759,9 @@
   }
   /** Route-/Warte-Etikett: volle Form, sonst kompakt ('5 M09'); Route-Etiketten fallen nie weg */
   function placeFloat(l, rs, W, H) {
-    const vars = l.route ? (R.compact ? ['c'] : ['f', 'c']) : (l.dist > 60 || R.compact ? ['c'] : ['f', 'c']);
+    const vars = l.route ? (R.compact ? VARS_C : VARS_FC) : (l.dist > 60 || R.compact ? VARS_C : VARS_FC);
     for (let vi = 0; vi < vars.length; vi++) {
-      const v = vars[vi], sz = measure(l, v, () => setVar(l, v));
+      const v = vars[vi], sz = measure(l, v);
       for (let ri = 0; ri < FL_RAD.length; ri++) for (let k = 0; k < FL_POS.length; k++) {
         const rad = FL_RAD[ri], c = FL_POS[k];
         const x0 = c[0] > 0 ? l.sx + rad : c[0] < 0 ? l.sx - rad - sz.w : l.sx - sz.w / 2;
@@ -3522,28 +3770,23 @@
       }
     }
     if (!l.route) return false;
-    const sz = measure(l, 'c', () => setVar(l, 'c'));
+    const sz = measure(l, 'c');
     l._v = 'c'; l._w = sz.w; l._h = sz.h;
     l._x = clamp(l.sx + 12, 4, Math.max(4, W - (R.drawerW || 0) - 4 - sz.w)); l._y = clamp(l.sy + 12, 4, Math.max(4, H - 4 - sz.h));
     return true;
   }
-  function setVar(l, v) { if (l.v !== v) { l.v = v; l.el.classList.toggle('c', v === 'c'); } }
   /** Führungslinie vom Anker zur nächsten Kante des Etiketts */
   function leader(l, on) {
     if (!on) { if (l.ln && l.lnOn) { l.ln.style.display = 'none'; l.dot.style.display = 'none'; l.lnOn = false; } return; }
-    if (!l.ln) {
-      l.ln = sv('line', { stroke: 'rgba(229,235,245,.78)' }, R.ui.lead); l.dot = sv('circle', { r: 4, fill: l.col || '#ff9d3d' }, R.ui.lead);
-      l.lk = '';
-    }
+    if (!l.ln) { l.ln = sv('line', { stroke: 'rgba(229,235,245,.78)' }, R.ui.lead); l.dot = sv('circle', { r: l.wait ? 0 : 4, fill: l.col || '#ff9d3d' }, R.ui.lead); l.lnOn = true; l.lx = NaN; }
     const px = clamp(l.sx, l._x, l._x + l._w), py = clamp(l.sy, l._y, l._y + l._h);
-    const far = Math.hypot(px - l.sx, py - l.sy) > 7;
-    const key = far ? Math.round(l.sx) + ',' + Math.round(l.sy) + ',' + Math.round(px) + ',' + Math.round(py) : 'n';
-    if (!l.lnOn) { l.ln.style.display = ''; l.dot.style.display = ''; l.lnOn = true; }
-    if (key === l.lk) return;
-    l.lk = key;
-    if (!far) { l.ln.style.display = 'none'; l.dot.style.display = 'none'; l.lnOn = false; l.lk = ''; return; }
-    l.ln.setAttribute('x1', l.sx.toFixed(1)); l.ln.setAttribute('y1', l.sy.toFixed(1)); l.ln.setAttribute('x2', px.toFixed(1)); l.ln.setAttribute('y2', py.toFixed(1));
-    l.dot.setAttribute('cx', l.sx.toFixed(1)); l.dot.setAttribute('cy', l.sy.toFixed(1));
+    if (Math.hypot(px - l.sx, py - l.sy) <= 7) { if (l.lnOn) { l.ln.style.display = 'none'; l.dot.style.display = 'none'; l.lnOn = false; } return; }
+    if (!l.lnOn) { l.ln.style.display = ''; l.dot.style.display = ''; l.lnOn = true; l.lx = NaN; }
+    const ax = Math.round(l.sx), ay = Math.round(l.sy), bx = Math.round(px), by = Math.round(py);
+    if (ax === l.lx && ay === l.ly && bx === l.lbx && by === l.lby) return;
+    l.lx = ax; l.ly = ay; l.lbx = bx; l.lby = by;
+    l.ln.setAttribute('x1', ax); l.ln.setAttribute('y1', ay); l.ln.setAttribute('x2', bx); l.ln.setAttribute('y2', by);
+    l.dot.setAttribute('cx', ax); l.dot.setAttribute('cy', ay);
   }
   function showAt(l, ok) {
     if (ok) {
@@ -3552,14 +3795,24 @@
     }
     if (ok !== l.shown) { l.shown = ok; l.el.classList.toggle('off', !ok); }
   }
+  function underUi(x, y) { const u = R.uiRects; for (let i = 0; i < u.length; i++) { const r = u[i]; if (x > r[0] && x < r[2] && y > r[1] && y < r[3]) return true; } return false; }
+  function wantOf(l) {
+    const ppm = _pxPerM / l.dist;
+    let want = ppm > 34 ? 2 : ppm > 12.5 ? 1 : 0;
+    if (R.compact) want = Math.min(want, 1);
+    if (_zone && l.mo && _zone.indexOf(l.mo.id) < 0 && l.p < 90) want = 0;   // Bereichsansicht: Maschinen außerhalb nur als Kurzetikett
+    return want;
+  }
   function placeLabels() {
     const cam = R.camera, W = R.w, H = R.h, L = R.layers;
-    _rects.length = 0; for (const r of R.uiRects) _rects.push(r);
+    _pn = 0;
+    _rects.length = 0; for (let i = 0; i < R.uiRects.length; i++) _rects.push(R.uiRects[i]);
     _all.length = 0;
     for (const id in R.rtLb) _all.push(R.rtLb[id]);
     for (const id in R.wtLb) _all.push(R.wtLb[id]);
     for (const id in R.lb) _all.push(R.lb[id]);
-    for (const l of _all) {
+    for (let i = 0; i < _all.length; i++) {
+      const l = _all[i];
       V2.copy(l.anchor).project(cam);
       l.vis = V2.z < 1 && V2.z > -1 && Math.abs(V2.x) < 1.2 && Math.abs(V2.y) < 1.2;
       l.sx = (V2.x + 1) / 2 * W; l.sy = (1 - V2.y) / 2 * H;
@@ -3567,25 +3820,17 @@
       l.p = l.pri;
     }
     // nach Priorität, dann von oben nach unten – Nachbarn lösen sich jedes Bild gleich auf
-    _all.sort((a, b) => b.p - a.p || a.sy - b.sy);
-    const pxPerM = H / (Math.tan(cam.fov * DEG / 2) * 2);
-    const crowd = R.compact ? 1 : 0;
-    const zone = R.preset ? R.zone : null;
-    const underUi = (x, y) => { for (const r of R.uiRects) if (x > r[0] && x < r[2] && y > r[1] && y < r[3]) return true; return false; };
-    const wantOf = (l) => {
-      const ppm = pxPerM / l.dist;
-      let want = ppm > 34 ? 2 : ppm > 12.5 ? 1 : 0;
-      if (crowd) want = Math.min(want, 1);
-      if (zone && l.mo && zone.indexOf(l.mo.id) < 0 && l.p < 90) want = 0;   // Bereichsansicht: Maschinen außerhalb nur als Kurzetikett
-      return want;
-    };
+    _all.sort(byPri);
+    _pxPerM = H / (Math.tan(cam.fov * DEG / 2) * 2);
+    _zone = R.preset ? R.zone : null;
     let nWant = 0, nGot = 0;
-    for (const l of _all) {
+    for (let i = 0; i < _all.length; i++) {
+      const l = _all[i];
       let ok = l.vis;
       if (l.route || l.wait) {
         if (l.wait && (!L.flow || R.route.id)) ok = false;
         if (ok) ok = placeFloat(l, _rects, W, H);
-        if (ok) { setVar(l, l._v); _rects.push([l._x - 4, l._y - 4, l._x + l._w + 4, l._y + l._h + 4]); }
+        if (ok) { setVar(l, l._v); prect(_rects, l._x - 4, l._y - 4, l._x + l._w + 4, l._y + l._h + 4); }
         leader(l, ok);
         showAt(l, ok);
         continue;
@@ -3602,10 +3847,10 @@
         if (ok) { l.level = l._lv; if (base >= 1 && l.p < 90 && l._lv >= 1) nGot++; }
       }
       if (ok) {
-        _rects.push([l._x - 4, l._y - 4, l._x + l._w + 4, l._y + l._h + 4]);
-        if (l.el.dataset.pl !== l._side) l.el.dataset.pl = l._side;
+        prect(_rects, l._x - 4, l._y - 4, l._x + l._w + 4, l._y + l._h + 4);
+        if (l.dpl !== l._side) { l.dpl = l._side; l.el.dataset.pl = l._side; }
       }
-      if (l.el.dataset.l !== String(l.level)) l.el.dataset.l = String(l.level);
+      setLv(l, l.level);
       showAt(l, ok);
     }
     // Einheitliche Stufe: passen weniger als 70 % der gewünschten ausführlichen Etiketten, zeigen alle nur das Kurzetikett.
@@ -3613,16 +3858,17 @@
     if (R.lbCap >= 1) {
       if (nWant >= 4 && nGot / nWant < 0.7) { if (++R.lbBad > 4) { R.lbCap = 0; R.lbBad = 0; } } else R.lbBad = 0;
     } else if (++R.lbDry % 40 === 0) {
-      _dry.length = 0; for (const r of R.uiRects) _dry.push(r);
+      _dry.length = 0; for (let i = 0; i < R.uiRects.length; i++) _dry.push(R.uiRects[i]);
       let dw = 0, dg = 0;
-      for (const l of _all) {
-        if (l.route || l.wait) { if (l.shown) _dry.push([l._x - 4, l._y - 4, l._x + l._w + 4, l._y + l._h + 4]); continue; }
+      for (let i = 0; i < _all.length; i++) {
+        const l = _all[i];
+        if (l.route || l.wait) { if (l.shown) prect(_dry, l._x - 4, l._y - 4, l._x + l._w + 4, l._y + l._h + 4); continue; }
         if (!l.vis || !L.labels || l.onRoute || underUi(l.sx, l.sy)) continue;
         const want = wantOf(l), w1 = l.p >= 100 ? Math.max(want, R.compact ? 1 : 2) : Math.min(want, 1);
         if (want >= 1 && l.p < 90) dw++;
-        if (placeMachine(l, w1, _dry, W, H)) { _dry.push([l._x - 4, l._y - 4, l._x + l._w + 4, l._y + l._h + 4]); if (want >= 1 && l.p < 90 && l._lv >= 1) dg++; }
+        if (placeMachine(l, w1, _dry, W, H)) { prect(_dry, l._x - 4, l._y - 4, l._x + l._w + 4, l._y + l._h + 4); if (want >= 1 && l.p < 90 && l._lv >= 1) dg++; }
       }
-      for (const l of _all) if (l.mo && l.el.dataset.l !== String(l.level)) l.el.dataset.l = String(l.level);
+      for (let i = 0; i < _all.length; i++) { const l = _all[i]; if (l.mo) setLv(l, l.level); }
       if (dw === 0 || dg / dw >= 0.8) R.lbCap = 1;
     }
   }
@@ -3703,7 +3949,7 @@
       if (p.vehicle) rows.push(row('Fahrzeug', esc(p.vehicle)));
       rows.push(row('Auslastung heute', F.fmtPct(p.utilToday)));
       rows.push(row('Aufgaben heute', fmtN(p.tasksToday || 0)));
-      return `<div class="h"><div class="t">${esc(p.name)}<small>${esc(p.role)} · ${p.shift === 'F' ? 'Frühschicht' : 'Spätschicht'}</small></div><span class="pill" style="--c:${ROLES[roleOf(p.role)].vest}"><i></i>${esc(lab)}</span></div>
+      return `<div class="h"><div class="t">${esc(p.name)}<small>${esc(p.role)} · ${p.shift === 'F' ? 'Frühschicht' : 'Spätschicht'}</small></div><span class="pill" style="--c:${ROLES[roleOf(p.role)].col}"><i></i>${esc(lab)}</span></div>
         <div class="cz">${esc(p.activity || '')}</div><dl class="dl">${rows.join('')}</dl><div class="ft"><span>Klicken für Details</span></div>`;
     }
     if (h.kind === 'agv') {
@@ -3894,7 +4140,7 @@
     if (dw !== R.drawerW) {
       R.drawerW = dw; R.root.style.setProperty('--dw', dw + 'px'); closeMenus(); layoutModes(); renderSelBar(); renderTip(false);
       // nach der Drawer-Animation sofort neu einpassen (nicht erst nach zwei 4-Hz-Takten)
-      setTimeout(() => { computeUiRects(); if (R.fit && R.ok) { R.fitPend = layoutSig(); checkFit(); } }, 240);
+      setTimeout(() => { computeUiRects(); if (R.fit && R.ok && R.visible) { R.fitPend = layoutSig(); checkFit(); } }, 240);
     }
   }
   // ================================================================== Aktualisierung 4×/s (Daten → Darstellung)
@@ -3990,6 +4236,7 @@
     act.push(R.C.klt, R.C.gb, R.C.rack, R.C.wrap);
     for (const p of R.pick) if (p.userData && p.userData.kind === 'store') act.push(p);
     if (R.route.id && (R.routeAcc = (R.routeAcc || 0) + 1) % 8 === 0) refreshRoute();
+    if (R.tourOn || document.querySelector('.tour-card')) computeUiRects();
     checkFit();
   }
   function applyMachineState(mo, st) {
@@ -4095,23 +4342,39 @@
   /** Pausenplätze im Leitstand: rund um den Pausentisch, danach ein zweiter Ring (die Engine vergibt nur 6 Plätze) */
   const BREAK_SLOTS = (() => {
     const out = [], cx = 59.5, cz = 5.5;
-    for (let k = 0; k < 8; k++) { const a = k * TAU / 8 + PI / 8; out.push({ x: cx + Math.sin(a) * 1.02, z: cz + Math.cos(a) * 1.02 }); }
+    for (let k = 0; k < 8; k++) { const a = k * TAU / 8 + PI / 8; out.push({ x: cx + Math.sin(a) * 1.04, z: cz + Math.cos(a) * 1.04 }); }
     for (let k = 0; k < 14; k++) { const a = k * TAU / 14; const x = cx + Math.sin(a) * 1.85, z = cz + Math.cos(a) * 1.85; if (z > 4.2 && z < 7.6 && x > 57.4 && x < 62.2) out.push({ x, z }); }
     return out;
   })();
+  /** Pausenplatz: stabil je Person (kleinster freier Platz beim ersten Pausen-Sample, frei erst nach der Pause) */
+  function seatOf(id) {
+    const seats = R.breakSeat; let k = seats[id];
+    if (k != null) return k;
+    for (k = 0; ; k++) { let used = false; for (const o in seats) if (seats[o] === k) { used = true; break; } if (!used) break; }
+    seats[id] = k; return k;
+  }
   function sample(S) {
-    let bi = 0;
+    const seats = R.breakSeat || (R.breakSeat = {});
+    for (const id in seats) { const p = S.people[id]; if (!p || p.state !== 'break') { delete seats[id]; if (R.people[id]) R.people[id].seat = -1; } }
     for (const id in R.people) {
       const pe = R.people[id], p = S.people[id];
       const vis = !!p && p.state !== 'offShift' && !p.vehicle;
-      if (vis && !pe.vis) { pe.x = p.pos.x; pe.z = p.pos.z; pe.th = pe.h = p.heading || 0; }
+      if (vis && !pe.vis) { pe.x = p.pos.x; pe.z = p.pos.z; pe.th = pe.h = p.heading || 0; pe.lt = null; }
       pe.vis = vis;
       if (!p) continue;
-      const brk = p.state === 'break' && !p.route && BREAK_SLOTS.length ? BREAK_SLOTS[bi++ % BREAK_SLOTS.length] : null;
-      pe.x0 = pe.x; pe.z0 = pe.z; pe.x1 = brk ? brk.x : p.pos.x; pe.z1 = brk ? brk.z : p.pos.z;
-      if (Math.hypot(pe.x1 - pe.x, pe.z1 - pe.z) > 40) { pe.x = pe.x0 = pe.x1; pe.z = pe.z0 = pe.z1; }
+      let brk = null;
+      if (p.state === 'break' && !p.route && BREAK_SLOTS.length) { pe.seat = seatOf(id); brk = BREAK_SLOTS[pe.seat % BREAK_SLOTS.length]; }
+      // Ziel: Engine-Position bzw. Pausenplatz; große Sprünge (Ankunft am Pausenplatz, Pausenende) werden gegangen,
+      // nicht geschoben – höchstens ~1,6 m je Sim-Sekunde, mit Schrittanimation
+      const dts = pe.lt == null ? 1 : Math.max(0, S.t - pe.lt); pe.lt = S.t;
+      let tx = brk ? brk.x : p.pos.x, tz = brk ? brk.z : p.pos.z, catchUp = false;
+      const dd = Math.hypot(tx - pe.x, tz - pe.z);
+      if (dd > 40) { pe.x = tx; pe.z = tz; }
+      else { const maxS = 1.6 * dts + 0.02; if (dd > maxS) { tx = pe.x + (tx - pe.x) / dd * maxS; tz = pe.z + (tz - pe.z) / dd * maxS; catchUp = true; } }
+      pe.x0 = pe.x; pe.z0 = pe.z; pe.x1 = tx; pe.z1 = tz;
       const mv = Math.hypot(pe.x1 - pe.x0, pe.z1 - pe.z0);
-      pe.moving = mv > 0.02 && (p.state === 'walking' || !!p.route);
+      pe.moving = mv > 0.02 && (p.state === 'walking' || !!p.route || catchUp || !!brk);
+      pe.seated = !!brk && pe.seat < 8 && !pe.moving && Math.hypot(brk.x - pe.x1, brk.z - pe.z1) < 0.06;
       if (pe.moving) pe.th = Math.atan2(pe.x1 - pe.x0, pe.z1 - pe.z0);
       else if (p.state === 'working' && p.task) { const tgt = faceTarget(p); if (tgt) pe.th = Math.atan2(tgt.x - pe.x1, tgt.z - pe.z1); }
       else if (p.state === 'break') pe.th = Math.atan2(59.5 - pe.x1, 5.5 - pe.z1);
@@ -4139,7 +4402,7 @@
       if (mv > 0.02) fe.th = Math.atan2(fe.x1 - fe.x0, fe.z1 - fe.z0);
       fe.driving = f.state === 'driving'; fe.load = f.load;
       const drv = f.driver ? S.people[f.driver] : null, dk = drv ? drv.id : null;
-      if (dk !== fe.driverKey) { fe.driverKey = dk; if (drv) fe.driver.geometry = personGeos(roleOf(drv.role), skinOf(drv.id)).seated; }
+      if (dk !== fe.driverKey) { fe.driverKey = dk; if (drv) fe.driver.geometry = personGeos(roleOf(drv.role), skinOf(drv.id), hairOf(drv.id), femOf(drv.role)).seated; }
       fe.driver.visible = !!drv && R.layers.people;
     }
     for (const mo of R.moList) {
@@ -4166,6 +4429,7 @@
   function onPartDone(mo) {
     if (mo.type === 'mill5') mo.a.palTarget += PI;
     if (mo.type === 'lathe') mo.a.loadT = 0;
+    if (mo.type === 'hobber') mo.a.ringT += TAU / 8;
     const now = R.time;
     if (now - (mo.lastDone || -9) > 1.4) {
       mo.lastDone = now;
@@ -4194,7 +4458,7 @@
     const running = !app.paused;
     // Hallenbeleuchtung: außerhalb der Schichten gedimmt (Geisterschicht – nur die Maschinen leuchten)
     const lt = R.lightT == null ? 1 : R.lightT;
-    if (Math.abs((R.lightK == null ? 1 : R.lightK) - lt) > 0.002) { R.lightK = damp(R.lightK == null ? 1 : R.lightK, lt, 1.6, dt); R.sun.intensity = 1.22 * R.lightK; R.hemi.intensity = 0.5 * (0.35 + 0.65 * R.lightK); R.fill.intensity = 0.3 * R.lightK;
+    if (Math.abs((R.lightK == null ? 1 : R.lightK) - lt) > 0.002) { R.lightK = damp(R.lightK == null ? 1 : R.lightK, lt, 1.6, dt); R.sun.intensity = LIGHT.sun * R.lightK; R.hemi.intensity = LIGHT.hemi * (0.35 + 0.65 * R.lightK); R.fill.intensity = LIGHT.fill * R.lightK;
       const night = Math.max(0, Math.min(1, (1 - R.lightK) / 0.58));
       if (R.envMats) for (const m of R.envMats) m.envMapIntensity = m.userData.envBase * (1 - 0.6 * night);
       if (R.poolMat) { R.poolMat.opacity = 0.5 * night; R.pools.visible = night > 0.02; } }
@@ -4235,6 +4499,8 @@
       pe.h += angD(pe.h, pe.th) * (1 - Math.exp(-dt * 10));
       if (!show) continue;
       pe.g.position.set(pe.x, 0, pe.z); pe.g.rotation.y = pe.h;
+      if (pe.seated !== pe.sitOn) { pe.sitOn = pe.seated; pe.sit.visible = pe.seated; pe.body.visible = pe.legL.visible = pe.legR.visible = pe.armL.visible = pe.armR.visible = !pe.seated; }
+      if (pe.seated) continue;
       const walking = pe.moving && running;
       pe.walk = damp(pe.walk, walking ? 1 : 0, 8, dt);
       pe.work = damp(pe.work, pe.working && !walking ? 1 : 0, 5, dt);
@@ -4302,15 +4568,19 @@
       const wk = Math.max(1, cd * 0.0065 / 0.42) * (1 + 0.5 * fl);
       for (const key in R.flowMats) { const m = R.flowMats[key]; m.uniforms.uHalfW.value = m.userData.w0 * 0.5 * wk; }
       R.flowMats.wait.uniforms.uOp.value = 0.4 + 0.5 * fl;
-      const ss = Math.max(1.1, cd * 0.016); for (const sp of R.stops) if (sp.visible) sp.scale.set(ss, ss, 1); }
+      const ss = Math.max(1.1, cd * 0.016); R.stopS = ss;
+      for (const sp of R.stops) if (sp.visible) sp.scale.set(ss, ss, 1);
+      for (const key in R.wtLb) { const l = R.wtLb[key]; if (l.stop) l.anchor.y = 1.55 + ss * 0.5; } }
     netPulses(dt);
     pulses(dt, t);
     // Hover (Raycast höchstens jedes zweite Bild)
     R.hoverN = (R.hoverN || 0) + 1;
     if (R.hoverDirty && !R.down && R.mouse.in && !R.lbHover && R.hoverN % 2 === 0) { R.hoverDirty = false; setHover(pickAt(R.mouse.x, R.mouse.y)); }
     else if (R.down) { if (R.hover) setHover(null); }
+    // Schatten nur bei Änderung neu rechnen (Zustandswechsel, Wände, Lager, Werkstücke) – bewegte Baugruppen,
+    // Personen, Fahrzeuge und Behälter werfen keine Kartenschatten (Kontaktschatten/AO genügen); Sicherheitslauf alle 10 s
     R.shadowAcc += dt;
-    if (R.shadowAcc > 0.25 || (R.shadowDirty && R.shadowAcc > 0.05)) { R.shadowAcc = 0; R.shadowDirty = false; R.renderer.shadowMap.needsUpdate = true; }
+    if ((R.shadowDirty && R.shadowAcc > 0.12) || R.shadowAcc > 10) { R.shadowAcc = 0; R.shadowDirty = false; R.renderer.shadowMap.needsUpdate = true; }
     adaptPerf(dt);
     R.renderer.render(R.scene, R.camera);
     placeLabels();
@@ -4329,7 +4599,6 @@
       if (Math.abs(d.f - tg) > 0.002) {
         d.f = damp(d.f, tg, 3.5, dt); if (Math.abs(d.f - tg) < 0.003) d.f = tg;
         if (d.vertical) d.obj.position.y = d.y0 + d.lift * d.f; else if (d.parts) for (const p of d.parts) p.obj.position.x = p.x0 + p.slide * d.f; else d.obj.position.x = d.x0 + d.slide * d.f;
-        R.shadowDirty = true;
       }
     }
     const it = mo.innerTarget != null ? mo.innerTarget : 0.1;
@@ -4386,14 +4655,16 @@
         break;
       }
       case 'hobber': {
-        a.hob.rotation.x += dt * 28 * w; a.table.rotation.y += dt * 1.3 * w;
-        a.head.position.y = damp(a.head.position.y, a.fy + 0.85 + (cutting ? 0.22 - mo.prog * 0.3 : 0.28), 4, dt);
+        a.hob.rotation.z += dt * 28 * w; a.table.rotation.y += dt * 1.3 * w;
+        // Axialvorschub durch die Zahnbreite; ohne Schnitt fährt der Kopf hoch (Rohling frei für den Ringlader)
+        a.head.position.y = damp(a.head.position.y, a.hy0 + (cutting ? 0.06 - mo.prog * 0.12 : 0.34), 4, dt);
+        if (Math.abs(a.ringA - a.ringT) > 0.001) { a.ringA = damp(a.ringA, a.ringT, 2.5, dt); a.ring.rotation.y = a.ringA; }
         break;
       }
       case 'mill5': {
         a.tool.rotation.y += dt * 40 * w;
         if (cutting) { a.spindle.position.x = a.sx + Math.sin(t * 0.9) * 0.16; a.spindle.position.y = a.sy + Math.sin(t * 1.7) * 0.05; a.table.rotation.y += dt * 0.25; }
-        if (Math.abs(a.palRot - a.palTarget) > 0.001) { a.palRot = damp(a.palRot, a.palTarget, 2.2, dt); if (Math.abs(a.palRot - a.palTarget) < 0.002) a.palRot = a.palTarget; a.pal.rotation.y = a.palRot; R.shadowDirty = true; }
+        if (Math.abs(a.palRot - a.palTarget) > 0.001) { a.palRot = damp(a.palRot, a.palTarget, 2.2, dt); if (Math.abs(a.palRot - a.palTarget) < 0.002) a.palRot = a.palTarget; a.pal.rotation.y = a.palRot; }
         break;
       }
       case 'mill3': {
@@ -4468,7 +4739,8 @@
     R.perfAcc += dt; R.perfN++;
     if (R.perfAcc < 2) return;
     const avg = R.perfAcc / R.perfN; R.perfAcc = 0; R.perfN = 0;
-    if (avg > 0.034 && R.dpr > 1) { R.dpr = Math.max(1, R.dpr - 0.25); resize(true); }
+    if (avg > 0.034 && R.dpr > 1) { R.dpr = Math.max(1, R.dpr - 0.25); shrinkShadows(); resize(true); }
+    else if (avg > 0.05) shrinkShadows();
     else if (avg < 0.0125 && R.dpr < R.dprMax) { R.perfHigh++; if (R.perfHigh > 3) { R.perfHigh = 0; R.dpr = Math.min(R.dprMax, R.dpr + 0.25); resize(true); } }
   }
   function resize(force) {
@@ -4501,7 +4773,7 @@
     const box = el('div', { class: 'h3-fb' });
     box.innerHTML = `<div class="card"><div class="card-b" style="padding:24px 26px"><span class="ic">${icon('cube', 24)}</span><h3>3D-Ansicht nicht verfügbar</h3>
       <p>${esc(msg || 'Dieser Browser oder Rechner unterstützt kein WebGL (3D-Grafik). Alle Live-Daten der Halle – Maschinen, Aufträge, Personal und Transporte – stehen im Leitstand und in den Ressourcen-Ansichten zur Verfügung.')}</p>
-      <div class="row"><button class="btn primary" data-go>${icon('grid', 15)}Zum Leitstand</button><span class="muted" style="font-size:12px">Tipp: Hardwarebeschleunigung im Browser aktivieren.</span></div></div></div>`;
+      <div class="row"><button class="btn primary" data-go>${icon('grid', 15)}Zum Leitstand</button><span class="muted" style="font-size:var(--fs-sm)">Tipp: Hardwarebeschleunigung im Browser aktivieren.</span></div></div></div>`;
     box.querySelector('[data-go]').onclick = () => WF.app.navigate('leitstand');
     root.append(box);
   }
@@ -4584,7 +4856,8 @@
     R.lastT = -1; R.lastCounter = {}; R.rawSig = null;
     for (const id in R.agvs) R.agvs[id].init = false;
     if (R.fork) R.fork.init = false;
-    for (const id in R.people) R.people[id].vis = false;
+    for (const id in R.people) { R.people[id].vis = false; R.people[id].seat = -1; }
+    R.breakSeat = {};
     for (const [, fl] of R.flowLines) for (const m of fl.meshes) dropMesh(m);
     R.flowLines.clear();
     for (const [, wl] of R.waitLines) dropMesh(wl.m);
@@ -4622,5 +4895,8 @@
     _debug: R,
     /** Test: Kamera noch in Bewegung oder Einpassung ausstehend */
     _busy: () => !!(R.tween || R.introPending || R.fitPend || (R.fit && layoutSig() !== R.fit.sig)),
+    /** Test: Voreinstellung bzw. feste Kamera (Ziel x/z, Abstand, Polar-/Azimutwinkel in Grad) */
+    _preset: (id) => preset(id),
+    _cam: (tx, tz, r, phi, th) => { if (!R.ok) return; dropFit(); R.follow = null; R.tween = null; R.introPending = false; setCam({ tx, ty: 0, tz, r, phi: phi * DEG, th: th * DEG }); R.controls.update(); },
   };
 })();
