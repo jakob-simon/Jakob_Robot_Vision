@@ -1895,7 +1895,7 @@
     if (ok) {
       op.good++; countGood(m, 1, o, i); addToOutput(m, o, i, 1);
       m.released = true; S.today.fpiOk++;
-      ev('fpiOk', 'ok', { kind: 'machine', id: m.id }, `${m.id}: ${f.local ? 'erstes Teil nach Werkzeugwechsel' : 'Erstteil'} ${o.id} AG ${r.seq} i.O. (${ch.name} ${fmtVal(f.value, ch)} ${ch.unit}) – Serie freigegeben durch ${sn(p.name)}`, { orderId: o.id, seq: r.seq, value: f.value, local: !!f.local });
+      GDIRTY = true; ev('fpiOk', 'ok', { kind: 'machine', id: m.id }, `${m.id}: ${f.local ? 'erstes Teil nach Werkzeugwechsel' : 'Erstteil'} ${o.id} AG ${r.seq} i.O. (${ch.name} ${fmtVal(f.value, ch)} ${ch.unit}) – Serie freigegeben durch ${sn(p.name)}`, { orderId: o.id, seq: r.seq, value: f.value, local: !!f.local });
     } else {
       op.scrap++; S.today.fpiNok++;
       scrapParts(o, i, 1, 'Erstteil n.i.O.', m, `${ch.name} ${fmtVal(f.value, ch)} ${ch.unit} außerhalb ${fmtVal(ch.nominal + ch.tolMinus, ch)} … ${fmtVal(ch.nominal + ch.tolPlus, ch)}`);
@@ -3521,7 +3521,7 @@
       // Werkzeug-Meldungen jede Sim-Minute aus der aktuellen Planung neu formulieren (Uhrzeit driftet sonst während langer Teile)
       if (!WARM) refreshToolNotes();
       // Geisterschicht-Check: ab 1 h vor Schichtende alle 10 min bzw. sofort nach einer Änderung; nachts Stillstand ergänzen
-      if (cur) { if (S.t >= cur.end - 3600 && (S.t % 600 === 0 || GDIRTY)) { GDIRTY = false; ghostCheck(); } }
+      if (cur) { if (S.t >= cur.end - 3600 && (S.t % 600 === 0 || GDIRTY || S.t === cur.end - 60)) { GDIRTY = false; ghostCheck(); } }
       else if (S.t % 600 === 0 && hasOpen('ghost:check')) ghostCompose();
     }
   }
@@ -3800,10 +3800,21 @@
       sugg = brief(cause, fits(recOf(true)) ? recOf(true) : recOf(false));
       for (const e of stops) if (e.action && actions.length < 3) actions.push({ label: e.actionLabel || `${e.machineId} vorbereiten`, action: e.action });
     } else {
-      const anyTool = stops.some(e => e.reason === 'tool');
+      // steht eine Maschine nachts aus einem anderen Grund als angekündigt, gilt der tatsächliche Grund
+      const nightRec = (e) => {
+        const st = S.machines[e.machineId].state, id = e.machineId;
+        if (e.waitingSince == null) return e.recNight || id;
+        if (st === 'fault' && e.reason !== 'fault') return `${id} Störung beheben`;
+        if (st === 'waitTool' && e.reason !== 'tool') return `${id} Werkzeug wechseln`;
+        if (st === 'starved' && !['bars', 'input', 'material'].includes(e.reason)) return `${id} Material bereitstellen`;
+        if (st === 'blocked' && e.reason !== 'output') return `${id} Ausgang leeren`;
+        return e.recNight || id;
+      };
       const RW = { tool: 'Standzeit zu kurz', bars: 'Stangen leer', material: 'Material fehlt', input: 'Teile fehlen', output: 'Ausgang voll', fpi: 'Erstteil offen', fault: 'Störung' };
-      const rs = [...new Set(stops.map(e => RW[e.reason] || e.reason))];
-      const cause = `${rs.slice(0, 2).join(', ')} – niemand im Haus bis ${nx}`, first = `${nx} als Erstes ${stops.map(e => (e.recNight || e.machineId).replace(/\s*\([^)]*\)/g, '')).join(', ')}`;
+      const liveR = (e) => { if (e.waitingSince == null) return e.reason; const st = S.machines[e.machineId].state; return st === 'fault' ? 'fault' : st === 'waitTool' ? 'tool' : st === 'starved' ? (['bars', 'input', 'material'].includes(e.reason) ? e.reason : 'material') : st === 'blocked' ? 'output' : e.reason; };
+      const rs = [...new Set(stops.map(e => RW[liveR(e)] || e.reason))];
+      const anyTool = stops.some(e => liveR(e) === 'tool');
+      const cause = `${rs.slice(0, 2).join(', ')} – niemand im Haus bis ${nx}`, first = `${nx} als Erstes ${stops.map(e => nightRec(e).replace(/\s*\([^)]*\)/g, '')).join(', ')}`;
       const full = `${first}${anyTool ? '; künftig vor Schichtende vorbeugend wenden/wechseln' : ''}`;
       sugg = brief(cause, `Ursache: ${cause}. Empfehlung: ${full}.`.length <= 190 ? full : first);
     }
