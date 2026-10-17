@@ -8,7 +8,7 @@
    Personen-Historie): Stichprobe bei jedem Sim-Ereignis (auch während des Vorrechnens) und alle 250 ms. Je Abschnitt
    wird der Zuwachs des Engine-Zählers workSec mitgeschrieben – die dunkelgrüne Arbeitszeit im Verlauf ist damit
    exakt die Arbeitszeit der Engine (eine Wahrheit mit Kachel „Aufgabenzeit“ und Aufgabenzeit-Anteil).
-   Öffentlich: WF.people = { whereOf, qualified, coverage, bottlenecks, timeline, recentTasks, workCheck }. */
+   Öffentlich: WF.people = { whereOf, qualified, coverage, bottlenecks, timeline, recentTasks, workCheck, displayState }. */
 (function () {
   const WF = window.WF;
   const { esc, icon } = WF.ui;
@@ -1708,5 +1708,7 @@
   });
 
   WF.people = { whereOf, qualified: (personId, task) => { const pp = P().people.find(x => x.id === personId); return !!(pp && task && qualified(pp, task)); },
-    coverage, bottlenecks, timeline, recentTasks, workCheck };
+    coverage, bottlenecks, timeline, recentTasks, workCheck,
+    /** Anzeige-Zustand wie in der Personalansicht: { key ('working'|'tending'|'lead'|'idle'|…), label, machines (betreute, laufende) } */
+    displayState: (personId) => { const p = S() && S().people[personId]; if (!p) return null; const k = dstate(p), run = k === 'tending' ? tendOf(p) : null; return { key: k, label: run ? tendLabel(run) : pLabel(k), machines: run || [] }; } };
 })();

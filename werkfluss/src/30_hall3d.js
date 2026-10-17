@@ -4274,7 +4274,18 @@
     if (R.selBox.visible) R.selBox.material.opacity = 0.65 + 0.35 * Math.sin(t * 3.2);
     // Flussnetz nur in der Übersicht: aus der Nähe würden die Bögen als breite Lichtbänder vor der Kamera stehen
     { const cd = R.camera.position.distanceTo(R.controls.target), k = Math.max(0, Math.min(1, (cd - 34) / 26));
-      R.netK = k; R.netMat.uniforms.uOp.value = 0.21 * k * (R.route && R.route.id ? 0.3 : 1); R.netGroup.visible = k > 0.02; }
+      if (R.flowFlash > 0) R.flowFlash = Math.max(0, R.flowFlash - dt);
+      const fl = Math.min(1, R.flowFlash / 0.6);   // „Fluss“-Hervorhebung nach dem Einschalten der Ebene
+      R.netK = Math.max(k, fl * 0.85);
+      R.netMat.uniforms.uOp.value = Math.max(0.45 * k * (R.route && R.route.id ? 0.3 : 1), 0.95 * fl);
+      R.netMat.uniforms.uR.value = Math.max(0.03, cd * 0.0012);
+      R.netEnds.material.opacity = 0.85 * R.netK * (R.route && R.route.id ? 0.35 : 1);
+      R.netGroup.visible = R.netK > 0.02;
+      // Bänder wachsen mit dem Abstand (Mindestbreite w0), damit Transporte aus der Übersicht sichtbar bleiben
+      const wk = Math.max(1, cd * 0.0065 / 0.42) * (1 + 0.5 * fl);
+      for (const key in R.flowMats) { const m = R.flowMats[key]; m.uniforms.uHalfW.value = m.userData.w0 * 0.5 * wk; }
+      R.flowMats.wait.uniforms.uOp.value = 0.4 + 0.5 * fl;
+      const ss = Math.max(1.1, cd * 0.016); for (const sp of R.stops) if (sp.visible) sp.scale.set(ss, ss, 1); }
     netPulses(dt);
     pulses(dt, t);
     // Hover (Raycast höchstens jedes zweite Bild)
@@ -4447,24 +4458,23 @@
     if (!R.root || !R.renderer) return;
     const w = R.root.clientWidth, h = R.root.clientHeight;
     if (!w || !h) return;
-    if (!force && w === R.w && h === R.h) return;
+    const changed = w !== R.w || h !== R.h;
+    if (!force && !changed) return;
     R.w = w; R.h = h;
     R.renderer.setPixelRatio(R.dpr);
     R.renderer.setSize(w, h, false);
     R.camera.aspect = w / h; R.camera.updateProjectionMatrix(); applyViewOffset();
     R.pulse.mat.uniforms.uScale.value = h * R.dpr / (2 * Math.tan(R.camera.fov * DEG / 2));
+    if (!changed) return;
     const mob = w <= 640;
-    if (mob !== R.mobile) { R.mobile = mob; R.root.classList.toggle('m', mob); closeSheets(); }
+    if (mob !== R.mobile) { R.mobile = mob; if (R.ui.hint) R.ui.hint.innerHTML = hintHtml(); }
     const short = !mob && h < 640;
     if (short !== R.short) { R.short = short; R.root.classList.toggle('short', short); }
-    R.root.classList.toggle('nomap', mob || short);
-    R.root.classList.toggle('narrow', w - (R.drawerW || 0) < 1060);
-    computeUiRects();
+    syncDrawer();
+    layoutModes();
     for (const id in R.lb) R.lb[id].sizes = {};
-    // Wechsel Hoch-/Querformat oder Telefon/Desktop: aktive Kamera-Voreinstellung neu einpassen
-    const fmt = (mob ? 'm' : 'd') + (w / h < 0.95 ? 'p' : 'l');
-    if (R.fmt && fmt !== R.fmt && R.preset && !R.tween && !R.introPending) preset(R.preset, true);
-    R.fmt = fmt;
+    // neue Größe: aktive Einpassung (Voreinstellung, Route, Station) sofort neu rechnen
+    if (R.fit && !R.introPending && R.ok) applyFit(true);
   }
 
   // ================================================================== Aufbau / Lebenszyklus
@@ -4503,7 +4513,7 @@
     R.canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); R.ok = false; }, false);
     R.canvas.addEventListener('webglcontextrestored', () => { R.ok = true; R.shadowDirty = true; }, false);
     root.append(R.canvas, el('div', { class: 'h3-vig', 'aria-hidden': 'true' }));
-    R.mobile = (root.clientWidth || window.innerWidth) <= 640; root.classList.toggle('m', R.mobile);
+    R.mobile = (root.clientWidth || window.innerWidth) <= 640;
     R.w = root.clientWidth || 1; R.h = root.clientHeight || 1;
     const t0 = performance.now();
     try {
@@ -4527,6 +4537,7 @@
       buildContainers(); buildFlow(); buildPulses(); buildHighlights();
       buildOverlays(root); buildLabels();
       bindPointer();
+      layoutModes();
       // Materialien mit Umgebungsreflexion sammeln (nachts wird die Reflexion mit dem Licht gedimmt)
       R.envMats = []; const seenM = new Set();
       R.scene.traverse(o => { const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : []; for (const m of ms) if (m && m.isMeshStandardMaterial && !seenM.has(m)) { seenM.add(m); m.userData.envBase = m.envMapIntensity; R.envMats.push(m); } });
@@ -4549,7 +4560,7 @@
     WF.bus.on('settings', () => { if (R.ok) setTimeout(() => { resize(true); }, 60); });
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (R.ok && !R.fontsDone) { R.fontsDone = true; R.redrawMarks(); for (const id in R.lb) R.lb[id].sizes = {}; } });
     if (WF.app.selected) applySelection(WF.app.selected);
-    setTimeout(hideHint, 15000);
+    setTimeout(hideHint, isTouch() ? 7000 : 15000);
   }
   function onReset() {
     if (!R.ok) return;
