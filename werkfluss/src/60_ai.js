@@ -807,7 +807,18 @@
       if (mv.inCap > 0 || mv.outCap > 0) a.md.push(`- Puffer: ${mv.inCap > 0 ? `Eingang ${mv.input.length}/${mv.inCap} Behälter (${stk(qty(mv.input))}), ` : ''}Ausgang ${mv.output.length}/${mv.outCap}${mv.inCap > 0 ? '' : ' Behälter'} (${stk(qty(mv.output))}).`);
       if (mv.barStockM != null) a.md.push(`- Stangenmagazin: ${nm(mv.barStockM, 1)} m ${mv.barMaterial || ''} (nachgeladen wird ab ${nm(mv.barReorderM, 1)} m).`);
       if (mv.queue && mv.queue.length) a.md.push(`- Als Nächstes: ${mv.queue.slice(0, 2).map(q => `${q.orderId} AG ${q.seq} „${q.op}“ (${q.why})`).join('; ')}.`);
-      if (focus !== 'eta') a.md.push(`- Heute: OEE ${pct(mv.oeeToday && mv.oeeToday.oee, 0)}, ${pl(mv.goodToday, 'Gutteil', 'Gutteile')}, ${nm(mv.scrapToday)} Ausschuss, Stillstandskosten ${eur(mv.lossEurToday)} (Satz ${eur(mv.rate)}/h).`);
+      const todayTxt = `- Heute: OEE ${pct(mv.oeeToday && mv.oeeToday.oee, 0)}, ${pl(mv.goodToday, 'Gutteil', 'Gutteile')}, ${nm(mv.scrapToday)} Ausschuss, Stillstandskosten ${eur(mv.lossEurToday)} (Satz ${eur(mv.rate)}/h).`;
+      if (!focus || focus === 'full') {
+        // Kennzahlen-Leiste statt Textzeile (im kopierten Text bleibt die Zeile erhalten)
+        const oee = mv.oeeToday && mv.oeeToday.oee;
+        a.stats = [
+          { l: 'Status', v: stLabel(mv.state), s: 'seit ' + durR(mv.sinceSec), c: mv.state === 'fault' ? 'crit' : WAIT[mv.state] ? 'warn' : mv.state === 'running' ? 'ok' : 'info' },
+          o ? { l: 'AG ' + o.seq + ' · Teile', v: nm(mv.partsDone) + '/' + nm(mv.partsTotal), s: mv.etaOpEnd ? 'fertig ca. ' + tc(mv.etaOpEnd) : o.id } : { l: 'Auftrag', v: '–', s: mv.queue && mv.queue.length ? 'als Nächstes ' + mv.queue[0].orderId : 'nichts eingeplant' },
+          { l: 'OEE heute', v: oee != null ? pct(oee, 0) : '–', s: pl(mv.goodToday, 'Gutteil', 'Gutteile') + (mv.scrapToday ? ' · ' + nm(mv.scrapToday) + ' Ausschuss' : ''), c: oee == null ? '' : oee >= TARGET_OEE ? 'ok' : 'warn' },
+          { l: 'Stillstand', v: eur(mv.lossEurToday), s: 'heute · ' + eur(mv.rate) + '/h', c: 'info' },
+        ];
+        SLOT(a, 'today', todayTxt, null);
+      } else if (focus !== 'eta') a.md.push(todayTxt);
     }
     // Auswirkung (Störung/Wartezeit oder ausdrücklich gefragt)
     if (focus === 'impact' || focus === 'full' || fi || (waiting && mv.sinceSec >= 300)) {
@@ -2384,6 +2395,7 @@
   .ai-sys .ico{flex:none}
   .ai-sys.ok .ico{color:var(--st-run)} .ai-sys.warn .ico{color:var(--st-wait)}
   .btn-ai.ai-on{background:color-mix(in srgb,var(--accent) 26%,var(--card));box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent) inset}
+  .ai-slot:empty{display:none}
   /* Werkzeug-Standzeiten */
   .ai-tools{display:grid;gap:8px;margin:4px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:color-mix(in srgb,var(--card2) 70%,transparent)}
   .ai-tl .h{display:flex;align-items:baseline;gap:8px;min-width:0;font-size:12.5px;line-height:18px}
@@ -2833,7 +2845,7 @@
         <div class="s"><span>${esc(nm(w, 0))} % Verschleiß</span>${t.tag ? `<span class="tg">${icon('wrench', 11)}${esc(t.tag)}</span>` : ''}</div></div>`;
     }).join('')}</div>`;
   }
-  const SLOT_HTML = { route: routeHTML, tools: toolsHTML };
+  const SLOT_HTML = { route: routeHTML, tools: toolsHTML, today: () => '' };
   const durShort = (sec) => { const m = Math.round(sec / 60); if (m < 60) return m + ' min'; const h = Math.floor(m / 60), r = m % 60; return h >= 24 ? (Math.round(h / 24 * 10) / 10).toString().replace('.', ',') + ' d' : h + ' h' + (r ? ' ' + String(r).padStart(2, '0') : ''); };
   function sourcesHTML(src) {
     if (!src || !src.length) return '';

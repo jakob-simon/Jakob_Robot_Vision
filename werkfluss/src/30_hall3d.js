@@ -666,6 +666,7 @@
       woodDark: std(0x9a7448, 0.86),
       carton: std(0xbb8d58, 0.86),
       wrap: std(0xe8edf1, 0.2, 0, { transparent: true, opacity: 0.9, envMapIntensity: 1.4 }),
+      film: std(0xdfe8ee, 0.12, 0, { transparent: true, opacity: 0.32, depthWrite: false, envMapIntensity: 2.0 }),
       klt: std(0xffffff, 0.5, 0, { side: THREE.DoubleSide }),
       kltB: std(0x2f6fc4, 0.5),
       granite: std(0x2b2f34, 0.24, 0.05, { envMapIntensity: 1.3 }),
@@ -713,7 +714,7 @@
     for (const k in M) { const m = M[k]; if (m && m.isMeshStandardMaterial && !m.map && !m.transparent && !m.vertexColors && m.emissive && m.emissive.getHex() === 0) m.userData.batch = true; }
     M.batch = batchMaterial();
     M.ledG.color.multiplyScalar(1.6); M.ledB.color.multiplyScalar(1.6);
-    for (const k of ['glass', 'glassRoom', 'wrap']) M[k].userData.noShadow = true;
+    for (const k of ['glass', 'glassRoom', 'wrap', 'film']) M[k].userData.noShadow = true;
   }
 
   /** Ein Material für viele Teile: Grundfarbe, Rauheit und Metallgrad kommen je Ecke aus der Geometrie */
@@ -777,7 +778,7 @@
     WE: { fill: 'rgba(96,165,250,.10)', line: 'rgba(150,190,250,.6)', hatch: true },
     EXT: { fill: 'rgba(255,157,61,.10)', line: 'rgba(255,170,90,.7)', hatch: true },
     SPERR: { fill: 'rgba(248,113,113,.14)', line: 'rgba(248,113,113,.75)', hatch: true },
-    VERSAND: { fill: 'rgba(52,211,153,.07)', line: 'rgba(110,220,170,.55)', hatch: false },
+    VERSAND: { fill: 'rgba(52,211,153,.045)', line: 'rgba(110,220,170,.5)', hatch: false },
     CRIB: { fill: 'rgba(232,238,244,.16)' }, MAINT: { fill: 'rgba(232,238,244,.10)' }, OFFICE: { fill: 'rgba(232,238,244,.20)' }, QS: { fill: 'rgba(236,241,246,.24)' }, M13: { fill: 'rgba(232,238,244,.10)' },
   };
   /** Stellplatz-Raster (wie die Engine: 3 je Reihe, 0,9 m), 2. Reihe zum Gang hin statt in die Maschine */
@@ -2146,9 +2147,9 @@
       [gBox(), xf(0, 0.08, -0.5, 0, 0, 0, 0.82, 0.12, 0.1)], [gBox(), xf(0, 0.08, 0.5, 0, 0, 0, 0.82, 0.12, 0.1)],
       ...[[-0.36, -0.65], [0.36, -0.65], [-0.36, 0.65], [0.36, 0.65]].map(([x, z]) => [gBox(), xf(x, 0, z, 0, 0, 0, 0.06, 0.52, 0.06)])])), M.blueRack, CMAX.rack);
     C.shaft = inst(cache('shaftg', () => new THREE.CylinderGeometry(1, 1, 1, 22).rotateX(PI / 2)), M.steel, CMAX.rack * 3);
-    C.wrap = inst(gRBox(1.12, 1, 0.76, 0.05), M.wrap, CMAX.wrap);
+    C.wrap = inst(gRBox(1.16, 1, 0.8, 0.05), M.film, CMAX.wrap, false); C.wrap.renderOrder = 2;
     C.pal = inst(cache('palg', () => { const b = new Builder(); palletStatic(b, 0, 0, 0, 0); const l = []; for (const v of b.map.values()) l.push(...v); b.map.clear(); return mergeGeos(l); }), M.wood, CMAX.wrap);
-    C.box = inst(gRBox(0.5, 1, 0.36, 0.02), M.carton, CMAX.wrap * 2);
+    C.box = inst(cache('ctnL', () => mergeGeos([[-0.29, -0.195], [0.29, -0.195], [-0.29, 0.195], [0.29, 0.195]].map(([x, z]) => [gRBox(0.56, 0.29, 0.37, 0.015), xf(x, 0, z)]))), M.carton, CMAX.wrap * 3);
     const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false });
     C.ring = inst(cache('cring', () => new THREE.RingGeometry(0.6, 0.72, 40).rotateX(-PI / 2)), ringMat, 60, false); C.ring.renderOrder = 3; C.ring.receiveShadow = false;
     C.wait = inst(cache('wring', () => new THREE.RingGeometry(0.5, 0.6, 36).rotateX(-PI / 2)), new THREE.MeshBasicMaterial({ color: 0xff9d3d, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false }), 40, false); C.wait.renderOrder = 3; C.wait.receiveShadow = false;
@@ -2222,14 +2223,14 @@
     }
     for (const v of C.vers) {
       if (n.wrap >= CMAX.wrap) break;
-      const i = n.wrap++, p = v.slot, layers = clamp(Math.ceil(v.n / 2), 1, 3), hgt = 0.32 + layers * 0.3;
+      const i = n.wrap++, p = v.slot, layers = clamp(Math.ceil(v.n / 2), 1, 3), hgt = layers * 0.3 + 0.03;
       C.byInst.wrap[i] = v.last;
-      C.pal.setMatrixAt(i, xf(p.x, 0, p.z)); C.wrap.setMatrixAt(i, xf(p.x, 0.144, p.z, 0, 0, 0, 1, hgt, 1));
-      if (boxes.n < CMAX.wrap * 2) C.box.setMatrixAt(boxes.n++, xf(p.x - 0.28, 0.144 + hgt, p.z, 0, 0, 0, 1, 0.001, 1));
+      C.pal.setMatrixAt(i, xf(p.x, 0, p.z)); C.wrap.setMatrixAt(i, xf(p.x, 0.142, p.z, 0, 0, 0, 1, hgt, 1));
+      for (let L = 0; L < layers && boxes.n < CMAX.wrap * 3; L++) C.box.setMatrixAt(boxes.n++, xf(p.x, 0.146 + L * 0.3, p.z));
       if (hl && v.order === hl && rings.n < 60) { const s = 1.5 + Math.sin(t * 4) * 0.08; C.ring.setMatrixAt(rings.n++, xf(p.x, 0.03, p.z, 0, 0, 0, s, 1, s)); }
     }
-    C.klt.count = C.kltFill.count = n.klt; C.gb.count = C.gbBase.count = C.gbFill.count = n.gb; C.rack.count = n.rack; C.shaft.count = sh.n; C.wrap.count = C.pal.count = n.wrap; C.box.count = 0; C.ring.count = rings.n;
-    for (const m of [C.klt, C.kltFill, C.gb, C.gbBase, C.gbFill, C.rack, C.shaft, C.wrap, C.pal, C.ring]) m.instanceMatrix.needsUpdate = true;
+    C.klt.count = C.kltFill.count = n.klt; C.gb.count = C.gbBase.count = C.gbFill.count = n.gb; C.rack.count = n.rack; C.shaft.count = sh.n; C.wrap.count = C.pal.count = n.wrap; C.box.count = boxes.n; C.ring.count = rings.n;
+    for (const m of [C.klt, C.kltFill, C.gb, C.gbBase, C.gbFill, C.rack, C.shaft, C.wrap, C.pal, C.box, C.ring]) m.instanceMatrix.needsUpdate = true;
     if (C.klt.instanceColor) C.klt.instanceColor.needsUpdate = true;
     for (const k in n) C.byInst[k].length = n[k];
     let w = 0;
@@ -2588,6 +2589,7 @@
     const p = PRESETS.find(x => x.id === id) || PRESETS[0];
     R.preset = p.id; R.follow = null;
     const dst = { tx: p.t[0], ty: p.t[1], tz: p.t[2], r: p.r * mobK(), phi: p.phi * DEG, th: p.th * DEG };
+    if (R.w / R.h < 0.8 && p.id === 'uebersicht') { dst.th = 74 * DEG; dst.phi = 50 * DEG; dst.r = 112; dst.tx = 33; dst.tz = 21; }
     if (instant) { setCam(dst); R.controls.update(); } else goCam(dst);
     markPresets(); renderSelBar();
   }
@@ -3177,8 +3179,8 @@
     const ui = R.ui.st, sh = sim.shift(), P = WF.profile;
     const dr = document.getElementById('drawer'), dw = dr && dr.classList.contains('open') && !R.mobile ? Math.round(dr.getBoundingClientRect().width) : 0;
     if (dw !== R.drawerW) { R.drawerW = dw; R.root.style.setProperty('--dw', dw + 'px'); R.root.classList.toggle('narrow', R.w - dw < 1060); closeMenus(); setTimeout(computeUiRects, 260); }
-    let run = 0, flt = 0, wait = 0;
-    for (const id of P.machines) { const st = S.machines[id] ? S.machines[id].state : 'idle'; if (st === 'running') run++; else if (st === 'fault') flt++; else if ((WF.STATE[st] || {}).group === 'wait') wait++; }
+    let run = 0, flt = 0, wait = 0, setup = 0, idle = 0;
+    for (const id of P.machines) { const st = S.machines[id] ? S.machines[id].state : 'idle', g = (WF.STATE[st] || {}).group; if (st === 'running') run++; else if (g === 'fault') flt++; else if (g === 'wait') wait++; else if (g === 'setup') setup++; else idle++; }
     let duty = 0, brk = 0, walk = 0;
     for (const id in S.people) { const p = S.people[id]; if (p.state === 'offShift') continue; duty++; if (p.state === 'break') brk++; else if (p.state === 'walking' || p.state === 'driving') walk++; }
     let trOpen = 0, trAgv = 0, trFork = 0, trWait = 0;
@@ -3193,7 +3195,8 @@
     ui.live.classList.toggle('paused', !!WF.app.paused);
     if (ui.live._p !== !!WF.app.paused) { ui.live._p = !!WF.app.paused; ui.live.innerHTML = `<i></i>${WF.app.paused ? 'Pausiert' : 'Live'}`; }
     set('run', `${run}<small>/${P.machines.length}</small>`, true);
-    set('runS', flt ? `${plural(flt, 'Störung', 'Störungen')}${wait ? ' · ' + wait + ' wartend' : ''}` : wait ? `${wait} wartend` : 'keine Störung');
+    const rs = []; if (flt) rs.push(plural(flt, 'Störung', 'Störungen')); if (wait) rs.push(wait + ' wartend'); if (setup) rs.push(setup + ' Rüsten'); if (idle) rs.push(idle + ' bereit');
+    set('runS', rs.slice(0, 2).join(' · ') || 'alle in Produktion'); if (ui.runS.title !== rs.join(' · ')) ui.runS.title = rs.join(' · ');
     ui.runS.classList.toggle('f', !!flt); ui.runS.classList.toggle('w', !flt && !!wait);
     set('ppl', String(duty));
     set('pplS', duty ? (brk ? `${brk} in Pause` : `${walk} unterwegs`) : 'niemand im Dienst');
@@ -3758,7 +3761,7 @@
       R.camera = new THREE.PerspectiveCamera(32, R.w / R.h, 0.5, 700);
       R.controls = new THREE.OrbitControls(R.camera, R.canvas);
       const c = R.controls;
-      c.enableDamping = true; c.dampingFactor = 0.09; c.minDistance = 6; c.maxDistance = 140;
+      c.enableDamping = true; c.dampingFactor = 0.09; c.minDistance = 6; c.maxDistance = 150;
       c.minPolarAngle = 14 * DEG; c.maxPolarAngle = 76 * DEG; c.screenSpacePanning = false;
       c.rotateSpeed = 0.55; c.zoomSpeed = 0.9; c.panSpeed = 0.9;
       c.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
