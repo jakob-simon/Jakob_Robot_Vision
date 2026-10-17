@@ -209,12 +209,12 @@
   // Titan ELI wird auftragsbezogen mit Zeugnis bestellt.
   const materials = [
     { id: 'MAT-TI10',   name: 'Ti6Al4V ELI Ø10 h9', form: 'Stange', unit: 'm', onHand: 36, min: 24, reorderQty: 60, supplier: 'TitanTrade Europe (Beispiel)', leadMin: 360, pricePerUnit: 145, location: 'RAW', kanban: false },
-    { id: 'MAT-14404',  name: '1.4404 Ø12 h9',      form: 'Stange', unit: 'm', onHand: 21, min: 12, reorderQty: 45, supplier: 'Edelstahl Service Ost (Beispiel)', leadMin: 240, pricePerUnit: 18, location: 'RAW', kanban: true },
-    { id: 'MAT-42CR110',name: '42CrMo4+QT Ø110',    form: 'Stange', unit: 'm', onHand: 28, min: 12, reorderQty: 24, supplier: 'Stahlhandel Ost (Beispiel)', leadMin: 480, pricePerUnit: 62, location: 'RAW', kanban: true },
-    { id: 'MAT-42CR65', name: '42CrMo4+QT Ø65',     form: 'Stange', unit: 'm', onHand: 24, min: 18, reorderQty: 36, supplier: 'Stahlhandel Ost (Beispiel)', leadMin: 360, pricePerUnit: 21, location: 'RAW', kanban: true },
-    { id: 'MAT-16MNCR90',name: '16MnCr5 Ø90',       form: 'Stange', unit: 'm', onHand: 7.2, min: 3, reorderQty: 12, supplier: 'Stahlhandel Ost (Beispiel)', leadMin: 360, pricePerUnit: 38, location: 'RAW', kanban: true },
+    { id: 'MAT-14404',  name: '1.4404 Ø12 h9',      form: 'Stange', unit: 'm', onHand: 21, min: 12, reorderQty: 45, supplier: 'Edelstahl Service Ost (Beispiel)', leadMin: 240, pricePerUnit: 7, location: 'RAW', kanban: true },
+    { id: 'MAT-42CR110',name: '42CrMo4+QT Ø110',    form: 'Stange', unit: 'm', onHand: 28, min: 12, reorderQty: 24, supplier: 'Stahlhandel Ost (Beispiel)', leadMin: 480, pricePerUnit: 170, location: 'RAW', kanban: true },
+    { id: 'MAT-42CR65', name: '42CrMo4+QT Ø65',     form: 'Stange', unit: 'm', onHand: 24, min: 18, reorderQty: 36, supplier: 'Stahlhandel Ost (Beispiel)', leadMin: 360, pricePerUnit: 60, location: 'RAW', kanban: true },
+    { id: 'MAT-16MNCR90',name: '16MnCr5 Ø90',       form: 'Stange', unit: 'm', onHand: 7.2, min: 3, reorderQty: 12, supplier: 'Stahlhandel Ost (Beispiel)', leadMin: 360, pricePerUnit: 110, location: 'RAW', kanban: true },
     { id: 'MAT-2842',   name: '1.2842 Flach 45×25', form: 'Stange', unit: 'm', onHand: 22, min: 14, reorderQty: 18, supplier: 'Werkzeugstahl Süd (Beispiel)', leadMin: 480, pricePerUnit: 44, location: 'RAW', kanban: true },
-    { id: 'MAT-ALBL',   name: 'AlMgSi1 Zuschnitt 160×120×80', form: 'Stk', unit: 'Stk', onHand: 24, min: 20, reorderQty: 40, supplier: 'Alu Zuschnitt Wien (Beispiel)', leadMin: 300, pricePerUnit: 9.8, location: 'RAW', kanban: true },
+    { id: 'MAT-ALBL',   name: 'AlMgSi1 Zuschnitt 160×120×80', form: 'Stk', unit: 'Stk', onHand: 24, min: 20, reorderQty: 40, supplier: 'Alu Zuschnitt Wien (Beispiel)', leadMin: 300, pricePerUnit: 30, location: 'RAW', kanban: true },
     { id: 'MAT-GUSSLD', name: 'Rohguss Lagerdeckel EN-GJL-250', form: 'Stk', unit: 'Stk', onHand: 40, min: 30, reorderQty: 50, supplier: 'Gießerei Steiermark (Beispiel)', leadMin: 600, pricePerUnit: 18, location: 'RAW', kanban: true },
   ];
 
@@ -609,6 +609,11 @@
     //  · Strompreis energyEurPerKwh (Industrietarif netto inkl. Netzentgelt) → Energiekosten (kpis().energyEurToday, machineView().energyEurToday)
     //  · Maschinenstundensätze stehen je Station in stations[].rate (€/h, Maschine inkl. Bediener) → Stillstandskosten lossEur
     //  · labourEurPerHour = Personal-Vollkostensatz (Einrichter/Facharbeiter), overtimeSurchargePct = Überstundenzuschlag
+    // Fremdbearbeiter: Expressdurchlauf (Durchlaufzeit × expressFactor, Aufpreis je Los) – für Was-wäre-wenn und Anfrage-Entwurf
+    externalPartners: [
+      { name: HAERTEREI, short: 'Härterei Wolf', expressFactor: 0.5, expressSurchargeEur: 180, contact: 'Auftragsannahme Härterei Wolf', email: 'auftrag@haerterei-wolf.example' },
+      { name: CHROM, short: 'Hartchrom Linz', expressFactor: 0.6, expressSurchargeEur: 240, contact: 'Disposition Hartchrom Linz', email: 'dispo@hartchrom-linz.example' },
+    ],
     costs: {
       currency: 'EUR',
       energyEurPerKwh: 0.19,

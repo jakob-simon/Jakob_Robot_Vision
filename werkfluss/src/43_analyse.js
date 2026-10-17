@@ -1,8 +1,10 @@
 /* werkfluss – Ansicht „Analyse“: Wo verliert die Fertigung heute Zeit und Geld?
    Held der Seite: Stillstandskosten nach Ursache (Pareto, € = Maschinenstundensatz × geplante Zeit ohne Produktion,
-   exakt aus der Engine: kd/ks.lossEurBy, plannedStateSec) mit Empfehlungen daneben. Darunter Verlustmatrix
-   Maschine × Ursache, Ausstoß im Tagesverlauf (Ist je Stunde, Prognose aus der Plantafel, kumuliert gegen Plan),
-   OEE je Maschine und Energie je Teil. Alle Werte aus WF.sim (kd = heute, ks = laufende Schicht).
+   exakt aus der Engine: kd/ks.lossEurBy, plannedStateSec) mit Empfehlungen daneben – Schichtzeit; die Nacht
+   (Geisterschicht, kpis().lossEurNightToday) wird getrennt ausgewiesen. Darunter Verlustmatrix Maschine × Ursache,
+   Ausstoß im Tagesverlauf (Arbeitsgänge gut je Stunde, Prognose aus einem Materialfluss-Modell der bekannten Aufträge,
+   kumuliert gegen den um 06:00 eingefrorenen Tagesplan), OEE je Maschine und Energie (Werk = Leitstand, davon Maschinen).
+   Eine Wahrheit: Bezeichnungen und Zahlen wie im Leitstand (OEE, Stillstandskosten, Fertige Teile, Energie).
    Rendern diff-basiert: Struktur nur bei geänderter Reihenfolge neu, Werte gezielt (Klicks gehen nie verloren). */
 (function () {
   const WF = window.WF;
@@ -53,6 +55,21 @@
   .an-plg .b{width:14px;height:8px;border-radius:2px;background:var(--text2);opacity:.6}
   .an-plg .c{width:18px;height:0;border-top:1.5px solid var(--text2);position:relative}
   .an-plg .c::after{content:"";position:absolute;left:5px;top:-4.5px;width:6px;height:6px;border-radius:50%;border:1.5px solid var(--text2);background:var(--card)}
+  /* Nacht (Geisterschicht) – getrennt von der Schichtzeit, neutral schraffiert (kein Maschinenzustand) */
+  .an-hatch{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--text2) 55%,transparent) 0 1.5px,transparent 1.5px 4px)}
+  .an-nt{margin-top:16px;padding:12px 14px 13px;border-radius:9px;background:var(--bg2);border:1px solid var(--line)}
+  .an-nt .h{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .an-nt .h i{width:12px;height:12px;border-radius:3px;flex:none;border:1px solid var(--line2)}
+  .an-nt .h .t{font:600 var(--fs-md)/1.2 var(--f-ui);color:var(--text)}
+  .an-nt .h .t span{color:var(--muted);font-weight:500;font-size:var(--fs-xs);margin-left:6px}
+  .an-nt .h b{margin-left:auto;font:600 var(--fs-xl)/1 var(--f-cond);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .an-nt .ms{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .an-nt .ms button{font:inherit;font-size:var(--fs-xs);color:var(--text2);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:4px 9px;cursor:pointer;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .an-nt .ms button:hover{border-color:var(--line2);color:var(--text)}
+  .an-nt .ms button b{color:var(--text);font-weight:600;margin-left:4px}
+  .an-nt p{margin:8px 0 0;font-size:var(--fs-xs);color:var(--muted);line-height:1.45}
+  .an-rc.night .h b{color:var(--text)}
+  .an-rc.night{--c:var(--line2)}
   @media (max-width:560px){
     .an-hl{padding:14px 14px 12px}
     .an-par{grid-template-columns:minmax(0,116px) minmax(0,1fr) max-content;column-gap:10px}
@@ -94,6 +111,8 @@
   .an-h2{background:color-mix(in srgb,var(--st-fault) 41%,var(--card2))}
   .an-h3{background:color-mix(in srgb,var(--st-fault) 56%,var(--card2));font-weight:600}
   .an-h4{background:color-mix(in srgb,var(--st-fault) 70%,var(--card2));font-weight:600}
+  .an-mx td.an-hn,.an-ml .cs span.an-hn{color:var(--text2);background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--text2) 13%,var(--card2)) 0 3px,var(--card2) 3px 7px);box-shadow:inset 0 0 0 1px var(--line2)}
+  .an-mx th.n{color:var(--text2)}
   @media (max-width:1100px){
     .an-mx th.m,.an-mx td.m{position:sticky;left:0;z-index:1;background:var(--card)}
     .an-mx th.s,.an-mx td.s{position:sticky;right:0;z-index:1;background:var(--card);box-shadow:0 0 0 3px var(--card),-1px 0 0 3px var(--line)}
@@ -143,6 +162,11 @@
   .an-legend i.ln{width:18px;height:0;border-radius:0;border-top:2px solid var(--accent);vertical-align:3px}
   .an-legend i.fc{width:18px;height:0;border-radius:0;border-top:2px dashed var(--accent);opacity:.8;vertical-align:3px}
   .an-legend i.pl{width:18px;height:0;border-radius:0;border-top:2px dotted var(--muted);vertical-align:3px}
+  .an-legend i.pt{width:14px;height:0;border-radius:0;border-top:2px solid var(--muted);vertical-align:3px}
+  .an-legend .nt{margin-left:auto;color:var(--faint)}
+  @media (max-width:560px){.an-legend .nt{margin-left:0}}
+  .an-os .v small.fin{color:var(--muted)}
+  .an-chart .plt{stroke:var(--muted);stroke-width:2;stroke-linecap:round}
 
   /* ---------- Balkenlisten (OEE, Energie) */
   .an-bars{display:grid;grid-template-columns:minmax(84px,max-content) minmax(60px,1fr) max-content max-content;gap:8px 12px;align-items:center}
@@ -166,6 +190,14 @@
   .an-legend2 i{display:inline-block;width:0;height:12px;border-left:1.5px dashed var(--muted);margin-right:6px;vertical-align:-2px}
   .an-eins{margin:0 0 12px;font-size:var(--fs-sm);color:var(--text2);line-height:1.5}
   .an-eins b{color:var(--accent);font-weight:600}
+  .an-es{display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--track);margin:0 0 6px}
+  .an-es i{display:block;height:100%}
+  .an-es i.m{background:var(--text2);opacity:.55}
+  .an-es i.b{opacity:.9}
+  .an-esl{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:var(--fs-xs);color:var(--muted);margin:0 0 14px;font-variant-numeric:tabular-nums}
+  .an-esl i{display:inline-block;width:10px;height:8px;border-radius:2px;margin-right:6px;vertical-align:0}
+  .an-esl i.m{background:var(--text2);opacity:.55}
+  .an-esl b{color:var(--text2);font-weight:600}
   .an-pw{display:inline-flex;align-items:center;gap:8px;font-size:var(--fs-xs);color:var(--muted)}
   .an-pw b{font:600 var(--fs-md)/1 var(--f-ui);color:var(--text);font-variant-numeric:tabular-nums}
   @media (max-width:560px){

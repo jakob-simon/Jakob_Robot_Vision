@@ -19,6 +19,8 @@
   const shortName = (n) => { const p = String(n || '').trim().split(/\s+/); return p.length > 1 ? p[0][0] + '. ' + p[p.length - 1] : String(n || ''); };
   const durMin = (sec) => (sec < 60 ? '< 1 min' : U.fmtDur(Math.floor(sec / 60) * 60));
   const hasDetail = (k) => !!(WF.details && WF.details[k]);
+  /** Quelle des Maschinenzustands laut Anbindung (WF.connect) – L0 nur laut Tablet */
+  const stateSrc = (id) => (WF.connect && WF.connect.provenance ? WF.connect.provenance(id, 'state') : '');
   function setText(node, txt) { txt = txt == null ? '' : String(txt); if (node && node._t !== txt) { node._t = txt; node.textContent = txt; } }
   function setHTML(node, html) { if (node && node._h !== html) { node._h = html; node.innerHTML = html; } }
   function setAttr(node, k, v) { const key = '_a' + k; if (node && node[key] !== v) { node[key] = v; if (v == null) node.removeAttribute(k); else node.setAttribute(k, v); } }
@@ -262,9 +264,11 @@
   .qa-cap-more{font-size:var(--fs-xs);color:var(--faint);padding:6px 14px 0}
   /* Balken */
   .qa-bars{display:grid;grid-template-columns:minmax(78px,max-content) minmax(50px,1fr) max-content max-content;gap:9px 10px;align-items:center}
-  .qa-br{display:contents}
-  .qa-br.click > *{cursor:pointer}
+  .qa-br{display:grid;grid-column:1/-1;grid-template-columns:subgrid;align-items:center;border-radius:5px}
+  .qa-br.click{cursor:pointer}
+  .qa-br.click:hover{background:color-mix(in srgb,var(--raise) 35%,transparent);box-shadow:0 0 0 4px color-mix(in srgb,var(--raise) 35%,transparent)}
   .qa-br.click:hover .qa-l{color:var(--text)}
+  .qa-br:focus-visible{outline-offset:4px}
   .qa-l{font-size:var(--fs-sm);color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .qa-tr{position:relative;height:12px;border-radius:3px;background:var(--track)}
   .qa-tr i{position:absolute;left:0;top:0;bottom:0;border-radius:0 4px 4px 0;background:var(--c,var(--st-fault))}
@@ -304,6 +308,14 @@
   .qa-sp .b b{font-weight:600;font-variant-numeric:tabular-nums;color:var(--text)}
   .qa-sp span{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .qa-sp span.r{color:var(--faint)}
+  /* Tastaturfokus: Tabellenzeilen bekommen den Ring an den Zellen (Chromium zeichnet keine Umrisse an <tr>) */
+  .qa-tbl tr.click{outline:none}
+  .qa-tbl tr.click:focus-visible td{background:color-mix(in srgb,var(--accent) 9%,transparent);box-shadow:inset 0 2px 0 var(--accent),inset 0 -2px 0 var(--accent)}
+  .qa-tbl tr.click:focus-visible td:first-child{box-shadow:inset 2px 0 0 var(--accent),inset 0 2px 0 var(--accent),inset 0 -2px 0 var(--accent)}
+  .qa-tbl tr.click:focus-visible td:last-child{box-shadow:inset -2px 0 0 var(--accent),inset 0 2px 0 var(--accent),inset 0 -2px 0 var(--accent)}
+  .qa-cr:focus-visible,.qa-up-r:focus-visible,.qa-sp:focus-visible{outline-offset:-2px}
+  .qa-root section.card:focus{outline:none}
+  .qa-root section.card:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 55%,transparent);outline-offset:2px}
   .qa-card-f{padding:9px 14px 11px;border-top:1px solid var(--line);font-size:var(--fs-xs);color:var(--faint);line-height:1.45}
 
   @media (max-width:1280px){.qa-main{grid-template-columns:minmax(0,1fr) 320px}.qa-lab{grid-template-columns:minmax(200px,260px) minmax(0,1fr) minmax(190px,240px)}}
@@ -311,7 +323,7 @@
   @media (max-width:560px){.qa-spc-ctl{width:100%}.qa-spc-ctl select.input{max-width:none;flex:1;min-width:0;width:100%}.qa-bars{grid-template-columns:minmax(64px,max-content) minmax(40px,1fr) max-content}.qa-m{display:none}
     .qa-st{grid-template-columns:repeat(2,minmax(0,1fr))}.qa-st > div:nth-child(n){border-left:0;border-top:1px solid var(--line)}.qa-st > div:nth-child(2n){border-left:1px solid var(--line)}.qa-st > div:nth-child(-n+2){border-top:0}
     .qa-tbl .hm{display:none}.qa-tbl td,.qa-tbl th{padding-left:8px;padding-right:8px}}
-  @media (pointer:coarse){.qa-spc-ctl select.input{height:40px}.qa-cr,.qa-up-r,.qa-sp.click{min-height:44px}.qa-fp{min-height:40px}.qa-ct{min-height:44px}}
+  @media (pointer:coarse){.qa-spc-ctl select.input{height:40px}.qa-cr,.qa-up-r,.qa-sp.click{min-height:44px}.qa-fp{min-height:40px}.qa-ct{min-height:44px}.qa-br.click{min-height:40px}}
   .qa-mo{display:none}
   @media (max-width:560px){.qa-mo{display:inline}}
   `, 'quality');
@@ -328,10 +340,10 @@
           <p class="view-sub">Gutteile, Ausschuss und Prozessfähigkeit – direkt aus den Messwerten jedes Arbeitsgangs. Trends werden erkannt, bevor Ausschuss entsteht.</p></div></div>
         <div class="kpis qa-kpis">
           <div class="kpi"><div class="l">Gutteilquote (FPY)</div><div class="v" data-r="kFpy">–</div><div class="s" data-r="kFpyS">–</div><div class="qa-fpy-w"><div class="qa-fpy" data-r="kFpyB"></div></div></div>
-          <div class="kpi click" data-r="kScrapBox" title="Zu Ausschuss nach Ursache"><div class="l">Ausschuss heute</div><div class="v" data-r="kScrap">–</div><div class="s" data-r="kScrapS">–</div></div>
-          <div class="kpi click" data-r="kFpiBox" title="Zu den Erstteilprüfungen"><div class="l">Erstteile heute</div><div class="v" data-r="kFpi">–</div><div class="s" data-r="kFpiS">–</div></div>
+          <div class="kpi click" data-r="kScrapBox" title="Zu Ausschuss nach Ursache" tabindex="0" role="button"><div class="l">Ausschuss heute</div><div class="v" data-r="kScrap">–</div><div class="s" data-r="kScrapS">–</div></div>
+          <div class="kpi click" data-r="kFpiBox" title="Zu den Erstteilprüfungen" tabindex="0" role="button"><div class="l">Erstteile heute</div><div class="v" data-r="kFpi">–</div><div class="s" data-r="kFpiS">–</div></div>
           <div class="kpi"><div class="l">Prüflose am Messraum</div><div class="v" data-r="kLab">–</div><div class="s" data-r="kLabS">–</div></div>
-          <div class="kpi click" data-r="kSpcBox" title="SPC-Regelkarte des betroffenen Merkmals öffnen"><div class="l">SPC-Warnungen</div><div class="v" data-r="kSpc">–</div><div class="s" data-r="kSpcS">–</div></div>
+          <div class="kpi click" data-r="kSpcBox" title="SPC-Regelkarte des betroffenen Merkmals öffnen" tabindex="0" role="button"><div class="l">SPC-Warnungen</div><div class="v" data-r="kSpc">–</div><div class="s" data-r="kSpcS">–</div></div>
         </div>
         <section class="card" aria-label="Messraum">
           <div class="card-h"><h3>Messraum</h3><span class="muted" data-r="labSub"></span></div>
@@ -343,7 +355,7 @@
         </section>
         <div class="qa-main">
           <div class="qa-col">
-          <section class="card qa-spc" data-r="spcCard" aria-label="SPC-Regelkarte">
+          <section class="card qa-spc" data-r="spcCard" aria-label="SPC-Regelkarte" tabindex="-1">
             <div class="card-h"><h3>SPC-Regelkarte · Einzelwerte</h3>
               <div class="qa-spc-ctl"><select class="input" data-r="sel" aria-label="Merkmal wählen"></select>
                 <div class="seg" data-r="win"><button data-n="30">30</button><button data-n="60" class="on">60</button><button data-n="0">alle</button></div></div></div>
@@ -355,7 +367,7 @@
             <div data-r="hint"></div>
             <div class="qa-spc-foot"></div>
           </section>
-          <section class="card" data-r="fpiCard" aria-label="Erstteilprüfungen">
+          <section class="card" data-r="fpiCard" aria-label="Erstteilprüfungen" tabindex="-1">
             <div class="card-h"><h3>Erstteilprüfungen</h3><span class="muted" data-r="fpiSub"></span></div>
             <div class="tbl-wrap qa-tw" data-r="fpi"></div>
             <div class="qa-up" data-r="fpiUp"></div>
@@ -367,7 +379,7 @@
               <div class="card-h"><h3>Prozessfähigkeit je Merkmal</h3><span class="muted" data-r="capSub"></span></div>
               <div class="qa-cap" data-r="cap"></div>
             </section>
-            <section class="card" data-r="scrapCard" aria-label="Ausschuss">
+            <section class="card" data-r="scrapCard" aria-label="Ausschuss" tabindex="-1">
               <div class="card-h"><h3>Ausschuss heute</h3><span class="muted" data-r="scrapSub"></span></div>
               <div class="card-b"><div class="qa-sub">Nach Ursache</div><div data-r="byReason"></div>
                 <div class="qa-sub">Nach Maschine</div><div data-r="byMachine"></div>
@@ -391,12 +403,13 @@
     R.sel.addEventListener('change', () => { selKey = R.sel.value; userPicked = true; sig.chart = ''; renderSpc(true); });
     R.win.addEventListener('click', (e) => { const b = e.target.closest('button[data-n]'); if (!b) return; winN = Number(b.dataset.n); R.win.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); renderSpc(true); });
     R.logF.addEventListener('click', (e) => { const b = e.target.closest('button[data-f]'); if (!b) return; logFilter = b.dataset.f; R.logF.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); sig.log = ''; renderLog(true); });
-    R.kScrapBox.addEventListener('click', () => R.scrapCard.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-    R.kFpiBox.addEventListener('click', () => R.fpiCard.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    const goCard = (card) => { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); try { card.focus({ preventScroll: true }); } catch (e) { /* alt */ } };
+    R.kScrapBox.addEventListener('click', () => goCard(R.scrapCard));
+    R.kFpiBox.addEventListener('click', () => goCard(R.fpiCard));
     R.kSpcBox.addEventListener('click', () => {
       const n = (S().notifications || []).find(x => x.status === 'open' && x.key && x.key.startsWith('spc:'));
       if (n) selectKey(n.key.slice(4)); else if (capInfo.min && capInfo.min.cpk < 1.33) selectKey(capInfo.min.k);
-      R.spcCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      goCard(R.spcCard);
     });
     el.addEventListener('click', (e) => {
       const fx = e.target.closest('[data-fix]');
@@ -404,9 +417,20 @@
       const a = e.target.closest('[data-act]');
       if (a) { e.stopPropagation(); const n = (S().notifications || []).find(x => x.id === a.dataset.nid); if (n && n.actions[Number(a.dataset.act)]) { WF.app.runAction(n.actions[Number(a.dataset.act)].action); sig.chart = ''; renderSpc(true); } return; }
       const lk = e.target.closest('[data-sel]');
-      if (lk) { e.stopPropagation(); const [k, id] = lk.dataset.sel.split('|'); if (k === 'char') { selectKey(id); R.spcCard.scrollIntoView({ behavior: 'smooth', block: 'start' }); } else WF.app.select(k, id); }
+      if (lk) {
+        e.stopPropagation(); const [k, id] = lk.dataset.sel.split('|');
+        if (k === 'char') { const fromLog = R.log.contains(lk); selectKey(id); if (fromLog) goCard(R.spcCard); else R.spcCard.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+        else WF.app.select(k, id);
+      }
     });
-    // Listen pausieren ihre Aktualisierung, solange der Mauszeiger darüber ist (Klickziele bleiben stabil)
+    // Tastatur: klickbare Zeilen/Karten (tabindex) per Enter/Leertaste – Knöpfe und Felder machen das selbst
+    el.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const t = e.target;
+      if (!t.matches || !t.matches('[tabindex="0"]') || t.matches('button,a,select,input,textarea')) return;
+      e.preventDefault(); t.click();
+    });
+    // Listen pausieren ihre Aktualisierung, solange der Mauszeiger darüber ist oder ein Eintrag den Fokus hat (Klickziele bleiben stabil)
     for (const k of ['log', 'fpi', 'fpiUp', 'sperr', 'cap', 'labQ', 'labF', 'byMachine']) {
       const n = R[k]; n.addEventListener('mouseenter', () => { n._hover = true; }); n.addEventListener('mouseleave', () => { n._hover = false; });
     }
@@ -414,8 +438,15 @@
     R.chart.addEventListener('mouseleave', hideTip);
     if (window.ResizeObserver) { ro = new ResizeObserver(() => { const w = R.chart.clientWidth; if (Math.abs(w - chartW) > 2) { chartW = w; sig.chart = ''; renderSpc(true); } }); ro.observe(R.chart);
       new ResizeObserver(() => { labQW = R.labQ.clientWidth; }).observe(R.labQ); }
-    R.cap.addEventListener('click', () => {});
     WF.bus.on('sim:reset', () => { sig = {}; if (!userPicked) selKey = null; for (const k in costCache) delete costCache[k]; });
+  }
+  /** Liste anhalten: Maus darüber oder Tastaturfokus darin */
+  const held = (n) => !!(n && (n._hover || n.contains(document.activeElement)));
+  /** Nach dem Neuaufbau einer Liste den Fokus auf denselben Eintrag (gleiches data-sel) zurücksetzen */
+  function keepFocus(box, fn) {
+    const a = document.activeElement, key = box && a && box.contains(a) && a.dataset ? a.dataset.sel : null;
+    fn();
+    if (key) { const nx = [...box.querySelectorAll('[data-sel]')].find(x => x.dataset.sel === key); if (nx) try { nx.focus({ preventScroll: true }); } catch (e) { /* alt */ } }
   }
   function selectKey(k) {
     if (!k || !S().measurements[k]) return;
@@ -513,7 +544,7 @@
         // Belegung (etaBusyEnd) nur zusätzlich, wenn der Messraum das Los zwischendurch freigibt (weitere Teile folgen vom Vorgänger)
         const occ = o && mv.etaBusyEnd != null && mv.etaOpEnd != null && mv.etaOpEnd - mv.etaBusyEnd > 600
           ? `<div class="m occ">Messraum mit diesem Los belegt bis ca. ${esc(tclock(mv.etaBusyEnd, now))} – die übrigen Teile folgen vom Vorgänger</div>` : '';
-        R.labNow.innerHTML = `<div class="row">${WF.ui.pill(mv.state, mv.state === 'running' ? 'Prüfung läuft' : null)}${op ? `<button class="link" data-sel="person|${esc(op.id)}">${esc(op.name)}</button>` : '<span class="muted">niemand anwesend</span>'}</div>
+        R.labNow.innerHTML = `<div class="row">${mv.state === 'running' ? WF.ui.pill('running', 'Prüfung läuft') : WF.ui.machinePill(mv)}${op ? `<button class="link" data-sel="person|${esc(op.id)}">${esc(op.name)}</button>` : '<span class="muted">niemand anwesend</span>'}</div>
           <div class="t">${o ? `<button class="link mono" data-sel="${hasDetail('order') ? 'order' : 'machine'}|${esc(hasDetail('order') ? o.id : 'QS')}">${esc(o.id)}</button> · AG ${o.seq} ${esc(o.op)}` : esc(mv.cause || 'Keine Prüfung eingeplant')}</div>
           ${o ? `<div class="m">${esc(o.partName)} · ${cnt}${mv.etaOpEnd != null ? ` · Arbeitsgang fertig ca. <b>${esc(tclock(mv.etaOpEnd, now))}</b>` : ''}</div>${WF.ui.bar(mv.partsTotal ? mv.partsDone / mv.partsTotal : 0, { color: mv.stateColor })}${occ}` : ''}
           ${o && mv.state !== 'running' ? `<div class="m">${esc(mv.cause || '')}</div>` : ''}`;
@@ -536,7 +567,7 @@
     const qw = labQW || 0, small = qw < 420, cw = small ? 108 : 136;
     const planSig = lab.items.map(x => { const e = plan[keyC(x)]; return e ? Math.floor(e.start / 60) + '-' + Math.floor(e.end / 60) : ''; }).join(',');
     const qsig = lab.items.map(x => x.c.id + ':' + x.c.qty).join(',') + '|' + trans.map(x => x.c.id + x.t.status).join(',') + '|' + curO + '|' + planSig + '|' + Math.round(qw / 10);
-    if (sig.labQ !== qsig && !R.labQ._hover) {
+    if (sig.labQ !== qsig && !held(R.labQ)) {
       sig.labQ = qsig;
       setText(R.labQn, lab.items.length ? `${lab.items.length} · ${U.fmtNum(lab.qty)} Stk · ca. ${U.fmtDur(lab.sec)}` : '');
       const firstPlanned = planL.filter(e => !e.active).reduce((m, e) => Math.min(m, e.start), Infinity);
@@ -554,7 +585,7 @@
           : e ? 'ca. ' + esc(tclock(e.start, now)) + '–' + esc(tclock(e.end, now))
           : r && r.cycleMin ? 'ca. ' + esc(U.fmtDur(c.qty * r.cycleMin * 60)) + ' Prüfzeit' : esc(c.id);
         const tip = `${c.id} · ${c.partName || ''}${r ? ' · AG ' + r.seq + ' ' + r.op : ''}${tr ? ' – unterwegs: ' + (tr.label || '') : e ? ` – Plan: Prüfung ${tclock(e.start, now)}–${tclock(e.end, now)}${e.opEnd > e.end + 600 ? ', Arbeitsgang fertig ca. ' + tclock(e.opEnd, now) : ''}` : ''}`;
-        return `<div class="qa-ct${tr ? ' tr' : ''}${first ? ' nx' : ''}${cur ? ' cur' : ''}" style="--qa-cw:${cw}px" data-sel="${hasDetail('container') ? 'container|' + esc(c.id) : hasDetail('order') ? 'order|' + esc(c.orderId) : 'machine|QS'}" title="${esc(tip)}">
+        return `<div class="qa-ct${tr ? ' tr' : ''}${first ? ' nx' : ''}${cur ? ' cur' : ''}" style="--qa-cw:${cw}px" data-sel="${hasDetail('container') ? 'container|' + esc(c.id) : hasDetail('order') ? 'order|' + esc(c.orderId) : 'machine|QS'}" title="${esc(tip)}" tabindex="0" role="button" aria-label="${esc(tip)}">
           <b>${esc(c.orderId)}</b><span><em>${U.fmtNum(c.qty)} Stk</em> · ${esc(r ? r.op : c.partName || '')}</span><span>${when}</span></div>`;
       };
       // so viele Behälter, wie ganz hineinpassen – der Rest als „+N“ statt abgeschnittener Karten
@@ -570,11 +601,11 @@
     const fp = openFpis().filter(x => !x.local).sort((a, b) => b.waitingSec - a.waitingSec);
     setText(R.labSub, `${lab.items.length ? `${lab.items.length} ${lab.items.length === 1 ? 'Prüflos' : 'Prüflose'} in der Warteschlange` : 'Warteschlange leer'} · ${fp.length ? `${fp.length} ${fp.length === 1 ? 'Erstteil wartet' : 'Erstteile warten'}` : 'kein Erstteil offen'}`);
     const fsig = fp.map(x => x.mid + x.stage + Math.floor(x.waitingSec / 60)).join(',');
-    if (sig.labF !== fsig && !R.labF._hover) {
+    if (sig.labF !== fsig && !held(R.labF)) {
       sig.labF = fsig;
       setText(R.labFn, fp.length ? String(fp.length) : '');
       const stg = WF.sim.LABELS.fpiStage || {};
-      R.labF.innerHTML = fp.length ? fp.map(x => `<div class="qa-fp${x.stage !== 'measure' && x.waitingSec >= 600 ? ' warn' : ''}" data-sel="machine|${esc(x.mid)}" title="${esc(stg[x.stage] || x.stage)}"><b>${esc(x.mid)}</b><span>${esc(stg[x.stage] || x.stage)}</span><em>${esc(durMin(x.waitingSec))}</em></div>`).join('')
+      R.labF.innerHTML = fp.length ? fp.map(x => `<div class="qa-fp${x.stage !== 'measure' && x.waitingSec >= 600 ? ' warn' : ''}" data-sel="machine|${esc(x.mid)}" title="${esc(stg[x.stage] || x.stage)}" tabindex="0" role="button" aria-label="${esc(x.mid)}: Erstteil ${esc(stg[x.stage] || x.stage)}, ${esc(durMin(x.waitingSec))} – Maschine öffnen"><b>${esc(x.mid)}</b><span>${esc(stg[x.stage] || x.stage)}</span><em>${esc(durMin(x.waitingSec))}</em></div>`).join('')
         : `<div class="qa-empty">${icon('check', 15)}<span>Kein Erstteil wartet – alle Maschinen freigegeben.</span></div>`;
     }
   }
@@ -596,7 +627,16 @@
     R.sel.value = selKey || '';
   }
   let spcRT = 0;
-  function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+  /** Achsenschritt aus 1-2-5 × 10^k (keine 2,5-Schritte: bei µm-Toleranzen fielen die Marken sonst zwischen ganze µm),
+      gewählt nach der Markenzahl, die dem Ziel am nächsten kommt. */
+  function niceStep(span, target) {
+    const p0 = Math.pow(10, Math.floor(Math.log10(span / target)));
+    let best = p0, bd = Infinity;
+    for (const m of [0.5, 1, 2, 5, 10]) { const st = m * p0, n = span / st, d = Math.abs(n - target) + (n < 2.5 ? 2 : 0); if (d < bd) { bd = d; best = st; } }
+    return best;
+  }
+  /** Nachkommastellen, die einen Schritt exakt darstellen (0,002 → 3; 0,0005 → 4) */
+  const stepDec = (st) => { for (let d = 0; d <= 6; d++) if (Math.abs(Math.round(st * 10 ** d) - st * 10 ** d) < 1e-6) return d; return 6; };
   function renderSpc(force) {
     if (!R.sel) return;
     buildOptions();
@@ -617,7 +657,7 @@
     const metaH = `<span><button class="link" data-sel="machine|${esc(mid)}">${esc(mLabel(mid))}</button></span>
       <span><b class="mono">${esc(ki.oid)}</b> ${esc(ki.o ? ki.o.part.name : '')} · AG ${ki.seq} ${esc(ki.r ? ki.r.op : '')}</span>
       <span>Merkmal <b>${esc(ch.name)}</b> · Soll ${esc(fv(ch.nominal, ch))} <span class="faint">${esc(fv(ch.tolMinus, ch, true))}/${esc(fv(ch.tolPlus, ch, true))}</span> ${esc(ch.unit)}</span>
-      ${active ? `<span>${WF.ui.pill(mv.state)}</span>` : `<span class="faint">Arbeitsgang ${ki.o && ki.o.ops && ki.o.ops.find(x => x.seq === ki.seq && x.complete) ? 'abgeschlossen' : 'nicht aktiv'}</span>`}`;
+      ${active ? `<span title="${esc(stateSrc(mid))}">${WF.ui.machinePill(mv)}${WF.connect && WF.connect.canShow && !WF.connect.canShow(mid, 'state') ? ' <span class="faint">laut Tablet</span>' : ''}</span>` : `<span class="faint">Arbeitsgang ${ki.o && ki.o.ops && ki.o.ops.find(x => x.seq === ki.seq && x.complete) ? 'abgeschlossen' : 'nicht aktiv'}</span>`}`;
     setHTML(R.meta, metaH);
     R.chart.innerHTML = chartSvg(d, Math.max(280, R.chart.clientWidth - 12));
     chartW = R.chart.clientWidth;
@@ -710,22 +750,25 @@
   }
   function chartSvg(d, W) {
     const small = W < 520;
-    const H = small ? 230 : 290, ml = small ? 50 : 62, mr = small ? 44 : 54, mt = 16, mb = 26;
-    const pw = W - ml - mr, ph = H - mt - mb;
     const pts = d.pts, ch = d.ch, n = pts.length;
     let lo = Math.min(d.lsl, d.lcl != null ? d.lcl : d.lsl), hi = Math.max(d.usl, d.ucl != null ? d.ucl : d.usl);
     for (const p of pts) { if (p.v < lo) lo = p.v; if (p.v > hi) hi = p.v; }
     const padv = (hi - lo) * 0.08 || Math.abs(hi) * 0.01 || 1; lo -= padv; hi += padv;
+    // linker Rand nach der längsten Achsenbeschriftung (4 Nachkommastellen bei µm-Toleranzen)
+    const decA = decOf(ch), lw = Math.max(U.fmtNum(lo, Math.max(decA, 3)).length, U.fmtNum(hi, Math.max(decA, 3)).length);
+    const H = small ? 230 : 290, ml = Math.max(small ? 44 : 54, Math.round(lw * 6.2 + 14)), mr = small ? 44 : 54, mt = 16, mb = 26;
+    const pw = W - ml - mr, ph = H - mt - mb;
     const Y = (v) => mt + (1 - (v - lo) / (hi - lo)) * ph;
     const step = n > 1 ? pw / (n - 1) : 0;
     const X = (i) => ml + (n > 1 ? i * step : pw / 2);
     const dec = decOf(ch);
     let g = '';
     // Raster + Achse links (nur saubere Werte)
-    const st0 = niceStep((hi - lo) / (small ? 4 : 5));
-    const tdec = Math.max(0, Math.min(5, -Math.floor(Math.log10(st0) + 1e-9)));
-    for (let v = Math.ceil(lo / st0) * st0; v <= hi + 1e-12; v += st0) {
-      const y = Y(v);
+    // Marken auf ganzen Schritten (ganzzahlig gezählt – keine Rundungsdrift), so viele Stellen wie das Merkmal (Soll 8,0000 → 4)
+    const st0 = niceStep(hi - lo, small ? 4 : 5);
+    const tdec = Math.min(6, Math.max(dec, stepDec(st0)));
+    for (let k = Math.ceil(lo / st0 - 1e-9), kEnd = Math.floor(hi / st0 + 1e-9); k <= kEnd; k++) {
+      const v = k * st0, y = Y(v);
       g += `<line class="grid" x1="${ml}" x2="${ml + pw}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}"/><text class="tk" x="${ml - 8}" y="${(y + 3.5).toFixed(1)}" text-anchor="end">${esc(U.fmtNum(v, tdec))}</text>`;
     }
     // Toleranzband
@@ -832,7 +875,7 @@
   function bars(rows, empty) {
     if (!rows.length) return `<div class="qa-empty">${icon('check', 15)}<span>${esc(empty)}</span></div>`;
     const max = Math.max(1, ...rows.map(r => r.n));
-    return `<div class="qa-bars">${rows.map(r => `<div class="qa-br${r.sel ? ' click' : ''}" ${r.sel ? `data-sel="${esc(r.sel)}"` : ''} title="${esc(r.tip || '')}">
+    return `<div class="qa-bars">${rows.map(r => `<div class="qa-br${r.sel ? ' click' : ''}" ${r.sel ? `data-sel="${esc(r.sel)}" tabindex="0" role="button" aria-label="${esc(r.label)}: ${esc(r.n)} Stk Ausschuss – öffnen"` : ''} title="${esc(r.tip || '')}">
       <span class="qa-l">${esc(r.label)}</span><span class="qa-tr">${r.n ? `<i style="width:${(Math.max(0.02, r.n / max) * 100).toFixed(1)}%"></i>` : ''}</span>
       <span class="qa-v">${U.fmtNum(r.n)}<small>Stk</small></span><span class="qa-m">${r.n ? '≈ ' + U.fmtEur(r.eur) : '–'}</span></div>`).join('')}</div>`;
   }
@@ -889,19 +932,19 @@
     return upCache.list;
   }
   function renderUpcoming(now) {
-    if (R.fpiUp._hover && sig.up) return;
+    if (held(R.fpiUp) && sig.up) return;
     const list = upcomingFpis(now);
     const usig = list.map(x => x.mid + x.orderId + x.seq + Math.floor(x.t / 60)).join(',');
     if (sig.up === usig) return;
     sig.up = usig;
     R.fpiUp.innerHTML = `<div class="qa-up-h"><span class="eyebrow">Nächste Erstteile laut Plan</span><span class="muted">nach dem Rüsten</span></div>` + (list.length
-      ? list.map(x => `<div class="qa-up-r" data-sel="machine|${esc(x.mid)}" title="${esc(mLabel(x.mid))} · ${esc(x.orderId)} AG ${esc(x.seq)} ${esc(x.op)} – Rüsten ca. ${esc(U.fmtDur(x.setupMin * 60))}, danach Erstteilprüfung">
+      ? list.map(x => `<div class="qa-up-r" data-sel="machine|${esc(x.mid)}" tabindex="0" role="button" title="${esc(mLabel(x.mid))} · ${esc(x.orderId)} AG ${esc(x.seq)} ${esc(x.op)} – Rüsten ca. ${esc(U.fmtDur(x.setupMin * 60))}, danach Erstteilprüfung">
           <b>${esc(x.mid)}</b><span class="nm">${esc(st(x.mid) ? st(x.mid).short : '')}</span><span class="o">${esc(x.orderId)} · AG ${esc(x.seq)}</span><span class="t">ca. ${esc(tclock(x.t, now))}</span></div>`).join('')
       : '<div class="qa-up-e">Kein weiteres Rüsten mit Erstteilprüfung geplant.</div>');
   }
   function renderFpi(now) {
     renderUpcoming(now);
-    if (R.fpi._hover && sig.fpi) return;
+    if (held(R.fpi) && sig.fpi) return;
     const recs = fpiRecords(now);
     const fsig = recs.map(r => r.mid + (r.ready || '') + (r.res ? r.res.id : r.stage) + (r.res ? '' : Math.floor((now - (r.ready || now)) / 60))).join(',');
     if (sig.fpi === fsig) return;
@@ -918,7 +961,7 @@
       else { res = `<span class="qa-res ${r.rework ? 'rw' : 'nok'}"><i></i>${r.rework ? 'n.i.O. · Nacharbeit' : 'n.i.O. · Ausschuss'}</span>`; sub = r.rework ? 'Nebenmerkmal – Korrektur, erneute Prüfung' : r.last ? 'letztes Teil – Nachfertigung nötig' : 'Korrektur, danach neues Erstteil'; }
       const dur = r.ready != null ? ((r.res ? r.res.t : now) - r.ready) : null;
       const late = !r.res && dur != null && dur >= 600 && r.stage !== 'measure';
-      return `<tr class="click" data-sel="machine|${esc(r.mid)}"><td class="mono hm">${r.ready != null ? esc(tclock(r.ready, now)) : '–'}<span class="sub">${r.local ? 'nach Werkzeugwechsel' : 'nach Rüsten'}</span></td>
+      return `<tr class="click" data-sel="machine|${esc(r.mid)}" tabindex="0" aria-label="${esc(r.mid)} · ${esc(r.orderId || '')} AG ${esc(r.seq)} – Maschine öffnen"><td class="mono hm">${r.ready != null ? esc(tclock(r.ready, now)) : '–'}<span class="sub">${r.local ? 'nach Werkzeugwechsel' : 'nach Rüsten'}</span></td>
         <td><b>${esc(r.mid)}</b> <span class="muted">${esc(st(r.mid) ? st(r.mid).short : '')}</span><span class="sub mono">${esc(r.orderId || '–')} · AG ${esc(r.seq)}<span class="qa-mo"> · ${r.ready != null ? esc(tclock(r.ready, now)) : ''}</span></span></td>
         <td>${res}<span class="sub">${esc(sub)}</span></td>
         <td class="hm">${esc(r.by || '–')}</td>
@@ -929,7 +972,7 @@
 
   // ---------------- Sperrlager
   function renderSperr(now) {
-    if (R.sperr._hover && sig.sperr) return;
+    if (held(R.sperr) && sig.sperr) return;
     const Sx = S();
     const list = Object.values(Sx.containers).filter(c => c.kind === 'scrap' || c.state === 'scrap').sort((a, b) => b.createdT - a.createdT);
     const ssig = list.map(c => c.id + ':' + c.qty + c.lastReason).join(',');
@@ -946,7 +989,7 @@
       const v = cost ? cost.total * c.qty : 0; tq += c.qty; te += v;
       const sel = hasDetail('container') ? 'container|' + c.id : hasDetail('order') ? 'order|' + c.orderId : '';
       const rs = reasons[c.orderId] ? Object.entries(reasons[c.orderId]).map(([r, q]) => `${r} ${q}`).join(' · ') : (c.lastReason || '');
-      return `<div class="qa-sp${sel ? ' click' : ''}" ${sel ? `data-sel="${esc(sel)}"` : ''} title="${esc(c.id)} · ${esc(c.partName || '')} · AG ${esc(seq)}">
+      return `<div class="qa-sp${sel ? ' click' : ''}" ${sel ? `data-sel="${esc(sel)}" tabindex="0" role="button"` : ''} title="${esc(c.id)} · ${esc(c.partName || '')} · AG ${esc(seq)}">
         <div class="a"><b>${esc(c.orderId)}</b><span>${esc(c.partName || '')}</span><span class="r">${esc(rs)} · seit ${esc(tclock(c.createdT, now))}</span></div>
         <div class="b"><b>${U.fmtNum(c.qty)} Stk</b><span>${v ? '≈ ' + esc(U.fmtEur(v)) : '–'}</span><span class="r">${esc(c.id)}</span></div></div>`;
     });
@@ -969,7 +1012,7 @@
   }
   let logRT = 0;
   function renderLog(force) {
-    if (!force && ((performance.now() - logRT < 1200 && sig.log) || R.log._hover)) return;
+    if (!force && ((performance.now() - logRT < 1200 && sig.log) || held(R.log))) return;
     const Sx = S(), now = Sx.t, keys = Object.keys(Sx.measurements);
     let total = 0, lastT = 0;
     for (const k of keys) { const a = Sx.measurements[k]; total += a.length; if (a.length && a[a.length - 1].t > lastT) lastT = a[a.length - 1].t; }
@@ -987,9 +1030,9 @@
     setText(R.logSub, `${U.fmtNum(total)} Messwerte gespeichert · ${keys.length} Merkmale`);
     if (!rows.length) { R.log.innerHTML = `<div class="empty">${logFilter === 'nok' ? 'Keine n.i.O.-Messwerte im Speicher.' : logFilter === 'fpi' ? 'Noch keine Erstteil-Messwerte.' : 'Noch keine Messwerte.'}</div>`; return; }
     const info = {};
-    R.log.innerHTML = `<table class="tbl qa-tbl"><thead><tr><th>Zeit</th><th class="hm">Maschine</th><th>Auftrag · AG</th><th class="hm">Merkmal</th><th class="r hm">Teil</th><th class="r">Messwert</th><th class="hm">Lage in Toleranz</th><th>Ergebnis</th></tr></thead><tbody>${rows.map(({ k, m }) => {
+    keepFocus(R.log, () => { R.log.innerHTML = `<table class="tbl qa-tbl"><thead><tr><th>Zeit</th><th class="hm">Maschine</th><th>Auftrag · AG</th><th class="hm">Merkmal</th><th class="r hm">Teil</th><th class="r">Messwert</th><th class="hm">Lage in Toleranz</th><th>Ergebnis</th></tr></thead><tbody>${rows.map(({ k, m }) => {
       const ki = info[k] || (info[k] = keyInfo(k)), ch = ki.ch; if (!ch) return '';
-      return `<tr class="click${m.ok ? '' : ' nok'}${k === selKey ? ' cur' : ''}" data-sel="char|${esc(k)}" title="In der Regelkarte anzeigen"><td class="mono">${esc(tclock(m.t, now))}</td>
+      return `<tr class="click${m.ok ? '' : ' nok'}${k === selKey ? ' cur' : ''}" data-sel="char|${esc(k)}" tabindex="0" title="In der Regelkarte anzeigen" aria-label="${esc(tclock(m.t, now))} ${esc(ki.oid)} AG ${ki.seq} ${esc(ch.name)} ${esc(fv(m.v, ch))} ${esc(ch.unit)} – in der Regelkarte anzeigen"><td class="mono">${esc(tclock(m.t, now))}</td>
         <td class="hm">${esc(ki.station || '–')}<span class="sub">${esc(st(ki.station) ? st(ki.station).short : '')}</span></td>
         <td class="mono">${esc(ki.oid)}<span class="sub">AG ${ki.seq}<span class="qa-mo"> · ${esc(ki.station || '')}${m.fpi ? ' · Erstteil' : ''}</span></span></td>
         <td class="hm">${esc(ch.name)}<span class="sub">Soll ${esc(fv(ch.nominal, ch))} ${esc(fv(ch.tolMinus, ch, true))}/${esc(fv(ch.tolPlus, ch, true))}</span></td>
@@ -997,13 +1040,13 @@
         <td class="r mono">${esc(fv(m.v, ch))}<span class="sub">${esc(ch.unit)}</span></td>
         <td class="hm">${gauge(m.v, ch)}</td>
         <td><span class="qa-res ${m.ok ? '' : 'nok'}"><i></i>${m.ok ? 'i.O.' : 'n.i.O.'}</span></td></tr>`;
-    }).join('')}</tbody></table>`;
+    }).join('')}</tbody></table>`; });
   }
 
   // ---------------- Prozessfähigkeit je Merkmal
   let capRT = 0, capInfo = { n: 0, low: 0, worst: null, min: null };
   function renderCap(now, force) {
-    if (!force && ((performance.now() - capRT < 3000 && sig.cap) || R.cap._hover)) return;
+    if (!force && ((performance.now() - capRT < 3000 && sig.cap) || held(R.cap))) return;
     const Sx = S(), rows = [];
     let total = 0;
     for (const k of Object.keys(Sx.measurements)) {
@@ -1029,14 +1072,14 @@
     const capable = rows.filter(r => r.d.cpk >= 1.33).length;
     setText(R.capSub, rows.length ? `${capable} von ${rows.length} fähig (Cpk ≥ 1,33)` : '');
     const X = (v) => (U.clamp(v, 0, 2) / 2 * 100).toFixed(1);
-    R.cap.innerHTML = shown.length ? shown.map(r => {
+    keepFocus(R.cap, () => { R.cap.innerHTML = shown.length ? shown.map(r => {
       const c = r.d.cpk, col = c >= 1.33 ? 'var(--st-run)' : c >= 1 ? 'var(--st-wait)' : 'var(--st-fault)';
-      return `<div class="qa-cr${r.k === selKey ? ' on' : ''}" data-sel="char|${esc(r.k)}" title="${esc(charLabel(r.k))} – Cp ${U.fmtNum(r.d.cp, 2)} · Cpk ${U.fmtNum(c, 2)} aus ${r.d.N} Werten">
+      return `<div class="qa-cr${r.k === selKey ? ' on' : ''}" data-sel="char|${esc(r.k)}" tabindex="0" role="button" aria-pressed="${r.k === selKey}" title="${esc(charLabel(r.k))} – Cp ${U.fmtNum(r.d.cp, 2)} · Cpk ${U.fmtNum(c, 2)} aus ${r.d.N} Werten">
         <div class="n"><b>${esc(r.ki.station || '–')} · ${esc(r.ki.ch.name)}</b><span>${esc(r.ki.oid)} · AG ${r.ki.seq}${r.active ? ' · <em>läuft</em>' : ''}</span></div>
         <div class="g"><span class="tr"><i style="width:${X(c)}%;background:${col}"></i><b style="left:50%"></b><b style="left:66.5%"></b></span></div>
         <div class="v" style="color:${col}">${U.fmtNum(c, 2)}</div></div>`;
     }).join('') + `<div class="qa-cap-ax"><span style="left:50%;transform:translateX(calc(-100% - 3px))">1,0</span><span style="left:66.5%;transform:translateX(3px)">1,33 Ziel</span></div>${rest.length ? `<div class="qa-cap-more">+ ${rest.length} weitere Merkmale${rest.every(r => r.d.cpk >= 1.33) ? ', alle fähig' : ''}</div>` : ''}`
-      : '<div class="empty">Noch zu wenige Messwerte (mind. 10 je Merkmal).</div>';
+      : '<div class="empty">Noch zu wenige Messwerte (mind. 10 je Merkmal).</div>'; });
   }
 
   function update() {

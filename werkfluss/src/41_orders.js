@@ -40,14 +40,23 @@
   const simStartT = () => { const s = S(); return s && s.startT != null ? s.startT : WF.profile.sim.startT; };
   const nf = (n) => U.fmtNum(n);
   const dayOf = (t) => Math.floor(t / DAY);
-  /** Uhrzeit relativ zu heute: „15:02“, „morgen 06:30“, „Mi 14:00“ */
+  /** Wochentag mit Wochenbezug: „Mi 14:00“ (diese Woche), „nächsten Mo 12:00“, „letzten Fr 10:00“, „in 2 Wochen Di 08:00“ –
+      sonst wäre am Montag „Mo 12:00“ der nächsten Woche nicht von heute zu unterscheiden */
+  function weekDayClock(t, now) {
+    const w = Math.floor(t / (7 * DAY)) - Math.floor(now / (7 * DAY));
+    if (w === 0) return U.fmtDayClock(t);
+    if (w === 1) return 'nächsten ' + U.fmtDayClock(t);
+    if (w === -1) return 'letzten ' + U.fmtDayClock(t);
+    return (w > 0 ? 'in ' + w + ' Wochen ' : 'vor ' + (-w) + ' Wochen ') + U.fmtDayClock(t);
+  }
+  /** Uhrzeit relativ zu heute: „15:02“, „morgen 06:30“, „Mi 14:00“, „nächsten Mo 12:00“ */
   function tShort(t, now) {
     if (t == null || !isFinite(t)) return '–';
     const d = dayOf(t) - dayOf(now);
     if (d === 0) return U.fmtClock(t);
     if (d === 1) return 'morgen ' + U.fmtClock(t);
     if (d === -1) return 'gestern ' + U.fmtClock(t);
-    return U.fmtDayClock(t);
+    return weekDayClock(t, now);
   }
   /** Ist-Zeitpunkt; vor Simulationsbeginn (Anfangsbestand) ehrlich als „vor Mo 06:00“ */
   function tAct(t, now) {
@@ -56,19 +65,30 @@
     return tShort(t, now);
   }
   const fmtDue = (t, now) => (t == null ? '–' : U.fmtDue(t, now));
-  /** Termin kompakt für Karten: „heute 14:00“, „morgen 10:00“, „Mi 14:00“, „nä. Mo 10:00“, „in 2 Wo. Di 08:00“ */
+  /** Termin für Karten und Drawer (ein Format): „heute 14:00“, „morgen 10:00“, „Mi 14:00“, „nächsten Mo 10:00“ */
   function dueShort(t, now) {
     if (t == null || !isFinite(t)) return '–';
     const d = dayOf(t) - dayOf(now);
     if (d === 0) return 'heute ' + U.fmtClock(t);
     if (d === 1) return 'morgen ' + U.fmtClock(t);
     if (d === -1) return 'gestern ' + U.fmtClock(t);
-    const w = Math.floor(t / (7 * DAY)) - Math.floor(now / (7 * DAY));
-    if (w === 0) return U.fmtDayClock(t);
-    if (w === 1) return 'nä. ' + U.fmtDayClock(t);
-    if (w === -1) return 'verg. ' + U.fmtDayClock(t);
-    return (w > 0 ? 'in ' + w + ' Wo. ' : 'vor ' + (-w) + ' Wo. ') + U.fmtDayClock(t);
+    return weekDayClock(t, now);
   }
+  /** Neu gerechnete, noch unbestätigte Prognose (Engine: etaPending; bis zur nächsten Veröffentlichung etaRaw bei > 15 min Abstand) */
+  function pendingEta(v) {
+    if (!v || v.status === 'fertig' || v.eta == null) return null;
+    const p = v.etaPending != null ? v.etaPending : (v.etaRaw != null && Math.abs(v.etaRaw - v.eta) > 900 ? v.etaRaw : null);
+    return p != null && Math.abs(p - v.eta) >= 60 ? p : null;
+  }
+  /** Menge gefährdet (Engine: qtyRisk.missing > 0 – Ausschuss nach dem 1. Arbeitsgang, keine Nachfertigung eingeplant) */
+  const qtyShort = (v) => (v && v.status !== 'fertig' && v.qtyRisk && typeof v.qtyRisk === 'object' && v.qtyRisk.missing > 0 ? v.qtyRisk : null);
+  /** Terminlage für die Darstellung: Engine-Risiko – eine fehlende Menge ist nie „Im Plan“, sondern mindestens Stufe „knapp“ */
+  function riskOf(v) {
+    if (v.status !== 'fertig' && qtyShort(v) && (v.risk === 'ok' || v.risk === 'unbekannt' || !v.risk)) return 'knapp';
+    return v.risk;
+  }
+  /** Termin selbst gefährdet (verspätet oder < 4 h Puffer) – nur dann gibt es eine Verzögerungs-Ursache und Termin-Hebel */
+  const timeRisk = (v) => v.status !== 'fertig' && (v.risk === 'spät' || (v.risk === 'knapp' && !(qtyShort(v) && v.slackSec != null && v.slackSec >= 4 * HOUR)));
   /** Begrenzender Schritt eines Auftrags (Engine: limit/limitText, sonst bottleneck) → {name, seq, plant, text} */
   function limitOf(v) {
     const bw = plantBottleneck();
@@ -171,8 +191,8 @@
     if (v.source === 'KI-Auftrag') return { label: 'KI-Auftrag', title: 'Aus einer Zeichnung mit dem KI-Auftrag eingelastet' };
     return null;
   }
-  /** Termin gefährdet (knapp oder verspätet) – nur dann wird der Engpass des Auftrags als Etikett gezeigt */
-  const atRisk = (v) => v.status !== 'fertig' && (v.risk === 'knapp' || v.risk === 'spät');
+  /** Termin gefährdet (knapp oder verspätet) – nur dann wird der begrenzende Schritt des Auftrags als Etikett gezeigt */
+  const atRisk = (v) => timeRisk(v);
   /** Fortschritt einer Auftragskarte: Stückzahl als Hauptaussage, Arbeitsinhalt (Engine: progress) als zweite Ebene */
   function progOf(v) {
     const qty = Math.max(1, v.qty), work = U.clamp(v.progress || 0, 0, 1);
@@ -200,15 +220,20 @@
       if (v.slackSec != null && v.slackSec < 0) return durLong(-v.slackSec) + ' nach Termin';
       return v.slackSec != null ? durLong(v.slackSec) + ' vor Termin' : 'geliefert';
     }
-    if (v.slackSec == null) return 'keine Prognose';
-    return v.slackSec >= 0 ? 'Puffer ' + durLong(v.slackSec) : durLong(-v.slackSec) + ' zu spät';
+    const qs = qtyShort(v), qTxt = qs ? nf(qs.missing) + ' Stk fehlen' : '';
+    if (v.slackSec == null) return qTxt || 'keine Prognose';
+    const tTxt = v.slackSec >= 0 ? 'Puffer ' + durLong(v.slackSec) : durLong(-v.slackSec) + ' zu spät';
+    return qTxt ? qTxt + ' · ' + tTxt : tTxt;
   }
   function riskBadge(v) {
     if (v.status === 'fertig') {
       const ok = v.onTime;
       return { label: ok ? 'Pünktlich' : (v.shippedQty < v.qty ? 'Teilmenge' : 'Verspätet'), c: ok ? 'var(--st-run)' : 'var(--st-fault)' };
     }
-    return { label: v.riskLabel || riskLabel(v.risk), c: RISK_C[v.risk] || RISK_C.unbekannt };
+    const rk = riskOf(v);
+    // Menge gefährdet bei sonst gutem Termin: nie „Im Plan“ (Engine-Label übernehmen, sobald die Engine es selbst liefert)
+    if (rk !== v.risk || (qtyShort(v) && !timeRisk(v))) return { label: 'Menge gefährdet', c: RISK_C.knapp, qty: true };
+    return { label: v.riskLabel || riskLabel(rk), c: RISK_C[rk] || RISK_C.unbekannt };
   }
   /** Lose dieses Arbeitsgangs beim Partner (aus den Behältern): [{qty, sentT, returnT}] nach Rückkehr sortiert */
   function extLots(v, op) {
@@ -401,7 +426,10 @@
   .or-dates span{font:600 var(--fs-2xs)/1.2 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
   .or-dates b{font-weight:600;color:var(--text2);white-space:normal;overflow-wrap:anywhere;min-width:0}
   .or-dates b.eta{color:var(--text)}
-  .or-dates small{grid-column:2;font-size:var(--fs-xs);color:var(--muted);margin-top:-2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .or-dates small{grid-column:1/-1;display:flex;align-items:center;gap:5px;font-size:var(--fs-xs);font-weight:600;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .or-dates small .ico{flex:none}
+  .or-dates small.dn{color:color-mix(in srgb,var(--st-wait) 85%,var(--text))}
+  .or-dates small.up{color:color-mix(in srgb,var(--st-run) 85%,var(--text))}
   .or-risk{display:flex;flex-direction:column;align-items:flex-start;gap:5px;min-width:0}
   .or-rb{--c:var(--st-run);display:inline-flex;align-items:center;gap:6px;padding:2px 9px 2px 7px;border-radius:999px;font-size:var(--fs-xs);font-weight:600;line-height:18px;white-space:nowrap;color:color-mix(in srgb,var(--c) 82%,white);background:color-mix(in srgb,var(--c) 14%,transparent);border:1px solid color-mix(in srgb,var(--c) 38%,transparent)}
   .or-rb i{width:7px;height:7px;border-radius:50%;background:var(--c)}
@@ -515,6 +543,9 @@
   .or-gsel .mono{font-weight:600;color:var(--text)}
   .or-gsel .or-gs-a{display:flex;gap:6px}
   .or-gsel .or-rb{line-height:16px;padding:1px 8px 1px 6px}
+  .or-gsel .or-gs-p{font-style:normal;font-weight:600}
+  .or-gsel .or-gs-p.dn{color:color-mix(in srgb,var(--st-wait) 85%,var(--text))} .or-gsel .or-gs-p.up{color:color-mix(in srgb,var(--st-run) 85%,var(--text))}
+  .or-gs-new{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font:600 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--accent-ink);background:var(--accent)}
   .or-gcard{--lw:184px;position:relative;display:grid;grid-template-columns:var(--lw) minmax(0,1fr);overflow:hidden}
   .or-glabels{border-right:1px solid var(--line);background:var(--card);position:relative;z-index:2}
   .or-gl-h{display:flex;align-items:flex-end;padding:0 12px 9px 14px;font:600 var(--fs-2xs)/1.2 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);border-bottom:1px solid var(--line)}
@@ -539,6 +570,10 @@
   .or-gsvg .bf.r-knapp{stroke:var(--st-wait);stroke-width:1.5}
   .or-gsvg .bf.r-spät{stroke:var(--st-fault);stroke-width:1.5}
   .or-gsvg .su{fill:url(#or-hatch)}
+  .or-gsvg .ns{fill:url(#or-ns)}
+  .or-gsvg .nsl{stroke:var(--line2);stroke-width:1.2;stroke-dasharray:2 3}
+  .or-gsvg .blk.on .nsl{stroke:var(--accent);stroke-opacity:.8}
+  .or-gsvg .blk.on .ns{fill:url(#or-ns)}
   .or-gsvg .off{fill:var(--bg);fill-opacity:.62}
   .or-gsvg .tail{stroke:var(--muted);stroke-opacity:.7;stroke-width:1.2;stroke-dasharray:2 3;fill:none}
   .or-gsvg .tailx{stroke:var(--muted);stroke-width:1.4}
@@ -555,6 +590,13 @@
   .or-gsvg .blk.on text.tl{fill:var(--text);font-weight:600}
   .or-gsvg .blk.on .tail,.or-gsvg .blk.on .tailx{stroke:var(--accent);stroke-opacity:1}
   .or-gsvg .lk{pointer-events:none}
+  .or-gsvg .blk.fresh .bf{animation:orFresh 1.3s ease-in-out 5}
+  .or-gsvg .blk.shift .bf{animation:orShift 1.3s ease-in-out 4}
+  .or-gsvg.hl .blk.shift{opacity:.9}
+  @keyframes orFresh{0%,100%{stroke-width:1.5}50%{stroke-width:4;stroke:var(--accent)}}
+  @keyframes orShift{0%,100%{}50%{stroke:var(--st-wait);stroke-width:2.5}}
+  .or-card.fresh{animation:orCardIn 1.5s ease-in-out 3}
+  @keyframes orCardIn{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 55%,transparent)}}
   .or-ltip{position:fixed;z-index:65}
   .or-tip{position:absolute;z-index:6;pointer-events:none;min-width:220px;max-width:300px;background:var(--panel);border:1px solid var(--line2);border-radius:9px;box-shadow:var(--shadow);padding:9px 11px 10px;font-size:var(--fs-sm);line-height:1.45;color:var(--text2)}
   .or-tip-h{display:flex;align-items:center;gap:7px;margin-bottom:3px}
@@ -580,6 +622,7 @@
   .or-gkey .k-st i{width:7px;height:4px;background:var(--c)}
   .or-gkey .k-now{width:2px;height:13px;background:var(--accent);border-radius:1px}
   .or-gkey .k-lk{width:22px;height:2px;background:repeating-linear-gradient(90deg,var(--mat) 0 4px,transparent 4px 7px)}
+  .or-gkey .k-ns{width:22px;height:8px;border-radius:2px;background:repeating-linear-gradient(-45deg,color-mix(in srgb,var(--muted) 45%,transparent) 0 1.3px,transparent 1.3px 4px)}
 
   /* Bestätigung Priorität */
   .or-pm{display:flex;flex-direction:column;gap:10px}
@@ -627,6 +670,9 @@
   .or-hero-d small b{font:inherit;font-weight:600;color:var(--text2)}
   .or-hero-d small .q{color:color-mix(in srgb,var(--st-wait) 80%,var(--text))}
   .or-hero-d small .r{color:color-mix(in srgb,var(--info) 75%,var(--text))}
+  .or-hero-d small .pd{display:inline-flex;align-items:center;gap:4px;font-weight:600}
+  .or-hero-d small .pd.dn{color:color-mix(in srgb,var(--st-wait) 85%,var(--text))}
+  .or-hero-d small .pd.up{color:color-mix(in srgb,var(--st-run) 85%,var(--text))}
   .or-hero-n{display:flex;align-items:flex-start;gap:8px;font-size:var(--fs-sm);line-height:1.45;color:var(--text2)}
   .or-hero-n .ico{flex:none;margin-top:1px;color:var(--muted)}
   .or-hero-n b{color:var(--text);font-weight:600}
@@ -769,6 +815,41 @@
   .or-why-opts li.no b{color:var(--text2)}
   .or-why-a{display:flex;gap:6px;flex-wrap:wrap}
   .or-why-a:empty{display:none}
+  .or-whys{display:flex;flex-direction:column;gap:10px}
+  /* Hebel: ausführbare Maßnahmen mit Wirkung auf den Liefertermin und Kosten (Engine: orderAdvice().alternatives) */
+  .or-lvs{display:flex;flex-direction:column;gap:6px}
+  .or-lv{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:9px 10px 9px 9px;border-radius:9px;background:var(--bg2);border:1px solid var(--line)}
+  .or-lv.prim{border-color:color-mix(in srgb,var(--accent) 38%,var(--line));background:color-mix(in srgb,var(--accent) 6%,var(--bg2))}
+  .or-lv-ic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--text2);background:var(--card2);border:1px solid var(--line2);align-self:start}
+  .or-lv.prim .or-lv-ic{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);border-color:color-mix(in srgb,var(--accent) 35%,transparent)}
+  .or-lv-b{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .or-lv-h{display:flex;align-items:center;gap:7px;flex-wrap:wrap;min-width:0}
+  .or-lv-h b{font-weight:600;font-size:var(--fs-md);color:var(--text)}
+  .or-lv-tag{font:600 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;padding:3px 6px;border-radius:4px;color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+  .or-lv-t{font-size:var(--fs-sm);line-height:1.4;color:var(--text2)}
+  .or-lv-m{display:flex;flex-wrap:wrap;align-items:center;gap:3px 12px;font-size:var(--fs-xs);color:var(--muted);font-variant-numeric:tabular-nums}
+  .or-lv-m > span{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+  .or-lv-m b{color:var(--text);font-weight:600}
+  .or-lv-g{font-weight:700}
+  .or-lv-g.up{color:var(--st-run)} .or-lv-g.dn{color:var(--st-wait)}
+  .or-lv-ok{color:color-mix(in srgb,var(--st-run) 85%,var(--text))}
+  .or-lv-no{color:color-mix(in srgb,var(--st-wait) 85%,var(--text))}
+  .or-lv-c{color:var(--text2)}
+  .or-lv-c .ico,.or-lv-ok .ico{flex:none}
+  .or-lv-n{font-size:var(--fs-xs);line-height:1.4;color:var(--muted)}
+  .or-lv > .btn{align-self:center}
+  @media (max-width:440px){.or-lv{grid-template-columns:30px minmax(0,1fr)}.or-lv > .btn{grid-column:2;justify-self:start;margin-top:3px}}
+  .or-lv-cost{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border-radius:8px;font-size:var(--fs-sm);line-height:1.45;color:var(--text2);background:var(--bg2);border:1px solid var(--line)}
+  .or-lv-cost .ico{flex:none;margin-top:1px;color:var(--muted)}
+  .or-lv-cost b{color:var(--text);font-weight:600}
+  .or-lv-draft{min-height:150px;font-family:var(--f-mono);font-size:var(--fs-sm);line-height:1.5;resize:vertical}
+  /* Hebel als Schnellaktion auf der Karte */
+  .or-lvq{position:relative;flex:0 1 auto;min-width:0;display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px 0 7px;border-radius:7px;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);background:color-mix(in srgb,var(--accent) 10%,var(--card));color:var(--text);font:600 var(--fs-xs)/1 var(--f-ui);cursor:pointer;white-space:nowrap}
+  .or-lvq:hover{background:color-mix(in srgb,var(--accent) 18%,var(--card));border-color:var(--accent)}
+  .or-lvq .ico{flex:none;color:var(--accent)}
+  .or-lvq span{overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .or-lvq b{font-weight:700;color:var(--st-run);font-variant-numeric:tabular-nums}
+  .or-lvq[hidden]{display:none}
 
   /* Gemeinsame Arbeitsplan-Darstellung WF.ui.route(ops, {mode}) – „row“ = Kette wie in der Auftragsliste
      (bricht nie um, verschiebbar), „stack“ = senkrechte Schrittfolge für schmale Drawer */
@@ -880,7 +961,7 @@
     .or-search input{height:40px}
     .or-search button{width:36px;height:36px}
     .or-prio{width:40px;height:40px}
-    .or-bnw::after,.or-gleg button::after{content:'';position:absolute;inset:-9px -3px}
+    .or-bnw::after,.or-gleg button::after,.or-lvq::after{content:'';position:absolute;inset:-9px -3px}
     .or-gleg{padding-top:9px;padding-bottom:9px;margin:-6px 0}
     .or-done-h{min-height:44px}
     .or-acts .btn{height:auto}
@@ -908,7 +989,7 @@
     for (const id in s.orders) { const v = WF.sim.orderView(id); if (v) out.push(v); }
     return out;
   }
-  const cmpOpen = (a, b) => (RISK_RANK[a.risk] - RISK_RANK[b.risk]) || (a.due - b.due) || (a.id < b.id ? -1 : 1);
+  const cmpOpen = (a, b) => (RISK_RANK[riskOf(a)] - RISK_RANK[riskOf(b)]) || (a.due - b.due) || (a.id < b.id ? -1 : 1);
   const cmpDone = (a, b) => (b.doneT || 0) - (a.doneT || 0) || (a.id < b.id ? -1 : 1);
   const hay = (v) => (v.id + ' ' + v.customer + ' ' + (v.sector || '') + ' ' + v.part.name + ' ' + (v.part.no || '') + ' ' + (v.part.material || '')).toLowerCase();
 
@@ -939,7 +1020,7 @@
         <div class="kpi click" data-r="kLate" data-rf="risk" role="button" tabindex="0" title="Offene Aufträge, deren Prognose nach dem Liefertermin liegt – Klick zeigt die gefährdeten Aufträge">
           <div class="l">Verspätet</div><div class="v" data-r="kLateV">–</div><div class="s" data-r="kLateS">–</div>
         </div>
-        <div class="kpi click" data-r="kTight" data-rf="risk" role="button" tabindex="0" title="Offene Aufträge mit weniger als 4 h Puffer bis zum Liefertermin – Klick zeigt die gefährdeten Aufträge">
+        <div class="kpi click" data-r="kTight" data-rf="risk" role="button" tabindex="0" title="Offene Aufträge mit weniger als 4 h Puffer bis zum Liefertermin oder mit gefährdeter Menge (Ausschuss ohne Nachfertigung) – Klick zeigt die gefährdeten Aufträge">
           <div class="l">Knapp</div><div class="v" data-r="kTightV">–</div><div class="s" data-r="kTightS">–</div>
         </div>
         <div class="kpi" title="Heute an den Versand übergebene Teile (alle Aufträge)">
@@ -1001,6 +1082,12 @@
       const card = e.target.closest('.or-card'); if (!card) return;
       const act = e.target.closest('[data-act]');
       if (act && act.dataset.act === 'prio') { e.stopPropagation(); togglePriority(card.dataset.id); return; }
+      if (act && act.dataset.act === 'lever') {
+        e.stopPropagation();
+        const c = cards[card.dataset.id], L = c && c.lever; if (!L) return;
+        if (L.qtyRemake) { WF.app.runAction(L.action); update(); } else openLeverModal(card.dataset.id, L);
+        return;
+      }
       WF.app.select('order', card.dataset.id);
     };
     const onListKey = (e) => {
@@ -1075,6 +1162,17 @@
     return slack < 0 ? 'spät' : slack < 4 * HOUR ? 'knapp' : 'ok';
   }
   const fmtDelta = (d) => (Math.abs(d) < 60 ? '±0' : (d < 0 ? '−' : '+') + durLong(Math.abs(d)));
+  /** Zeile „Liefertermin-Prognose vorher → nachher“ (Bestätigungsdialoge Eilauftrag und Hebel); after == null: nur heutiger Stand */
+  function pmRow(oid, before, after, self, riskK) {
+    const s = S(), now = s.t, oo = s.orders[oid]; if (!oo) return '';
+    const cmp = after != null;
+    const rk = riskK || riskOfEta(oo, cmp ? after : before), d = cmp ? after - before : 0;
+    const cls = !cmp || Math.abs(d) < 60 ? '' : d < 0 ? ' up' : ' dn';
+    const eta = cmp && Math.abs(d) >= 60 ? `<s>${esc(tShort(before, now))}</s>${icon('arrowRight', 12)}<b>${esc(tShort(after, now))}</b>` : `<b>${esc(tShort(cmp ? after : before, now))}</b>`;
+    return `<div class="or-pm-r${self ? ' self' : ''}"><span class="or-pm-id">${esc(oid)}</span><span class="or-pm-pt">${esc(oo.part.name)}<small>Termin ${esc(tShort(oo.due, now))}</small></span>` +
+      `<span class="or-pm-eta">${eta}</span><span class="or-pm-d${cls}">${cmp ? esc(fmtDelta(d)) : ''}</span>` +
+      `<span class="or-rb" style="--c:${RISK_C[rk]}"><i></i>${esc(riskLabel(rk))}</span></div>`;
+  }
   /** Priorität ändern – vorher bestätigen, mit Liefertermin-Prognose vorher/nachher der betroffenen Aufträge */
   function togglePriority(id) {
     const s = S(), o = s && s.orders[id]; if (!o) return;
@@ -1087,17 +1185,7 @@
       ? `<b>${esc(id)}</b> · ${esc(v.part.name)} wird an jeder Maschine beim nächsten Auftragswechsel vorgezogen. Laufende Teile werden nicht unterbrochen; andere Aufträge rücken dafür nach hinten.`
       : `<b>${esc(id)}</b> · ${esc(v.part.name)} wird wieder nach Liefertermin eingereiht. Aufträge, die bisher warten mussten, können dadurch früher fertig werden.`;
     let tbl = '';
-    /** Zeile: vorher → nachher (after == null: nur der heutige Stand) */
-    const row = (oid, before, after, self, riskK) => {
-      const oo = s.orders[oid]; if (!oo) return '';
-      const cmp = after != null;
-      const rk = riskK || riskOfEta(oo, cmp ? after : before), d = cmp ? after - before : 0;
-      const cls = !cmp || Math.abs(d) < 60 ? '' : d < 0 ? ' up' : ' dn';
-      const eta = cmp && Math.abs(d) >= 60 ? `<s>${esc(tShort(before, now))}</s>${icon('arrowRight', 12)}<b>${esc(tShort(after, now))}</b>` : `<b>${esc(tShort(cmp ? after : before, now))}</b>`;
-      return `<div class="or-pm-r${self ? ' self' : ''}"><span class="or-pm-id">${esc(oid)}</span><span class="or-pm-pt">${esc(oo.part.name)}<small>Termin ${esc(tShort(oo.due, now))}</small></span>` +
-        `<span class="or-pm-eta">${eta}</span><span class="or-pm-d${cls}">${cmp ? esc(fmtDelta(d)) : ''}</span>` +
-        `<span class="or-rb" style="--c:${RISK_C[rk]}"><i></i>${esc(riskLabel(rk))}</span></div>`;
-    };
+    const row = (oid, before, after, self, riskK) => pmRow(oid, before, after, self, riskK);
     if (wi) {
       const rows = wi.rows.filter(x => x.id === id || Math.abs(x.after - x.before) >= 5 * 60);
       rows.sort((a, b) => (a.id === id ? -1 : b.id === id ? 1 : Math.abs(b.after - b.before) - Math.abs(a.after - a.before)));
@@ -1140,7 +1228,7 @@
   function updateKpis(views, now) {
     const open = views.filter(v => v.status !== 'fertig');
     const cnt = { ok: 0, knapp: 0, 'spät': 0, unbekannt: 0 };
-    for (const v of open) cnt[v.risk] = (cnt[v.risk] || 0) + 1;
+    for (const v of open) { const rk = riskOf(v); cnt[rk] = (cnt[rk] || 0) + 1; }
     const inWork = open.filter(v => v.status === 'in Arbeit').length;
     const eil = open.filter(v => v.priority === 'eil').length;
     setHTML(R.kOpen, nf(open.length));
@@ -1148,15 +1236,18 @@
     const tot = Math.max(1, open.length);
     setW(R.bOk, cnt.ok / tot); setW(R.bKn, cnt.knapp / tot); setW(R.bLt, cnt['spät'] / tot);
     // Verspätet / Knapp: je eine Kachel, Hinweis nur über .warn/.crit und nie bei 0 (UI_GUIDE Regel 14)
-    const byRisk = (k) => open.filter(v => v.risk === k).sort((a, b) => (a.slackSec == null ? 0 : a.slackSec) - (b.slackSec == null ? 0 : b.slackSec));
+    const byRisk = (k) => open.filter(v => riskOf(v) === k).sort((a, b) => (a.slackSec == null ? 0 : a.slackSec) - (b.slackSec == null ? 0 : b.slackSec));
     const idList = (l) => (l.length > 2 ? l.slice(0, 2).map(v => v.id).join(', ') + ' +' + (l.length - 2) : l.map(v => v.id).join(', '));
     const late = byRisk('spät'), tight = byRisk('knapp');
     setText(R.kLateV, nf(late.length));
     setCls(R.kLate, 'kpi click' + (late.length ? ' crit' : ''));
     setHTML(R.kLateS, late.length ? `<span class="mono">${esc(idList(late))}</span><br>${late[0].slackSec != null ? 'bis ' + esc(durLong(-late[0].slackSec)) + ' zu spät' : 'Prognose nach Termin'}` : 'keiner – alle Prognosen vor dem Liefertermin');
+    // Knapp = weniger als 4 h Puffer ODER Menge gefährdet (Ausschuss nach AG 1 ohne Nachfertigung) – beides wird beim Kunden spät/unvollständig
+    const tightT = tight.filter(v => timeRisk(v)), tightQ = tight.filter(v => !timeRisk(v));
     setText(R.kTightV, nf(tight.length));
     setCls(R.kTight, 'kpi click' + (tight.length ? ' warn' : ''));
-    setHTML(R.kTightS, tight.length ? `<span class="mono">${esc(idList(tight))}</span><br>${tight[0].slackSec != null ? 'Puffer ab ' + esc(durLong(tight[0].slackSec)) : 'weniger als 4 h Puffer'}` : 'keiner mit weniger als 4 h Puffer');
+    const qLine = tightQ.length ? (tightQ.length === 1 ? 'Menge gefährdet' : nf(tightQ.length) + '× Menge gefährdet') : '';
+    setHTML(R.kTightS, tight.length ? `<span class="mono">${esc(idList(tightT.concat(tightQ)))}</span><br>${tightT.length ? (tightT[0].slackSec != null ? 'Puffer ab ' + esc(durLong(tightT[0].slackSec)) : 'weniger als 4 h Puffer') + (qLine ? ' · ' + qLine : '') : qLine}` : 'keiner mit weniger als 4 h Puffer');
     const k = WF.sim.kpis();
     const day0 = dayOf(now) * DAY;
     const doneToday = views.filter(v => v.status === 'fertig' && v.doneT != null && v.doneT >= day0).length;
@@ -1210,7 +1301,7 @@
         <button type="button" class="or-prio" data-r="prio" data-act="prio">${icon('bolt', 16)}</button>
       </div>
       <div class="or-chain" data-r="chain" aria-label="Arbeitsplan"></div>
-      <div class="or-foot"><span class="or-now" data-r="now"><span data-r="nowIc"></span><span data-r="nowT"></span></span><span class="or-msg" data-r="msg" hidden>${icon('bell', 13)}<span data-r="msgT"></span></span><span class="or-bn" data-r="bn" hidden>${icon('gauge', 14)}<span data-r="bnT"></span></span></div>`;
+      <div class="or-foot"><span class="or-now" data-r="now"><span data-r="nowIc"></span><span data-r="nowT"></span></span><span class="or-msg" data-r="msg" hidden>${icon('bell', 13)}<span data-r="msgT"></span></span><span class="or-bn" data-r="bn" hidden>${icon('gauge', 14)}<span data-r="bnT"></span></span><button type="button" class="or-lvq" data-r="lvq" data-act="lever" hidden></button></div>`;
     const c = { el, r: refs(el), chips: [], links: [], nOps: -1 };
     if (selectedOrder === id) el.classList.add('sel');
     return c;
@@ -1312,7 +1403,7 @@
   function updateCard(c, v, now) {
     const r = c.r;
     const rb = riskBadge(v);
-    const late = v.status !== 'fertig' && v.risk === 'spät', tight = v.status !== 'fertig' && v.risk === 'knapp';
+    const rk = v.status !== 'fertig' ? riskOf(v) : null, late = rk === 'spät', tight = rk === 'knapp';
     setCls(c.el, 'or-card' + (late ? ' r-late' : tight ? ' r-tight' : '') + (v.status === 'fertig' ? ' done' : '') + (selectedOrder === v.id ? ' sel' : ''));
     setVar(c.el, '--rc', rb.c);
     setText(r.id, v.id);
@@ -1343,14 +1434,19 @@
     const t2 = v.status === 'fertig' ? v.doneT : v.eta;
     setText(r.etaL, v.status === 'fertig' ? 'Fertig' : 'Prognose');
     setText(r.eta, dueShort(t2, now)); setAttr(r.eta, 'title', t2 != null ? (v.status === 'fertig' ? 'Fertig ' : 'Prognose ') + fmtDue(t2, now) : null);
-    const pend = v.status !== 'fertig' && v.etaPending != null && v.eta != null && Math.abs(v.etaPending - v.eta) > 900;
-    setHidden(r.etaS, !pend);
-    if (pend) { setText(r.etaS, 'neu ' + tShort(v.etaPending, now) + ' – wird geprüft'); setAttr(r.etaS, 'title', 'Die letzte Planrechnung ergibt einen deutlich anderen Termin; er wird übernommen, sobald die nächste Rechnung ihn bestätigt.'); }
+    // sofort sichtbar, wenn eine Störung o. Ä. die Prognose verschiebt: neu gerechnet, wird mit der nächsten Planrechnung bestätigt
+    const pend = pendingEta(v);
+    setHidden(r.etaS, pend == null);
+    if (pend != null) {
+      setHTML(r.etaS, `${icon('refresh', 11)}neu ${esc(tShort(pend, now))} – wird geprüft`);
+      setCls(r.etaS, pend > v.eta ? 'dn' : 'up');
+      setAttr(r.etaS, 'title', `Die letzte Planrechnung ergibt ${tShort(pend, now)} (${pend > v.eta ? '+' : '−'}${durLong(Math.abs(pend - v.eta))}). Der Liefertermin wird übernommen, sobald die nächste Planrechnung ihn bestätigt.`);
+    }
     // Lage
     setVar(r.rb, '--c', rb.c);
     setText(r.rbT, rb.label);
     setText(r.slack, slackText(v));
-    setAttr(r.rb.parentNode, 'title', v.status === 'fertig' ? null : 'Im Plan: > 4 h Puffer · Knapp: < 4 h · Verspätet: Prognose nach Liefertermin');
+    setAttr(r.rb.parentNode, 'title', v.status === 'fertig' ? null : (qtyShort(v) ? qtyShort(v).text + '\n' : '') + 'Im Plan: > 4 h Puffer · Knapp: < 4 h oder Menge gefährdet · Verspätet: Prognose nach Liefertermin');
     // Eil
     setHidden(r.prio, v.status === 'fertig');
     setCls(r.prio, 'or-prio' + (v.priority === 'eil' ? ' on' : ''));
@@ -1367,7 +1463,21 @@
     setHidden(r.nowIc, !nl.ic);
     setHTML(r.nowT, nl.html);
     setAttr(r.nowT, 'title', r.nowT.textContent);
-    const nts = v.status !== 'fertig' ? orderNotifs(v.id) : [];
+    // Schnellaktion „Hebel“: beste ausführbare Maßnahme der Engine (Eilauftrag hat den eigenen Blitz-Knopf);
+    // bei gefährdeter Menge die Nachfertigung
+    let lv = null;
+    if (timeRisk(v)) lv = leversOf(adviceOf(v.id, v, 5000)).find(x => x.action.type !== 'setPriority') || null;
+    else if (qtyShort(v)) lv = { kind: 'planRemake', qtyRemake: true, label: `Nachfertigung ${nf(qtyShort(v).missing)} Stk`, action: { type: 'planRemake', orderId: v.id } };
+    c.lever = lv;
+    setHidden(r.lvq, !lv);
+    if (lv) {
+      const lm = LEVER[lv.kind] || LEVER[lv.action.type] || { ic: 'arrowRight' };
+      const g = !lv.qtyRemake && num0(lv.gainSec) != null && lv.gainSec >= 60 ? lv.gainSec : null;
+      setHTML(r.lvq, `${icon(lm.ic || 'arrowRight', 13)}<span>${esc(lv.label || lm.t || '')}</span>${g ? `<b>−${esc(durLong(g))}</b>` : ''}`);
+      setAttr(r.lvq, 'title', lv.qtyRemake ? 'Nachfertigung als Eilauftrag einplanen – dann ist die volle Menge lieferbar' : (lv.text || lv.label || '') + (leverCost(lv) != null ? ` · ca. ${U.fmtEur(leverCost(lv))}` : '') + ' – prüfen und umsetzen');
+    }
+    // Meldungschip: Terminmeldung entfällt, wenn ein Hebel daneben steht (sagt dasselbe, der Hebel handelt)
+    const nts = v.status !== 'fertig' ? orderNotifs(v.id).filter(n => !(lv && /^(late|qty):/.test(n.key || ''))) : [];
     setHidden(r.msg, !nts.length);
     if (nts.length) {
       const top = nts.find(n => n.sev === 'crit') || nts.find(n => n.sev === 'warn') || nts[0];
@@ -1406,7 +1516,7 @@
     const open = views.filter(v => v.status !== 'fertig').sort(cmpOpen);
     const done = views.filter(v => v.status === 'fertig').sort(cmpDone);
     let main, side;
-    if (filter === 'risk') { main = open.filter(v => v.risk === 'spät' || v.risk === 'knapp'); side = null; }
+    if (filter === 'risk') { main = open.filter(v => riskOf(v) === 'spät' || riskOf(v) === 'knapp'); side = null; }
     else if (filter === 'work') { main = open.filter(v => v.status === 'in Arbeit'); side = null; }
     else if (filter === 'done') { main = done; side = null; }
     else { main = open; side = done; }
@@ -1464,6 +1574,7 @@
         <span><span class="k-fc"></span>Prognose</span>
         <span><span class="k-su"></span>Rüsten</span>
         <span><span class="k-ext"></span>Weitere Lose geplant</span>
+        <span title="Bediener-Arbeitsplätze (Einlegen von Hand, Messraum, Montage) arbeiten nur in der Schichtzeit – Nacht und Wochenende ohne Schicht"><span class="k-ns"></span>Keine Schicht (Bediener-Arbeitsplatz)</span>
         <span><span class="k-hl"></span>Hervorgehobener Auftrag</span>
         <span><span class="k-rl"></span>Verspätet</span>
         <span><span class="k-rk"></span>Knapp</span>
@@ -1690,6 +1801,18 @@
     if (cur < b) out.push([cur, b]);
     return out;
   }
+  /** Belegung eines Bediener-Arbeitsplatzes in Arbeitsabschnitte zerlegen: Zeiten ohne Schicht ≥ 90 min (Nacht, Wochenende)
+      sind Lücken, kürzere (Pausen) bleiben im Block. → { work:[[a,b]], gaps:[[a,b]], brk:[[a,b]] } */
+  function staffedSplit(a, e) {
+    const work = [], gaps = [], brk = [];
+    let cur = a;
+    for (const [p, q] of offWork(a, e)) {
+      if (q - p >= 90 * 60) { if (p > cur + 30) work.push([cur, p]); gaps.push([p, q]); cur = q; }
+      else brk.push([p, q]);
+    }
+    if (e > cur + 30) work.push([cur, e]);
+    return { work, gaps, brk };
+  }
   // Beschriftung 11,5 px: ca. 6,4 px je Zeichen; Blöcke unter 28 px bleiben unbeschriftet
   const CW = 6.4;
   const labelFits = (txt, w) => w >= 28 && txt.length * CW + 14 <= w;
@@ -1698,7 +1821,7 @@
   function pickLabel(variants, w) { for (const t of variants) if (t && labelFits(t, w)) return t; return ''; }
   /** ein Beschriftungsformat für alle Blöcke: „FA-24119 · AG 20“, sonst „24119“ */
   const blkLabels = (oid, seq) => [seq != null ? `${oid} · AG ${seq}` : oid, numId(oid)];
-  const riskCls = (v) => (v && v.status !== 'fertig' && (v.risk === 'spät' || v.risk === 'knapp') ? ' r-' + v.risk : '');
+  const riskCls = (v) => { const rk = v && v.status !== 'fertig' ? riskOf(v) : null; return rk === 'spät' || rk === 'knapp' ? ' r-' + rk : ''; };
   const numId = (id) => String(id).replace(/^[A-Za-z]+-/, '');
 
   function ganttRender(force) {
@@ -1736,7 +1859,10 @@
     const laneBy = {}; for (const l of lanes) laneBy[l.id] = l;
     const tips = [];
     const out = [];
+    const freshOn = !!(G.fresh && performance.now() < G.fresh.until);
+    const freshCls = (oid) => (!freshOn ? '' : oid === G.fresh.id ? ' fresh' : G.fresh.shifted.has(oid) ? ' shift' : '');
     out.push(`<defs><pattern id="or-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="6" style="fill:var(--text)" fill-opacity=".2"/></pattern>` +
+      `<pattern id="or-ns" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)"><rect width="1.3" height="5" style="fill:var(--muted)" fill-opacity=".38"/></pattern>` +
       `<marker id="or-arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" style="fill:var(--mat)"/></marker></defs>`);
     // Schichten / Nacht
     const pxH = pps * HOUR;
@@ -1777,20 +1903,36 @@
     // Ist-Belegung + Zustandsband
     const past = pastOccupancy(now);
     const rr = (x, yy, w, h, cls, extra) => `<rect class="${cls}" x="${x.toFixed(1)}" y="${yy}" width="${Math.max(1, w).toFixed(1)}" height="${h}" rx="4"${extra || ''}/>`;
+    /** Bediener-Arbeitsplatz: Nacht/Wochenende als Lücke „keine Schicht“ (schraffiert, ohne Kontur), kurze Pausen dunkel im Block */
+    const gapHtml = (sp, yy) => sp ? sp.gaps.map(([p, q]) => {
+      const gx = X(p), gw = X(q) - gx; if (gw < 2) return '';
+      return `<rect class="ns" x="${gx.toFixed(1)}" y="${yy + 4}" width="${gw.toFixed(1)}" height="${BLK_H - 8}" rx="2"/><line class="nsl" x1="${gx.toFixed(1)}" x2="${(gx + gw).toFixed(1)}" y1="${yy + BLK_H / 2}" y2="${yy + BLK_H / 2}"/>`;
+    }).join('') : '';
+    const brkHtml = (sp, yy) => sp ? sp.brk.map(([p, q]) => {
+      const ox = X(p), ow = X(q) - ox; if (ow < 1.5) return '';
+      return `<rect class="off" x="${ox.toFixed(1)}" y="${yy + 1}" width="${ow.toFixed(1)}" height="${BLK_H - 2}"/>`;
+    }).join('') : '';
     out.push('<g class="past">');
     for (const l of lanes) {
       if (l.id === 'EXT') continue;
       const m = s.machines[l.id];
+      const staffed = m.loading !== 'auto';
       for (const b of past[l.id] || []) {
         const a = Math.max(b.t0, d0), e = Math.min(b.t1, now);
         if (e <= a) continue;
         const x0 = X(a), x1 = X(e), w = x1 - x0; if (w < 1) continue;
         const i = tips.length;
         tips.push({ kind: 'past', o: b.o, seq: b.seq, mid: l.id, t0: b.t0, t1: b.t1, live: b.live, pre: b.pre, shares: stateShares(m.segments, a, e) });
-        const pv = blkLabels(b.o, b.seq);
-        const lbl = pickLabel(pv, w);
-        out.push(`<g class="blk" data-i="${i}" data-o="${esc(b.o)}" data-x="${x0.toFixed(0)}">${rr(x0 + 0.5, l.y + BLK_Y, w - 1, BLK_H, 'bf ps')}` +
-          (lbl ? stickyText(lbl, x0, x1, l.y + BLK_Y + 15, 'ps', pv) : '') + '</g>');
+        const pv = blkLabels(b.o, b.seq), yy = l.y + BLK_Y;
+        const sp = staffed ? staffedSplit(a, e) : null;
+        const segs = sp && sp.work.length ? sp.work : [[a, e]];
+        let h = gapHtml(sp && sp.work.length ? sp : null, yy);
+        for (const [p, q] of segs) {
+          const sx0 = X(p), sx1 = X(q), sw = sx1 - sx0; if (sw < 1) continue;
+          const lbl = pickLabel(pv, sw);
+          h += rr(sx0 + 0.5, yy, sw - 1, BLK_H, 'bf ps') + (lbl ? stickyText(lbl, sx0, sx1, yy + 15, 'ps', pv) : '');
+        }
+        out.push(`<g class="blk" data-i="${i}" data-o="${esc(b.o)}" data-x="${x0.toFixed(0)}">${h}</g>`);
       }
       // Zustandsband
       const by = l.y + l.h - 7;
@@ -1802,33 +1944,31 @@
     }
     out.push('</g>');
     // Prognose-Blöcke: neutral; laufender Arbeitsgang mit Kante in der Farbe des Maschinenzustands,
-    // gefährdete Aufträge mit Kontur in Zustandsfarbe, Eilauftrag mit roter Ecke
+    // gefährdete Aufträge mit Kontur in Zustandsfarbe, Eilauftrag mit roter Ecke.
+    // Bediener-gebundene Arbeitsplätze arbeiten nur in der Schichtzeit: die Prognose der Engine belegt die Maschine über
+    // Nacht durchgehend – hier wird die Nacht als Lücke „keine Schicht“ gezeigt, Pausen dunkel im Block.
     out.push('<g class="fc">');
     for (const l of lanes) {
       if (l.id === 'EXT') continue;
       const mst = WF.STATE[s.machines[l.id].state] || WF.STATE.idle;
+      const staffed = s.machines[l.id].loading !== 'auto';
       for (const b of fc.machines[l.id] || []) {
         const a = Math.max(b.start, now), e = b.end;
         if (e - a < 30) continue;
         const x0 = X(a), x1 = X(e), w = x1 - x0; if (w < 0.8) continue;
         const i = tips.length;
-        tips.push({ kind: 'fc', o: b.orderId, seq: b.seq, op: b.op, mid: l.id, start: b.start, end: b.end, opEnd: b.opEnd, setupEnd: b.setupEnd, active: b.active });
+        const sp0 = staffed ? staffedSplit(a, e) : null, sp = sp0 && sp0.work.length ? sp0 : null;
+        const segs = sp ? sp.work : [[a, e]];
+        const workSec = sp ? segs.reduce((acc, [p, q]) => acc + (q - p), 0) - sp.brk.reduce((acc, [p, q]) => acc + (q - p), 0) : e - a;
+        tips.push({ kind: 'fc', o: b.orderId, seq: b.seq, op: b.op, mid: l.id, start: b.start, end: b.end, opEnd: b.opEnd, setupEnd: b.setupEnd, active: b.active,
+          staffed: !!(sp && (sp.brk.length || sp.gaps.length)), night: !!(sp && sp.gaps.length), workSec });
         const v = vById[b.orderId];
         const fv = blkLabels(b.orderId, b.seq);
-        const lbl = pickLabel(fv, w);
         const yy = l.y + BLK_Y;
-        let su = '';
-        if (b.setupEnd != null && b.setupEnd > a + 30) { const sw = Math.min(X(b.setupEnd), x1) - x0; if (sw > 1) su = rr(x0 + 0.5, yy, sw - 0.5, BLK_H, 'su'); }
         const eil = v && v.priority === 'eil';
-        // Bediener-gebundene Arbeitsplätze arbeiten nur in der Schichtzeit: Nacht/Pausen im Block abgedunkelt
-        let off = '';
-        if (s.machines[l.id].loading !== 'auto') {
-          for (const [p, q] of offWork(Math.max(a, b.setupEnd || a), e)) {
-            const ox = X(p), ow = X(q) - ox; if (ow < 1.5) continue;
-            off += `<rect class="off" x="${ox.toFixed(1)}" y="${yy + 1}" width="${ow.toFixed(1)}" height="${BLK_H - 2}"/>`;
-          }
-          if (off) tips[i].staffed = true;
-        }
+        const sx0 = X(segs[0][0]), fx1 = X(segs[0][1]);
+        let su = '';
+        if (b.setupEnd != null && b.setupEnd > a + 30) { const sw = Math.min(X(b.setupEnd), fx1) - sx0; if (sw > 1) su = rr(sx0 + 0.5, yy, sw - 0.5, BLK_H, 'su'); }
         // Arbeitsplätze, die je Behälter freigeben (Messraum, Waschen, Montage): Arbeitsgang bleibt bis opEnd offen
         let tail = '';
         if (b.opEnd != null && b.opEnd > e + 600) {
@@ -1836,10 +1976,21 @@
           tail = `<line class="tail" x1="${(x1 + 2).toFixed(1)}" x2="${tx1.toFixed(1)}" y1="${ty}" y2="${ty}"/><line class="tailx" x1="${tx1.toFixed(1)}" x2="${tx1.toFixed(1)}" y1="${ty - 4}" y2="${ty + 4}"/>` +
             `<rect x="${x1.toFixed(1)}" y="${yy}" width="${Math.max(0, tx1 - x1).toFixed(1)}" height="${BLK_H}" fill="transparent"/>`;
         }
-        const edge = b.active && w > 6 ? `<rect x="${(x0 + 0.5).toFixed(1)}" y="${yy}" width="3" height="${BLK_H}" rx="1.5" style="fill:${mst.color}"/>` : '';
-        const eilMk = eil && w > 10 ? `<path class="eil" d="M${(x0 + 0.5).toFixed(1)} ${yy + 4}a4 4 0 0 1 4-4h5l-9 9z"/>` : '';
-        out.push(`<g class="blk" data-i="${i}" data-o="${esc(b.orderId)}" data-x="${x0.toFixed(0)}">${tail}${rr(x0 + 0.5, yy, w - 1, BLK_H, 'bf' + (b.active ? ' act' : '') + riskCls(v))}` + off + su + edge + eilMk +
-          (lbl ? stickyText(lbl, x0 + (edge ? 3 : 0), x1, yy + 15, b.active ? 'act' : '', fv) : '') + '</g>');
+        const edge = b.active && fx1 - sx0 > 6 ? `<rect x="${(sx0 + 0.5).toFixed(1)}" y="${yy}" width="3" height="${BLK_H}" rx="1.5" style="fill:${mst.color}"/>` : '';
+        const eilMk = eil && fx1 - sx0 > 10 ? `<path class="eil" d="M${(sx0 + 0.5).toFixed(1)} ${yy + 4}a4 4 0 0 1 4-4h5l-9 9z"/>` : '';
+        const cls = 'bf' + (b.active ? ' act' : '') + riskCls(v);
+        let h = tail + gapHtml(sp, yy);
+        segs.forEach(([p, q], k) => {
+          const px0 = X(p), px1 = X(q), pw = px1 - px0; if (pw < 0.8) return;
+          h += rr(px0 + 0.5, yy, pw - 1, BLK_H, cls);
+        });
+        h += brkHtml(sp, yy) + (!sp && sp0 ? brkHtml({ brk: sp0.gaps.concat(sp0.brk) }, yy) : '') + su + edge + eilMk;
+        // Beschriftung je Arbeitsabschnitt (vor und nach der Nacht), sofern sie hineinpasst
+        segs.forEach(([p, q], k) => {
+          const px0 = X(p) + (k === 0 && edge ? 3 : 0), px1 = X(q), lbl = pickLabel(fv, px1 - px0);
+          if (lbl) h += stickyText(lbl, px0, px1, yy + 15, b.active && k === 0 ? 'act' : '', fv);
+        });
+        out.push(`<g class="blk${freshCls(b.orderId)}" data-i="${i}" data-o="${esc(b.orderId)}" data-x="${sx0.toFixed(0)}">${h}</g>`);
       }
     }
     out.push('</g>');
@@ -1943,15 +2094,15 @@
     if (G.nowTxt._t !== txt) { G.nowTxt._t = txt; G.nowTxt.textContent = txt; }
   }
   function updateLegend(views) {
-    const open = views.filter(v => v.status !== 'fertig').sort((a, b) => (RISK_RANK[a.risk] - RISK_RANK[b.risk]) || (a.due - b.due));
-    const sig = open.map(v => v.id + v.risk + v.priority).join(',') + '|' + G.pin;
+    const open = views.filter(v => v.status !== 'fertig').sort((a, b) => (RISK_RANK[riskOf(a)] - RISK_RANK[riskOf(b)]) || (a.due - b.due));
+    const sig = open.map(v => v.id + riskOf(v) + v.priority).join(',') + '|' + G.pin;
     if (R.gleg._sig === sig) return;
     R.gleg._sig = sig;
     if (G.pin && !open.some(v => v.id === G.pin)) G.pin = null;
     setHidden(R.glegL, !open.length);
     // neutrale Chips; Punkt nur bei gefährdetem Termin, Blitz bei Eilauftrag
-    R.gleg.innerHTML = open.map(v => `<button type="button" data-o="${esc(v.id)}" class="risk-${esc(v.risk)}${v.id === G.pin ? ' on' : ''}" aria-pressed="${v.id === G.pin}" title="${esc(v.id)} · ${esc(v.part.name)} · ${esc(v.customer)} – Termin ${esc(U.fmtDayClock(v.due))}, ${esc(v.riskLabel || '')}${v.priority === 'eil' ? ' · Eilauftrag' : ''}">` +
-      `${v.risk === 'spät' || v.risk === 'knapp' ? '<i></i>' : ''}${v.priority === 'eil' ? icon('bolt', 12) : ''}${esc(numId(v.id))}</button>`).join('');
+    R.gleg.innerHTML = open.map(v => `<button type="button" data-o="${esc(v.id)}" class="risk-${esc(riskOf(v))}${v.id === G.pin ? ' on' : ''}" aria-pressed="${v.id === G.pin}" title="${esc(v.id)} · ${esc(v.part.name)} · ${esc(v.customer)} – Termin ${esc(U.fmtDayClock(v.due))}, ${esc(riskBadge(v).label)}${v.priority === 'eil' ? ' · Eilauftrag' : ''}">` +
+      `${riskOf(v) === 'spät' || riskOf(v) === 'knapp' ? '<i></i>' : ''}${v.priority === 'eil' ? icon('bolt', 12) : ''}${esc(numId(v.id))}</button>`).join('');
     glegMask();
   }
   function glegMask() {
@@ -1974,7 +2125,7 @@
       const pinned = G.pin === oid;
       html = `<span class="or-gs-t"><span class="or-gs-id"><i></i><span class="mono">${esc(v.id)}</span></span><span><b>${esc(v.part.name)}</b> · ${esc(custShort(v.customer))}</span>
         <span class="or-rb" style="--c:${rb.c}"><i></i>${esc(rb.label)}</span>
-        <span>Termin <b>${esc(tShort(v.due, now))}</b></span><span>${v.status === 'fertig' ? 'Fertig' : 'Prognose'} <b>${esc(tShort(v.status === 'fertig' ? v.doneT : v.eta, now))}</b></span></span>
+        <span>Termin <b>${esc(tShort(v.due, now))}</b></span><span>${v.status === 'fertig' ? 'Fertig' : 'Prognose'} <b>${esc(tShort(v.status === 'fertig' ? v.doneT : v.eta, now))}</b>${pendingEta(v) != null ? ` <em class="or-gs-p ${pendingEta(v) > v.eta ? 'dn' : 'up'}" title="neu gerechnet – wird mit der nächsten Planrechnung bestätigt">→ neu ${esc(tShort(pendingEta(v), now))}</em>` : ''}</span>${G.fresh && G.fresh.id === v.id ? '<span class="or-gs-new">Neu eingelastet</span>' : ''}</span>
         <span class="or-gs-a"><button type="button" class="btn sm ghost" data-gs="due">${icon('target', 14)}Zum Termin</button><button type="button" class="btn sm" data-gs="open">Details</button>${pinned ? `<button type="button" class="btn sm ghost" data-gs="unpin" title="Hervorhebung aufheben" aria-label="Hervorhebung aufheben">${icon('x', 14)}</button>` : ''}</span>`;
     }
     if (box._h !== html) { box._h = html; box.innerHTML = html; }
@@ -2027,7 +2178,7 @@
     }
     // Liefertermin + Prognose
     const dx = g.X(o.due), v = lastViews && lastViews.find(x => x.id === oid);
-    const dc = v && v.risk === 'spät' ? 'var(--st-fault)' : v && v.risk === 'knapp' ? 'var(--st-wait)' : 'var(--accent)';
+    const rkL = v ? riskOf(v) : null, dc = rkL === 'spät' ? 'var(--st-fault)' : rkL === 'knapp' ? 'var(--st-wait)' : 'var(--accent)';
     if (dx >= 0 && dx <= g.width) {
       out.push(`<line x1="${dx.toFixed(1)}" x2="${dx.toFixed(1)}" y1="${AXIS_H}" y2="${g.H}" style="stroke:${dc}" stroke-width="1.5" stroke-dasharray="6 4"/>`);
       const lbl = `Termin ${numId(oid)} · ${tShort(o.due, now)}`;
@@ -2053,10 +2204,11 @@
       if (info.kind === 'fc') {
         const a = Math.max(info.start, now);
         body += row(info.active ? 'Läuft bis ca.' : 'Geplant', info.active ? tShort(info.end, now) : `${tShort(a, now)} – ${tShort(info.end, now)}`);
-        body += row('Dauer', U.fmtDur(info.end - a));
+        if (info.night || info.staffed) { body += row('Arbeitszeit', U.fmtDur(info.workSec)); if (info.night) body += row('Belegt (inkl. ohne Schicht)', U.fmtDur(info.end - a)); }
+        else body += row('Dauer', U.fmtDur(info.end - a));
         if (info.setupEnd != null && info.setupEnd > a + 30) body += row('davon Rüsten', `${U.fmtDur(info.setupEnd - a)} (bis ${tShort(info.setupEnd, now)})`);
         if (info.opEnd != null && info.opEnd > info.end + 600) { body += row('Arbeitsgang fertig ca.', tShort(info.opEnd, now)); body += `<div class="or-tip-n">Belegt nur, solange Teile da sind – weitere Behälter folgen vom Vorgänger (gestrichelt bis Arbeitsgang-Ende)</div>`; }
-        if (info.staffed) body += `<div class="or-tip-n">Bediener legt jedes Teil ein – gearbeitet wird nur in der Schichtzeit (abgedunkelt: Pause, Nacht)</div>`;
+        if (info.staffed) body += `<div class="or-tip-n">${info.night ? 'Bediener-Arbeitsplatz – in der Nacht ohne Schicht (schraffiert) steht er geplant, weiter mit Schichtbeginn; dunkel: Pausen' : 'Bediener legt jedes Teil ein – gearbeitet wird nur in der Schichtzeit (dunkel: Pausen)'}</div>`;
       } else {
         body += row('Ist-Belegung', `${tAct(info.t0, now)} – ${info.live ? 'jetzt' : tShort(info.t1, now)}`);
         const sh = (info.shares || []).slice(0, 3).map(x => `${(WF.STATE[x.k] || {}).label || x.k} ${U.fmtDur(x.sec)}`);
@@ -2095,6 +2247,7 @@
   function update() {
     if (!root || !WF.sim || !WF.sim.state) return;
     const now = S().t;
+    if (G.fresh && performance.now() > G.fresh.until) { G.fresh = null; G.dirty = true; }
     const views = collect();
     lastViews = views;
     updateKpis(views, now);
@@ -2106,9 +2259,15 @@
     if (R && R.newBtn) R.newBtn.hidden = !hasView('ki-auftrag');
     if (params.mode) setMode(params.mode);
     if (params.filter && ['alle', 'risk', 'work', 'done'].includes(params.filter)) setFilter(params.filter);
+    // frisch eingelastet (KI-Auftrag): neuer Auftrag hervorgehoben, verschobene Aufträge kurz markiert
+    if (params.fresh && params.order) G.fresh = { id: params.order, shifted: new Set(params.shifted || []), until: performance.now() + 20000 };
     if (params.order) {
-      if (mode === 'gantt') { G.pin = params.order; G.scrollPin = true; R.gleg._sig = null; }
-      else requestAnimationFrame(() => { const c = cards[params.order]; if (c && c.el.isConnected) c.el.scrollIntoView({ block: 'center', behavior: 'smooth' }); });
+      if (mode === 'gantt') { G.pin = params.order; G.pinFromSel = false; G.scrollPin = true; R.gleg._sig = null; }
+      else requestAnimationFrame(() => {
+        const c = cards[params.order]; if (!c || !c.el.isConnected) return;
+        c.el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        if (params.fresh) { c.el.classList.remove('fresh'); void c.el.offsetWidth; c.el.classList.add('fresh'); setTimeout(() => c.el.classList.remove('fresh'), 6000); }
+      });
     }
     if (mode === 'gantt') G.dirty = true;
   }
@@ -2230,6 +2389,121 @@
     modal = WF.app.modal({ title: 'Arbeitsgang verlagern · ' + id, body, width: 620, actions: [{ label: 'Schließen' }] });
   }
 
+  // ------------------------------------------------------------------ Hebel gegen Verspätung (Engine: orderAdvice().alternatives)
+  // Ausführbar ist eine Alternative, wenn die Engine sie für sinnvoll hält (ok) und eine Aktion mitliefert – z. B. „Los teilen“
+  // (splitLot), „Expressdurchlauf“ (expressExt), „Überstunden“ (overtime), „verlagern“ (moveOp), „Als Eilauftrag“ (setPriority).
+  // Wirkung (gainSec, ggf. Was-wäre-wenn) und Kosten (costEur) kommen aus der Engine; die Ansicht rechnet nichts selbst.
+  const LEVER = {
+    priority: { ic: 'bolt', t: 'Als Eilauftrag' }, setPriority: { ic: 'bolt', t: 'Als Eilauftrag' },
+    moveOp: { ic: 'route', t: 'Arbeitsgang verlagern' }, splitLot: { ic: 'layers', t: 'Los teilen' },
+    expressExt: { ic: 'truck', t: 'Expressdurchlauf' }, express: { ic: 'truck', t: 'Expressdurchlauf' },
+    overtime: { ic: 'clock', t: 'Überstunden' }, material: { ic: 'box', t: 'Material beschleunigen' },
+    partial: { ic: 'box', t: 'Teillieferung' }, planRemake: { ic: 'refresh', t: 'Nachfertigung' },
+  };
+  const ADV = {};   // orderId → { key, at, adv } – Empfehlung je Planstand (Was-wäre-wenn ist teuer)
+  /** Empfehlung der Engine (eine Wahrheit mit Meldung, Leitstand, Copilot) – je Planstand, höchstens alle minGapMs neu */
+  function adviceOf(id, v, minGapMs) {
+    if (!v || !timeRisk(v) || typeof WF.sim.orderAdvice !== 'function') { delete ADV[id]; return null; }
+    const fc = WF.sim.forecast(), key = fc.t + '|' + v.risk, tn = performance.now(), c = ADV[id];
+    if (c && (c.key === key || tn - c.at < (minGapMs == null ? 3000 : minGapMs))) return c.adv;
+    let adv = null;
+    try { adv = WF.sim.orderAdvice(id); } catch (e) { console.warn('[orderAdvice]', e); adv = null; }
+    ADV[id] = { key, at: tn, adv };
+    return adv;
+  }
+  const sameAct = (a, b) => !!(a && b) && JSON.stringify(a) === JSON.stringify(b);
+  const num0 = (x) => (typeof x === 'number' && isFinite(x) ? x : null);
+  /** Ausführbare Hebel: Hauptempfehlung der Engine zuerst, dann nach Zeitgewinn */
+  function leversOf(adv) {
+    if (!adv) return [];
+    const L = (adv.alternatives || []).filter(a => a && a.ok && a.action && a.action.type).map(a => Object.assign({}, a));
+    if (adv.action && adv.action.type && !L.some(a => sameAct(a.action, adv.action)))
+      L.unshift({ kind: adv.primaryKind || adv.action.type, label: adv.actionLabel || (LEVER[adv.action.type] || {}).t || adv.action.type, ok: true, action: adv.action,
+        gainSec: adv.whatIf ? adv.whatIf.gainSec : null, text: adv.whatIf ? adv.whatIf.text : '' });
+    for (const a of L) a.primary = sameAct(a.action, adv.action) || (!adv.action && a.kind === adv.primaryKind);
+    return L.sort((a, b) => (b.primary - a.primary) || ((num0(b.gainSec) || 0) - (num0(a.gainSec) || 0)));
+  }
+  /** Was-wäre-wenn-Spezifikation eines Hebels: eigene Angabe der Engine, sonst die Aktion selbst (gleiche Form wie bei setPriority/moveOp) */
+  const specOf = (a) => (a.whatIf && a.whatIf.type ? a.whatIf : a.spec && a.spec.type ? a.spec : a.action);
+  /** Prognose nach dem Hebel: Angabe der Engine (etaAfter / whatIf.target.after), sonst Prognose − Zeitgewinn */
+  function leverEta(v, a) {
+    const t = a.whatIf && a.whatIf.target ? a.whatIf.target : null;
+    const before = num0(a.etaBefore) ?? (t ? num0(t.before) : null) ?? v.eta;
+    const after = num0(a.etaAfter) ?? (t ? num0(t.after) : null) ?? (num0(a.gainSec) != null && before != null ? before - a.gainSec : null);
+    return { before, after };
+  }
+  const leverCost = (a) => num0(a.costEur) ?? num0(a.cost) ?? null;
+  const leverDraft = (a) => { const d = a.draft || a.mailText || a.requestText || a.email || null; if (!d) return null; if (typeof d === 'string') return d; return [d.to ? 'An: ' + d.to : '', d.subject ? 'Betreff: ' + d.subject : '', '', d.body || d.text || ''].filter((x, i) => x || i === 2).join('\n').trim(); };
+  /** Kurzzeile eines Hebels: „Mi 13:12 statt Do 07:12 · −18 h · Termin hält · ca. 240 €“ */
+  function leverMeta(v, a, now) {
+    const { before, after } = leverEta(v, a), cost = leverCost(a), out = [];
+    if (after != null && before != null && Math.abs(before - after) >= 60) {
+      out.push(`<span class="or-lv-eta">fertig ca. <b>${esc(tShort(after, now))}</b> statt ${esc(tShort(before, now))}</span>`);
+      out.push(`<span class="or-lv-g ${after < before ? 'up' : 'dn'}">${esc(fmtDelta(after - before))}</span>`);
+      out.push(after <= v.due ? `<span class="or-lv-ok">${icon('check', 12)}Termin hält</span>` : `<span class="or-lv-no">noch ${esc(durLong(after - v.due))} zu spät</span>`);
+    } else if (num0(a.gainSec) != null && a.gainSec > 60) out.push(`<span class="or-lv-g up">−${esc(durLong(a.gainSec))}</span>`);
+    if (cost != null) out.push(`<span class="or-lv-c">${icon('euro', 12)}ca. ${esc(U.fmtEur(cost))}</span>`);
+    return out.join('');
+  }
+  /** Hebel-Liste im Abschnitt „Warum verspätet/knapp“ */
+  function leversHtml(v, adv, now) {
+    const L = leversOf(adv);
+    if (!L.length) return '';
+    return `<div class="or-lvs"><span class="or-why-l">Hebel · Wirkung auf den Liefertermin</span>` + L.slice(0, 4).map((a, i) => {
+      const meta = LEVER[a.kind] || LEVER[a.action.type] || { ic: 'arrowRight' };
+      const title = a.label || meta.t || a.kind;
+      const txt = a.text && a.text !== title ? a.text : '';
+      return `<div class="or-lv${a.primary ? ' prim' : ''}"><span class="or-lv-ic">${icon(meta.ic || 'arrowRight', 16)}</span>` +
+        `<div class="or-lv-b"><div class="or-lv-h"><b>${esc(title)}</b>${a.primary ? '<span class="or-lv-tag">Empfohlen</span>' : ''}</div>` +
+        (txt ? `<div class="or-lv-t">${esc(txt)}</div>` : '') + `<div class="or-lv-m">${leverMeta(v, a, now)}</div>${a.note ? `<div class="or-lv-n">${esc(a.note)}</div>` : ''}</div>` +
+        `<button type="button" class="btn sm${a.primary ? ' primary' : ''}" data-lever="${i}">Prüfen</button></div>`;
+    }).join('') + `</div>`;
+  }
+  /** Bestätigungsdialog eines Hebels – wie beim Eilauftrag: Liefertermin vorher → nachher der betroffenen Aufträge, Kosten */
+  function openLeverModal(id, a) {
+    if (!a || !a.action) return;
+    if (a.action.type === 'setPriority') { togglePriority(id); return; }
+    const s = S(), v = WF.sim.orderView(id); if (!v) return;
+    const meta = LEVER[a.kind] || LEVER[a.action.type] || {};
+    let wi = null;
+    const spec = specOf(a);
+    if (spec && spec.type && typeof WF.sim.whatIf === 'function') { try { const r = WF.sim.whatIf(spec); if (r && r.ok !== false && r.target) wi = r; } catch (e) { wi = null; } }
+    const body = document.createElement('div'); body.className = 'or-pm';
+    let rows = [];
+    if (wi) {
+      rows = [wi.target].concat(wi.affected || []).filter(Boolean).map(x => ({ id: x.orderId || x.id, before: x.before, after: x.after, risk: x.riskAfter || null }))
+        .filter((x, k, arr) => x.id && arr.findIndex(y => y.id === x.id) === k && (x.id === id || Math.abs(x.after - x.before) >= 5 * 60));
+      rows.sort((p, q) => (p.id === id ? -1 : q.id === id ? 1 : Math.abs(q.after - q.before) - Math.abs(p.after - p.before)));
+    } else {
+      const e = leverEta(v, a);
+      if (e.before != null) rows = [{ id, before: e.before, after: e.after, risk: null }];
+    }
+    const late = wi ? (wi.newlyLate || []).concat((wi.laterLate || []).filter(x => !(wi.newlyLate || []).includes(x))) : [];
+    const cost = leverCost(a), draft = leverDraft(a);
+    let h = `<p class="or-pm-lead"><b>${esc(id)}</b> · ${esc(v.part.name)}: ${esc(a.text || a.label || meta.t || '')}</p>`;
+    if (rows.length) h += `<div class="or-pm-h"><span>Liefertermin-Prognose</span><span>vorher → nachher</span></div><div class="or-pm-t">${rows.slice(0, 8).map(x => pmRow(x.id, x.before, x.after, x.id === id, x.risk)).join('')}</div>`;
+    if (late.length) h += `<div class="or-pm-w">${icon('alert', 15)}<span>Dadurch ${late.length === 1 ? 'wird' : 'werden'} <b>${late.map(esc).join(', ')}</b> ${(wi.newlyLate || []).length ? 'zu spät' : 'noch später'}.</span></div>`;
+    if (cost != null || a.costText) h += `<div class="or-lv-cost">${icon('euro', 15)}<span>Mehrkosten ca. <b>${cost != null ? esc(U.fmtEur(cost)) : '–'}</b>${a.costText || a.costNote ? ' · ' + esc(a.costText || a.costNote) : ''}</span></div>`;
+    if (a.note) h += `<p class="or-pm-n">${esc(a.note)}</p>`;
+    if (draft) h += `<div class="or-pm-h"><span>Anfrage an den Partner</span><span>zum Kopieren</span></div><textarea class="input or-lv-draft" readonly spellcheck="false">${esc(draft)}</textarea>`;
+    h += `<p class="or-pm-n">${wi ? 'Was-wäre-wenn-Rechnung derselben Planung wie die Plantafel; nach dem Umsetzen bestätigt die nächste Planrechnung die Werte.' : 'Wirkung laut Planung der Engine; nach dem Umsetzen rechnet die Planung neu – die Plantafel zeigt die Auswirkung auf alle Aufträge.'}</p>`;
+    body.innerHTML = h;
+    const acts = [{ label: 'Abbrechen' }];
+    if (draft) acts.push({ label: 'Text kopieren', icon: 'file', onClick: () => {
+      const ta = body.querySelector('textarea'), ok = () => WF.app.toast('Anfragetext in die Zwischenablage kopiert', 'ok');
+      try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).then(ok, () => { ta.select(); document.execCommand('copy'); ok(); }); else { ta.select(); document.execCommand('copy'); ok(); } } catch (e) { ta.select(); }
+      return false;
+    } });
+    acts.push({ label: a.actionLabel || a.label || meta.t || 'Umsetzen', primary: true, onClick: () => applyLever(id, a) });
+    WF.app.modal({ title: (a.label || meta.t || 'Hebel') + ' · ' + id, body, width: 620, actions: acts });
+  }
+  function applyLever(id, a) {
+    const r = WF.app.runAction(a.action);   // Bestätigung bzw. Ablehnungsgrund als Meldung (App)
+    delete ADV[id];
+    if (r && r.ok === false) return;
+    update();
+  }
+
   /** Zeile der senkrechten Schrittfolge im Drawer. Erledigte und noch nicht begonnene Schritte einzeilig,
       laufende/wartende/externe ausführlich mit Mengen; zufließende Behälter als Materialfluss-Hinweis über dem Schritt. */
   function opRowHtml(op, v, now, ctx) {
@@ -2346,10 +2620,11 @@
     const fc = WF.sim.forecast(), f = fc.orders[v.id] || {};
     const pg = progOf(v);
     const top = `<div class="or-hero-top"><span class="or-rb" style="--c:${rb.c}"><i></i>${esc(rb.label)}</span><span class="or-hero-slack">${esc(slackText(v))}</span><span class="spacer" style="flex:1"></span>${v.priority === 'eil' ? `<span class="or-tag eil">${icon('bolt', 11)}Eilauftrag</span>` : ''}${v.status === 'freigegeben' ? '<span class="or-tag rel">Freigegeben</span>' : ''}${(() => { const t = srcTag(v); return t ? `<span class="or-tag src" title="${esc(t.title)}">${esc(t.label)}</span>` : ''; })()}</div>`;
-    const pend = v.status !== 'fertig' && v.etaPending != null && v.eta != null && Math.abs(v.etaPending - v.eta) > 900;
+    const pend = pendingEta(v);
+    // ein Terminformat für Karte und Drawer (dueShort): „morgen 16:00“, „nächsten Mo 12:00“
     const d = `<div class="or-hero-d">
-      <div><span class="eyebrow">Liefertermin</span><b>${esc(fmtDue(v.due, now))}</b><small>${esc(v.status === 'fertig' ? U.fmtDayClock(v.due) : v.due >= now ? 'in ' + durLong(v.due - now) : 'seit ' + durLong(now - v.due) + ' überschritten')}</small></div>
-      <div><span class="eyebrow">${v.status === 'fertig' ? 'Fertig' : 'Prognose fertig'}</span><b>${esc(v.status === 'fertig' ? fmtDue(v.doneT, now) : fmtDue(v.eta, now))}</b><small>${pend ? 'neu gerechnet ' + esc(tShort(v.etaPending, now)) + ' – wird geprüft' : v.status === 'fertig' ? (v.onTime ? 'termingerecht und vollständig' : 'nicht termingerecht') : 'aus Live-Daten, inkl. Fremdbearbeitung'}</small></div>
+      <div><span class="eyebrow">Liefertermin</span><b title="${esc(fmtDue(v.due, now))}">${esc(dueShort(v.due, now))}</b><small>${esc(v.status === 'fertig' ? U.fmtDayClock(v.due) : v.due >= now ? 'in ' + durLong(v.due - now) : 'seit ' + durLong(now - v.due) + ' überschritten')}</small></div>
+      <div><span class="eyebrow">${v.status === 'fertig' ? 'Fertig' : 'Prognose fertig'}</span><b>${esc(v.status === 'fertig' ? dueShort(v.doneT, now) : dueShort(v.eta, now))}</b><small>${pend != null ? `<span class="pd ${pend > v.eta ? 'dn' : 'up'}">${icon('refresh', 11)}neu ${esc(tShort(pend, now))} – wird geprüft</span>` : v.status === 'fertig' ? (v.onTime ? 'termingerecht und vollständig' : 'nicht termingerecht') : 'aus Live-Daten, inkl. Fremdbearbeitung'}</small></div>
       <div title="${esc(pg.title)}"><span class="eyebrow">${v.status === 'fertig' ? 'Versandt' : 'Fertig bearbeitet'}</span><b>${nf(pg.n)}/${nf(v.qty)} Stk</b><small>${pg.sub}</small></div>
     </div>`;
     const bar = `<span class="or-pbar" title="${esc(pg.title)}"><i class="w" style="width:${(pg.work * 100).toFixed(1)}%"></i><i style="width:${(U.clamp(pg.frac, 0, 1) * 100).toFixed(1)}%"></i></span>`;
@@ -2402,17 +2677,32 @@
     if (adv) {
       const m = /Empfehlung:\s*(.+?)\.?\s*$/.exec(adv.text || '');
       const rec = m ? m[1] : null;
-      const act = adv.action && adv.actionLabel ? `<button type="button" class="btn sm primary" data-wact="1">${esc(adv.actionLabel)}</button>` : '';
       if (rec) h += `<div class="or-why-rec">${icon('arrowRight', 14)}<span><b>Empfehlung:</b> ${esc(rec)}</span></div>`;
-      const alts = (adv.alternatives || []).filter(a => a && a.kind !== adv.primaryKind);
+      // ausführbare Hebel mit Wirkung und Kosten; übrige Optionen (ohne Aktion) als Liste, nicht sinnvolle durchgestrichen erklärt
+      h += leversHtml(v, adv, now);
+      const lv = leversOf(adv);
+      const alts = (adv.alternatives || []).filter(a => a && !lv.some(x => sameAct(x.action, a.action) && a.action) && !(a.kind === adv.primaryKind && !a.action && rec));
       if (alts.length) {
         h += `<ul class="or-why-opts">` + alts.slice(0, 4).map(a => a.ok
-          ? `<li>${icon('check', 14)}<span>${esc(a.text || a.label)}${a.gainSec > 60 ? ` <b>(−${esc(durLong(a.gainSec))})</b>` : ''}</span></li>`
+          ? `<li>${icon('check', 14)}<span>${esc(a.text || a.label)}${a.gainSec > 60 ? ` <b>(−${esc(durLong(a.gainSec))})</b>` : ''}${leverCost(a) != null ? ` · ca. ${esc(U.fmtEur(leverCost(a)))}` : ''}</span></li>`
           : `<li class="no">${icon('x', 14)}<span>${esc(a.note || a.text || a.label)}</span></li>`).join('') + `</ul>`;
       }
-      if (act) h += `<div class="or-why-a">${act}</div>`;
     }
     return h ? `<div class="or-why" style="--rc:${late ? 'var(--st-fault)' : 'var(--st-wait)'}">${h}</div>` : '';
+  }
+  /** Menge gefährdet: Ursache (Ausschuss nach AG 1 ohne Nachfertigung) und der eine Hebel – Nachfertigung einplanen (Engine: planRemake) */
+  function qtyWhyHtml(v, qs, now) {
+    const op1 = v.ops[0] || {};
+    const nt = orderNotifs(v.id).find(n => /^qty:/.test(n.key || ''));
+    const na = nt && (nt.actions || []).find(x => x.action && x.action.type === 'planRemake');
+    const lbl = na ? na.label : `Nachfertigung ${nf(qs.missing)} Stk einplanen`;
+    return `<div class="or-why" style="--rc:var(--st-wait)">
+      <div class="or-why-c"><span class="or-why-l">Ursache</span><b>${esc(qs.text || `nur ${nf(qs.expectedQty)}/${nf(qs.qty)} Stk – Ausschuss nach AG ${op1.seq}, keine Nachfertigung eingeplant`)}</b></div>
+      <div class="or-lvs"><span class="or-why-l">Hebel · Menge sichern</span>
+        <div class="or-lv prim"><span class="or-lv-ic">${icon('refresh', 16)}</span><div class="or-lv-b"><div class="or-lv-h"><b>Nachfertigung einplanen</b><span class="or-lv-tag">Empfohlen</span></div>
+          <div class="or-lv-t">Neuer Eilauftrag über ${nf(qs.missing)} Stk mit gleichem Arbeitsplan ab ${esc(op1.stationName || op1.station || '')} (AG ${esc(op1.seq)}), Termin wie ${esc(v.id)}.</div>
+          <div class="or-lv-m"><span class="or-lv-ok">${icon('check', 12)}dann ${nf(qs.qty)}/${nf(qs.qty)} Stk lieferbar</span><span>sonst nur ${nf(qs.expectedQty)}/${nf(qs.qty)} Stk</span></div></div>
+          <button type="button" class="btn sm primary" data-qact="remake">${esc(lbl)}</button></div></div></div>`;
   }
   function factsHtml(v, now) {
     const scrap = v.ops.reduce((a, o) => a + (o.scrap || 0), 0);
@@ -2481,19 +2771,11 @@
   WF.registerDetail('order', (id) => {
     const v0 = WF.sim.orderView(id);
     if (!v0) return null;
-    const st = { evAll: false, adv: null, advKey: null, advAt: 0 };
+    const st = { evAll: false, adv: null };
     const subtitle = `<span class="or-d-sub"><span>${esc(v0.customer)}</span><span class="faint">·</span><span>${esc(v0.sector || '')}</span><span class="faint">·</span><span class="mono">${esc(v0.part.no || '')}</span></span>`;
     let N = null;
-    /** Empfehlung der Engine (eine Wahrheit mit Meldung, Leitstand, Copilot) – teuer (Was-wäre-wenn), daher je Planstand und höchstens alle 3 s */
-    function advice(v) {
-      if (!atRisk(v) || typeof WF.sim.orderAdvice !== 'function') { st.adv = null; st.advKey = null; return null; }
-      const fc = WF.sim.forecast(), key = fc.t + '|' + v.risk, tn = performance.now();
-      if (st.advKey !== key && (st.advKey == null || tn - st.advAt > 3000)) {
-        try { st.adv = WF.sim.orderAdvice(id); } catch (e) { console.warn('[orderAdvice]', e); st.adv = null; }
-        st.advKey = key; st.advAt = tn;
-      }
-      return st.adv;
-    }
+    /** Empfehlung der Engine (eine Wahrheit mit Meldung, Leitstand, Copilot) – je Planstand, höchstens alle 3 s (Was-wäre-wenn ist teuer) */
+    function advice(v) { st.adv = adviceOf(id, v, 3000); return st.adv; }
     function render(el) {
       el.innerHTML = `
         <section data-n="hero"></section>
@@ -2518,13 +2800,10 @@
         else if (k === 'run' && n.actions && n.actions[Number(idx)]) WF.app.runAction(n.actions[Number(idx)].action);
         N.nts._h = null; update(); return;
       }
-      const wa = e.target.closest('[data-wact]');
-      if (wa && st.adv && st.adv.action) {
-        const a = st.adv.action;
-        if (a.type === 'setPriority') togglePriority(id);
-        else { WF.app.runAction(a); st.advKey = null; update(); }
-        return;
-      }
+      const lb = e.target.closest('[data-lever]');
+      if (lb && st.adv) { const L = leversOf(st.adv)[Number(lb.dataset.lever)]; if (L) openLeverModal(id, L); return; }
+      const qb = e.target.closest('[data-qact]');
+      if (qb) { const r = WF.app.runAction({ type: 'planRemake', orderId: id }); if (r && r.ok !== false) { N.why._h = null; update(); } return; }
       const ent = e.target.closest('[data-ent]');
       if (ent) { const [k, i] = ent.dataset.ent.split('|'); WF.app.select(k, i); return; }
       const act = e.target.closest('[data-act]'); if (!act || act.disabled) return;
@@ -2546,18 +2825,20 @@
       const v = WF.sim.orderView(id); if (!v) return;
       const now = S().t;
       setHTML(N.hero, heroHtml(v, now));
-      // Warum spät / knapp
+      // Warum spät / knapp / Menge gefährdet – mit Hebeln
       const adv = advice(v);
-      const why = atRisk(v) ? whyHtml(v, adv, now) : '';
+      const qs = qtyShort(v);
+      const whyT = atRisk(v) ? whyHtml(v, adv, now) : '', whyQ = qs ? qtyWhyHtml(v, qs, now) : '';
+      const why = whyT + whyQ;
       setHidden(N.whySec, !why);
-      setText(N.whyT, v.risk === 'spät' ? 'Warum verspätet' : 'Warum knapp');
-      setHTML(N.why, why);
+      setText(N.whyT, whyT ? (v.risk === 'spät' ? 'Warum verspätet' : 'Warum knapp') : 'Warum Menge gefährdet');
+      setHTML(N.why, why ? `<div class="or-whys">${why}</div>` : '');
       const nts = orderNotifs(id, false);
       setHidden(N.ntSec, !nts.length);
       setHTML(N.nts, nts.map(n => {
         const sv = WF.SEV[n.sev] || WF.SEV.info;
         // Terminmeldung: Empfehlung und Aktion stehen schon unter „Warum …“ – hier nicht doppelt
-        const dup = !!why && /^late:/.test(n.key || '');
+        const dup = (!!whyT && /^late:/.test(n.key || '')) || (!!whyQ && /^qty:/.test(n.key || ''));
         const acts = dup ? [] : (n.actions || []).map((a, i) => ({ a, i })).filter(x => !(x.a.action && x.a.action.type === 'select' && x.a.action.id === id));
         return `<div class="or-nt${n.status === 'ack' ? ' ack' : ''}" style="--c:${sv.color}">
           <div class="or-nt-h"><span>${WF.ui.notifTime ? WF.ui.notifTime(n) : esc(tShort(n.t, now))} · ${esc(n.role || '')}</span>${n.status === 'ack' ? `<span>quittiert${n.ackBy ? ' von ' + esc(n.ackBy) : ''}</span>` : `<span class="or-nt-sev">${esc(sv.label)}</span>`}</div>

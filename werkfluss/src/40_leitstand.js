@@ -16,12 +16,15 @@
   const SETUPISH = { setup: 1, firstPiece: 1, toolchange: 1 };
   // Bereiche in Materialfluss-Reihenfolge (Zuschnitt → Drehen/Fräsen → Sonderbearbeitung → Schleifen → Waschen → Prüfen → Montage)
   const AREA_ORDER = ['Zuschnitt', 'Dreherei', 'Fräserei', 'Sonderbearbeitung', 'Verzahnung', 'Schleiferei', 'Reinigung', 'Qualität', 'Montage'];
+  // Zusammenfassung über den Kacheln: dieselben Bezeichnungen wie die Pills (UI_GUIDE Regel 19) –
+  // „Keine Schicht“ (geplanter Stillstand ohne Schicht) zählt getrennt von „Bereit“ und erscheint nur, wenn es vorkommt
   const STATE_GROUPS = [
-    { key: 'prod', label: 'Produktion', color: 'var(--st-run)', match: (s) => s === 'running' },
-    { key: 'setup', label: 'Rüsten/Prüfen', color: 'var(--st-setup)', match: (s) => !!SETUPISH[s] },
-    { key: 'wait', label: 'Wartet', color: 'var(--st-wait)', match: (s) => !!WAIT[s] },
-    { key: 'fault', label: 'Störung', color: 'var(--st-fault)', match: (s) => s === 'fault' },
-    { key: 'idle', label: 'Bereit', color: 'var(--st-idle)', match: (s) => s === 'idle' },
+    { key: 'prod', label: 'Produktion', color: 'var(--st-run)' },
+    { key: 'setup', label: 'Rüsten/Prüfen', color: 'var(--st-setup)' },
+    { key: 'wait', label: 'Wartet', color: 'var(--st-wait)' },
+    { key: 'fault', label: 'Störung', color: 'var(--st-fault)' },
+    { key: 'idle', label: 'Bereit', color: 'var(--st-idle)' },
+    { key: 'noshift', label: 'Keine Schicht', color: 'var(--st-idle)', optional: true },
   ];
   const NO_TOOL = {
     cmm: 'Prüfmittel 3D-KMG · ohne Werkzeug',
@@ -41,7 +44,43 @@
 
   // ------------------------------------------------------------------ kleine Helfer
   const S = () => WF.sim && WF.sim.state;
-  const tclock = (t, now) => (Math.floor(t / 86400) === Math.floor(now / 86400) ? U.fmtClock(t) : U.fmtDayClock(t));
+  /** Ein Zeitformat für die ganze Ansicht: heute nur die Uhrzeit, gestern/morgen relativ (wie fmtDue in Aufträgen
+      und Drawer), weiter weg mit Wochentag. */
+  const tclock = (t, now) => {
+    const d = Math.floor(t / 86400) - Math.floor(now / 86400);
+    return d === 0 ? U.fmtClock(t) : (d === 1 || d === -1) ? U.fmtDue(t, now) : U.fmtDayClock(t);
+  };
+  const DAYN = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+  /** Engine-Texte nennen Zeitpunkte mit Wochentag („weiter Di 06:00“). Für gestern/heute/morgen dieselbe relative
+      Schreibweise wie in den übrigen Zeilen (sonst stünde „Di 06:00“ neben „morgen 06:49“ in derselben Kachel). */
+  function relDays(s, now) {
+    if (!s || String(s).indexOf(':') < 0) return s;
+    return String(s).replace(/\b(Mo|Di|Mi|Do|Fr|Sa|So) (\d{2}):(\d{2})\b/g, (m, d, hh, mm) => {
+      const day0 = Math.floor(now / 86400), dow = ((day0 % 7) + 7) % 7;
+      let delta = DAYN.indexOf(d) - dow; if (delta > 3) delta -= 7; if (delta < -3) delta += 7;
+      if (Math.abs(delta) > 1) return m;
+      return U.fmtDue((day0 + delta) * 86400 + Number(hh) * 3600 + Number(mm) * 60, now);
+    });
+  }
+  /** Zustandsname und Pill – eine Benennung für Kachel, Zusammenfassung und Drawer (WF.ui.machineStateLabel, Regel 19).
+      Unbekannte Engine-Zustände (z. B. künftige Messraum-Zustände) mit Engine-Label und -Farbe statt Rohschlüssel. */
+  function stateLabel(mv) {
+    if (!mv) return '';
+    if (!WF.STATE[mv.state]) return mv.stateLabel || mv.state;
+    return WF.ui.machineStateLabel ? WF.ui.machineStateLabel(mv) : WF.STATE[mv.state].label;
+  }
+  function statePill(mv) {
+    if (!WF.STATE[mv.state]) return `<span class="pill" style="--c:${esc(mv.stateColor || 'var(--st-setup)')}"><i></i>${esc(stateLabel(mv))}</span>`;
+    return WF.ui.machinePill ? WF.ui.machinePill(mv) : WF.ui.pill(mv.state);
+  }
+  function groupOf(mv) {
+    const s = mv && mv.state;
+    if (s === 'running') return 'prod';
+    if (s === 'fault') return 'fault';
+    if (WAIT[s]) return 'wait';
+    if (s === 'idle') return stateLabel(mv) === 'Keine Schicht' ? 'noshift' : 'idle';
+    return 'setup';   // Rüsten, Erstteilprüfung, Werkzeugwechsel und unbekannte Belegt-Zustände (ruhig, nicht „Wartet“)
+  }
   const shortName = (n) => { const p = String(n || '').trim().split(/\s+/); return p.length > 1 ? p[0][0] + '. ' + p[p.length - 1] : String(n || ''); };
   const custShort = (c) => String(c || '').replace(/\s*\([^)]*\)/g, '').replace(/\s+(GmbH|AG|KG|OG|GesmbH)\b\.?/g, '').trim();
   const toolShort = (n) => String(n || '').replace(/\s*\([^)]*\)/g, '').trim();
@@ -75,9 +114,17 @@
   .ls-kpis .kpi .s{-webkit-line-clamp:1;overflow-wrap:anywhere}
   .ls-kpis .kpi .s b{color:var(--text2);font-weight:600}
   .ls-k-spark{height:30px}
-  .ls-kpis .ls-k-oee.ghost .s{-webkit-line-clamp:2}
-  .ls-kpis .ls-k-oee.ghost .ls-s2{display:none}
+  /* Zwei Aussagezeilen (Schichten/Nacht, Geisterschicht): Unterzeile darf 2 Zeilen haben, V × L × Q entfällt */
+  .ls-kpis .kpi.two .s{-webkit-line-clamp:2}
+  .ls-kpis .kpi.two .ls-s2{display:none}
+  .ls-kpis .kpi .s .ln{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ls-k-spark svg{display:block;width:100%;height:100%;overflow:visible}
+  /* OEE Schichten gegen Nacht (wenn der Tagesverlauf die Nacht enthält): zwei Balken, gemeinsame Ziel-Marke */
+  .ls-k-bars{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 8px;align-items:center;font:600 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+  .ls-k-bars em{font-style:normal}
+  .ls-k-bars > span{position:relative;height:5px;border-radius:3px;background:var(--track)}
+  .ls-k-bars > span > i{position:absolute;left:0;top:0;bottom:0;border-radius:inherit;background:var(--c)}
+  .ls-k-bars > span > b{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;border-radius:1px;background:var(--muted)}
 
   .ls-main{display:grid;grid-template-columns:minmax(0,1fr) 344px;gap:14px;align-items:start}
   .ls-side{display:flex;flex-direction:column;gap:14px;min-width:0}
@@ -88,6 +135,7 @@
   .ls-sum button i{width:8px;height:8px;border-radius:50%;background:var(--c)}
   .ls-sum button b{font-variant-numeric:tabular-nums;color:var(--text)}
   .ls-sum button.zero{opacity:.5}
+  .ls-sum button[hidden]{display:none}
   .ls-sum button.on{border-color:color-mix(in srgb,var(--c) 60%,transparent);background:color-mix(in srgb,var(--c) 14%,var(--card))}
   .ls-sum button:hover{border-color:var(--line2)}
   .ls-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(256px,1fr))}
@@ -199,12 +247,15 @@
   .ls-x-ax span.a1{transform:translateX(-100%)}
   .ls-x-ax span.nw{color:var(--text2);font-weight:600}
   .ls-x-lh{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid var(--line);padding-top:8px;margin-top:2px}
-  .ls-x-list{display:flex;flex-direction:column;min-height:0;overflow:hidden;flex:1}
-  .ls-x-row{--c:var(--muted);display:grid;grid-template-columns:40px 16px minmax(0,1fr);gap:6px;align-items:center;font-size:var(--fs-sm);line-height:1.35;padding:3px 0;color:var(--text2)}
+  /* Liste „Als Nächstes“: feste Zeilenhöhe, Höhe kommt vom Raster (height:0 + flex:1) – die Zeilenzahl wird aus der
+     beim Größenwechsel gemessenen Höhe berechnet, update() liest kein Layout (keine angeschnittenen Zeilen) */
+  .ls-x{--xr:24px}
+  .ls-x-list{display:flex;flex-direction:column;overflow:hidden;flex:1 1 0;height:0;min-height:calc(var(--xr) * 4)}
+  .ls-x-row{--c:var(--muted);display:grid;grid-template-columns:40px 16px minmax(0,1fr);gap:6px;align-items:center;font-size:var(--fs-sm);line-height:1.35;height:var(--xr);flex:none;color:var(--text2)}
   .ls-x-row[data-ent]{cursor:pointer}
   .ls-x-row[data-ent]:hover span:last-child{color:var(--text)}
   .ls-x-row .num{color:var(--muted);font-size:var(--fs-xs);white-space:nowrap}
-  .ls-x-list.wd .ls-x-row{grid-template-columns:62px 16px minmax(0,1fr)}
+  .ls-x-list.wd .ls-x-row{grid-template-columns:76px 16px minmax(0,1fr)}
   .ls-x-row .ico{color:var(--c)}
   .ls-x-row span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ls-x-empty{font-size:var(--fs-sm);color:var(--muted);padding:2px 0}
@@ -233,19 +284,34 @@
   .ls-now-ok .ico{color:var(--st-run);flex:none;margin-top:1px}
   .ls-now-more{display:block;width:100%;padding:10px 14px;border:0;border-top:1px solid var(--line);background:transparent;color:var(--accent);font-size:var(--fs-sm);font-weight:600;cursor:pointer;text-align:left}
 
-  .ls-brief .card-b{display:flex;flex-direction:column;gap:9px}
-  .ls-brief-h{font-weight:600;font-size:var(--fs-md);line-height:1.4}
-  .ls-brief ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px}
-  .ls-brief li{--c:var(--info);position:relative;padding-left:14px;font-size:var(--fs-sm);line-height:1.45;color:var(--text2)}
-  .ls-brief li::before{content:"";position:absolute;left:1px;top:.52em;width:6px;height:6px;border-radius:50%;background:var(--c)}
-  /* Bezüge im Briefing wie im Copilot: schlichte Links (Mono, gepunktet unterstrichen) */
-  .ls-brief li .link{font-family:var(--f-mono);font-size:.95em;font-weight:500;color:var(--text);text-decoration:underline dotted;text-decoration-color:color-mix(in srgb,var(--accent) 70%,transparent);text-underline-offset:3px}
-  .ls-brief li .link:hover{color:var(--accent);text-decoration-style:solid}
-  .ls-brief-f{display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--faint);flex-wrap:wrap}
+  /* KI-Schichtbriefing: 3–5 Punkte mit Kategorie, je eine Kernaussage + eine leise Zeile; nichts aus den Karten darüber */
+  .ls-brief .card-h{cursor:pointer;user-select:none}
+  .ls-brief .card-h:hover h3{color:var(--text)}
+  .ls-brief.closed .card-h{border-bottom-color:transparent}
+  .ls-brief.closed [data-r="briefBody"]{display:none}
+  .ls-brief .card-b{display:flex;flex-direction:column;gap:2px;padding-top:6px;padding-bottom:10px}
+  .ls-bl{margin:0;padding:0;list-style:none;display:flex;flex-direction:column}
+  .ls-bl li{--c:var(--info);display:grid;grid-template-columns:76px minmax(0,1fr);gap:2px 10px;padding:8px 0;border-bottom:1px solid var(--line);align-items:baseline}
+  .ls-bl li:last-child{border-bottom:0}
+  .ls-bl li.click{cursor:pointer}
+  .ls-bl li.click:hover .ls-bl-m b{color:var(--accent)}
+  .ls-bl-k{display:flex;align-items:center;gap:6px;font:600 var(--fs-2xs)/1.25 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+  .ls-bl-k::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--c);flex:none;transform:translateY(-.5px)}
+  .ls-bl-m{min-width:0;display:flex;flex-direction:column;gap:2px}
+  .ls-bl-m b{font-weight:600;font-size:var(--fs-sm);line-height:1.38;color:var(--text)}
+  .ls-bl-m span{font-size:var(--fs-xs);line-height:1.4;color:var(--muted);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  /* Bezüge wie im Copilot: schlichte Links (Mono, gepunktet unterstrichen) */
+  .ls-bl .link{font-family:var(--f-mono);font-size:.94em;font-weight:500;color:inherit;text-decoration:underline dotted;text-decoration-color:color-mix(in srgb,var(--accent) 70%,transparent);text-underline-offset:3px}
+  .ls-bl .link:hover{color:var(--accent);text-decoration-style:solid}
+  .ls-brief-f{display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--faint);flex-wrap:wrap;padding-top:8px;border-top:1px solid var(--line)}
   .ls-brief-f .spacer{flex:1}
+  .ls-brief-n{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap}
   .ls-mode{font:600 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.06em;text-transform:uppercase;padding:3px 6px;border-radius:5px;color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);border:1px solid color-mix(in srgb,var(--accent) 28%,transparent)}
   .ls-ibtn{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}
   .ls-ibtn:hover{color:var(--text);border-color:var(--line2)}
+  .ls-brief [data-r="briefToggle"] .ico{transition:transform .2s ease;transform:rotate(90deg)}
+  .ls-brief.closed [data-r="briefToggle"] .ico{transform:none}
+  .ls-feed-list.wd .ls-ev{grid-template-columns:76px 22px minmax(0,1fr)}
 
   .ls-feed-list{display:flex;flex-direction:column;padding:4px 0}
   .ls-ev{--c:var(--muted);display:grid;grid-template-columns:40px 22px minmax(0,1fr);gap:6px;align-items:start;padding:6px 14px;font-size:var(--fs-sm);line-height:1.38;border:0;background:transparent;color:inherit;text-align:left;width:100%}
@@ -285,6 +351,7 @@
     .ls-shift{width:100%}
     .ls-tvbtn{display:none}
     .ls-grid{grid-template-columns:minmax(0,1fr)}
+    .ls-x-list{height:auto;flex:none;min-height:0}
   }
   /* Telefon: KPI- und Schicht-Leiste zum Wischen, Maschinen als kompakte Statuszeilen, Sprungleiste */
   @media (max-width:560px){
@@ -389,9 +456,10 @@
   .ls-root.ls-tv .ls-x-tr{height:10px}
   .ls-root.ls-tv .ls-x .eyebrow{font-size:14px}
   .ls-root.ls-tv .ls-x-ax{font-size:14px;height:15px}
-  .ls-root.ls-tv .ls-x-row{font-size:15px;grid-template-columns:50px 18px minmax(0,1fr);padding:4px 0}
+  .ls-root.ls-tv .ls-x{--xr:30px}
+  .ls-root.ls-tv .ls-x-row{font-size:15px;grid-template-columns:50px 18px minmax(0,1fr)}
   .ls-root.ls-tv .ls-x-row .num{font-size:14px}
-  .ls-root.ls-tv .ls-x-list.wd .ls-x-row{grid-template-columns:76px 18px minmax(0,1fr)}
+  .ls-root.ls-tv .ls-x-list.wd .ls-x-row{grid-template-columns:100px 18px minmax(0,1fr)}
   /* „Jetzt wichtig“ in 16 px – nimmt im TV-Modus die ganze rechte Spalte ein */
   .ls-root.ls-tv .ls-now .card-h{padding:13px 16px}
   .ls-root.ls-tv .ls-now .card-h h3{font-size:19px}
@@ -431,13 +499,21 @@
   let selected = null;
   let lastMVs = {};
   let nowNodes = new Map(), nowExpanded = false;
-  let feedNodes = new Map(), feedLastId = null;
-  let brief = { t: -1e9, data: null, pending: false, sig: '' };
+  let feedNodes = new Map(), feedLastId = null, feedDay = -1;
+  let brief = { k: -1, nowSig: '', items: null };
+  let nowListSig = '';
   let kpiCache = { t: -1, risk: null };
   let bnCache = { t: -1, id: null, text: '' };
   let X = null;              // Abschluss-Kachel {el, r}
   let lastNextSig = null, lastTlSig = null, gridCols = 0;   // null = neu zeichnen erzwingen
+  let gridW = 0, xListH = 0, xCap = 7;                      // gemessen im ResizeObserver (nie in update())
+  let nowClipDirty = true, nowClipSig = '', nowClipped = 0;
   const TV_FIT = '(min-width:1660px) and (min-height:940px)';
+  const mq = (q) => { try { return window.matchMedia(q); } catch (e) { return { matches: false }; } };
+  const MQ_PHONE = mq('(max-width:640px)'), MQ_TVFIT = mq(TV_FIT);
+  const BRIEF_KEY = 'werkfluss.leitstand.briefOpen';
+  let briefOpen = true;
+  try { const v = localStorage.getItem(BRIEF_KEY); if (v === '0') briefOpen = false; } catch (e) { /* ohne Speicher: offen */ }
 
   function flowOrder() {
     const P = WF.profile;
@@ -471,7 +547,7 @@
 
       <div class="ls-kpis" data-r="kpis">
         <div class="kpi ls-k-oee" data-r="kOee" title="Gesamtanlageneffektivität der Bearbeitungsmaschinen seit 00:00">
-          <div class="l">OEE heute</div>
+          <div class="l" data-r="kOeeL">OEE heute</div>
           <div class="v" data-r="kOeeV">–</div>
           <div class="s" data-r="kOeeS1">–</div>
           <div class="s ls-s2" data-r="kOeeS2">–</div>
@@ -483,7 +559,7 @@
         <div class="kpi click" data-r="kOt" data-nav="auftraege" title="Anteil der Aufträge, die laut Prognose (bzw. tatsächlich) termingerecht und vollständig geliefert werden">
           <div class="l">Termintreue</div><div class="v" data-r="kOtV">–</div><div class="s" data-r="kOtS">–</div><div class="s ls-s2" data-r="kOtS2">–</div>
         </div>
-        <div class="kpi click" data-r="kLoss" title="Maschinenstundensatz × Zeit in der Schicht, in der ein Auftrag eingeplant ist, die Maschine aber nicht produziert (Rüsten, Warten, Störung)">
+        <div class="kpi click ls-k-loss" data-r="kLoss" title="Maschinenstundensatz × Zeit in der Schicht, in der ein Auftrag eingeplant ist, die Maschine aber nicht produziert (Rüsten, Warten, Störung)">
           <div class="l">Stillstandskosten</div><div class="v" data-r="kLossV">–</div><div class="s" data-r="kLossS">–</div><div class="s ls-s2" data-r="kLossS2">–</div>
         </div>
         <div class="kpi" data-r="kEn" title="Elektrische Leistung der Halle (Maschinen, AGVs, Grundlast) – gemessen bzw. aus Zustand geschätzt">
@@ -523,9 +599,9 @@
             <button class="ls-now-more" data-r="nowMore" hidden></button>
           </section>
           <section class="card ls-brief" data-r="briefCard" aria-label="KI-Schichtbriefing">
-            <div class="card-h"><h3>${icon('sparkles', 16)}KI-Schichtbriefing</h3>
-              <div class="row" style="gap:6px"><span class="ls-mode" data-r="briefMode">–</span><button class="ls-ibtn ls-tvhide" data-r="briefRefresh" title="Briefing neu erstellen" aria-label="Briefing neu erstellen">${icon('refresh', 15)}</button></div></div>
-            <div class="card-b" data-r="briefBody"><div class="muted">Briefing wird erstellt …</div></div>
+            <div class="card-h" data-r="briefHead"><h3>${icon('sparkles', 16)}KI-Schichtbriefing</h3>
+              <div class="row" style="gap:8px"><span class="ls-brief-n" data-r="briefN"></span><span class="ls-mode" data-r="briefMode" title="Aus den Live-Daten der Halle nach festen Regeln zusammengestellt – laufend aktuell">Live</span><button class="ls-ibtn ls-tvhide" data-r="briefToggle" aria-expanded="true" aria-controls="ls-brief-body" title="Briefing ein-/ausklappen" aria-label="Briefing ein- oder ausklappen">${icon('chevron', 15)}</button></div></div>
+            <div class="card-b" id="ls-brief-body" data-r="briefBody"><div class="muted">Briefing wird erstellt …</div></div>
           </section>
           <section class="card ls-feed" data-r="feedCard" aria-label="Gerade passiert">
             <div class="card-h"><h3>${icon('clock', 16)}Gerade passiert</h3><span class="muted" data-r="feedSub">letzte 12 Ereignisse</span></div>
@@ -555,13 +631,15 @@
       applyOrder(true);
     });
     R.kGood.onclick = R.kOt.onclick = () => { if (!tv && hasView('auftraege')) WF.app.navigate('auftraege'); };
-    R.kLoss.onclick = () => { if (tv) return; const top = topLoss(); if (top) WF.app.select('machine', top.id); };
+    R.kLoss.onclick = () => { if (tv) return; const L = lossModel(WF.sim.kpis()), top = L.top || topLoss(); if (top) WF.app.select('machine', top.id); };
     R.kMsg.onclick = () => { if (!tv) R.nowCard.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     R.jump.addEventListener('click', (e) => {
       const b = e.target.closest('[data-jump]'); if (!b || !R[b.dataset.jump]) return;
       R[b.dataset.jump].scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
-    R.briefRefresh.onclick = () => refreshBrief(true);
+    // Briefing ein-/ausklappen (Kopfzeile oder Pfeil) – je Betrachter gemerkt
+    R.briefHead.addEventListener('click', (e) => { if (e.target.closest('a,.link')) return; setBriefOpen(!briefOpen, true); });
+    setBriefOpen(briefOpen, false);
     R.nowMore.onclick = () => { if (tv) return; nowExpanded = !nowExpanded; renderNow(true); };
     R.feed.addEventListener('click', (e) => {
       const row = e.target.closest('[data-ent]'); if (!row) return;
@@ -571,8 +649,18 @@
       const a = e.target.closest('[data-ent]'); if (!a) return;
       const [k, i] = a.dataset.ent.split('|'); WF.app.select(k, i);
     });
-    // Spaltenzahl des Rasters beobachten → Abschluss-Kachel füllt die letzte Reihe
-    if (typeof ResizeObserver === 'function') { const ro = new ResizeObserver(() => { fitX(); clipX(); }); ro.observe(R.grid); }
+    // Größen nur beim Größenwechsel messen (ResizeObserver, nach dem Layout): Rasterbreite → Spaltenzahl der
+    // Abschluss-Kachel, Listenhöhe → Zeilenzahl „Als Nächstes“, Höhe „Jetzt wichtig“ (TV). update() liest kein Layout.
+    if (typeof ResizeObserver === 'function') {
+      const ro = new ResizeObserver((entries) => {
+        for (const en of entries) {
+          if (en.target === R.grid) { gridW = en.contentRect.width; fitX(); }
+          else if (en.target === X.r.xList) { xListH = en.contentRect.height; fitXRows(); }
+          else if (en.target === R.nowList) nowClipDirty = true;
+        }
+      });
+      ro.observe(R.grid); ro.observe(X.r.xList); ro.observe(R.nowList);
+    }
 
     WF.bus.on('select', (s) => { selected = s && s.kind === 'machine' ? s.id : null; for (const id in tiles) tiles[id].el.classList.toggle('sel', id === selected); });
     WF.bus.on('settings', () => {
@@ -580,7 +668,7 @@
       setTvClass();
     });
     WF.bus.on('sim:reset', () => {
-      lastMVs = {}; kpiCache = { t: -1, risk: null }; bnCache = { t: -1, id: null, text: '' }; brief = { t: -1e9, data: null, pending: false, sig: '' };
+      lastMVs = {}; kpiCache = { t: -1, risk: null }; bnCache = { t: -1, id: null, text: '' }; brief = { k: -1, nowSig: '', items: null }; ghostPrev = { k: -1, real: 0, v: null };
       feedLastId = null; for (const n of feedNodes.values()) n.remove(); feedNodes.clear();
       for (const n of nowNodes.values()) n.remove(); nowNodes.clear(); lastNextSig = null; lastTlSig = null;
       for (const id in tiles) { tiles[id].vm = {}; }
@@ -598,9 +686,9 @@
     root.classList.toggle('ls-tvview', tv);
     if (changed) {
       if (tv && filter) { filter = null; R.sum.querySelectorAll('[data-g]').forEach(x => { x.classList.remove('on'); x.setAttribute('aria-pressed', 'false'); }); applyOrder(true); }
-      lastNextSig = null; lastTlSig = null;
+      lastNextSig = null; lastTlSig = null; nowClipDirty = true;
       if (tv) root.scrollTop = 0;
-      fitX();
+      fitX(); fitXRows();
       if (WF.sim && S()) renderNow(true);
     }
   }
@@ -729,18 +817,21 @@
     const first = segs && segs.length ? segs[0].t0 : now - BAND_SEC;
     return Math.min(now - 1800, Math.max(now - BAND_SEC, first));
   }
-  /** Ohne Schicht geplant „Bereit“ (nicht autonome Maschine wartet auf den Schichtbeginn) – ruhige Kachel, keine Warnung */
+  /** Ohne Schicht geplant (nicht autonome Maschine wartet auf den Schichtbeginn) – ruhige Kachel, keine Warnung.
+      Bezeichnung „Keine Schicht“ aus WF.ui.machineStateLabel (eine Benennung für Kachel, Zusammenfassung, Drawer, Halle). */
   const restCause = /^Keine Schicht\s*[–-]\s*/;
   function tileVM(mv, now, noShift) {
-    const st = WF.STATE[mv.state] || WF.STATE.idle;
+    const st = WF.STATE[mv.state] || { label: stateLabel(mv), color: mv.stateColor || 'var(--st-setup)' };
     const showCause = causeIsInfo(mv);
-    const rest = !!(noShift && mv.state === 'idle');
-    const restHold = rest && restCause.test(mv.cause || '');
-    const cause = restHold ? (s => s.charAt(0).toUpperCase() + s.slice(1))(String(mv.cause).replace(restCause, '')) : (mv.cause || '–');
+    const label = stateLabel(mv);
+    const restHold = label === 'Keine Schicht';
+    const rest = !!((noShift && mv.state === 'idle') || restHold);
+    // „Keine Schicht“ steht schon in der Pill – Ursache ohne Präfix; Zeitangaben wie in den übrigen Zeilen (morgen 06:00)
+    const cause = relDays(restHold ? (s => s.charAt(0).toUpperCase() + s.slice(1))(String(mv.cause || '').replace(restCause, '')) : (mv.cause || '–'), now);
     const vm = {
-      state: mv.state + (restHold ? '|rest' : ''), color: st.color, rest,
+      state: mv.state + '|' + label, color: st.color, rest,
       sev: mv.state === 'fault' ? 'crit' : WAIT[mv.state] ? 'warn' : '',
-      pill: restHold ? WF.ui.pill('idle', 'Keine Schicht') : WF.ui.pill(mv.state),
+      pill: statePill(mv),
       since: sinceText(mv.sinceSec),
       sinceTitle: 'seit ' + U.fmtDayClock(mv.since),
       cause, showCause,
@@ -776,7 +867,7 @@
       const q = mv.queue[0];
       vm.oid = ''; vm.pn = q ? 'Kein Auftrag aktiv' : 'Kein Auftrag eingeplant'; vm.none = true; vm.risk = ''; vm.riskC = ''; vm.riskTitle = '';
       // „Als Nächstes“ steht bei freien Plätzen schon in der Ursache (Engine-Text) – nicht doppelt
-      vm.op = q && !showCause ? `<em>Als Nächstes:</em> ${esc(q.orderId)} AG ${esc(q.seq)} <em>· ${esc(q.why)}</em>` : '';
+      vm.op = q && !showCause ? `<em>Als Nächstes:</em> ${esc(q.orderId)} AG ${esc(q.seq)} <em>· ${esc(relDays(q.why, now))}</em>` : '';
       vm.opTitle = mv.queue.map(x => `${x.orderId} AG ${x.seq} ${x.op} – ${x.parts} Teile – ${x.why}`).join('\n');
       vm.progL = ''; vm.progR = ''; vm.frac = 0; vm.progTitle = '';
     }
@@ -795,7 +886,7 @@
     vm.bandKey = segs.length + '|' + (last ? last.state + last.t0 : '') + '|' + Math.floor(now / 60) + '|' + Math.floor(vm.band0 / 60);
     vm.bandA0 = tclock(vm.band0, now);
     vm.bandTitle = `Zustände ${tclock(vm.band0, now)}–${U.fmtClock(now)}${now - vm.band0 >= BAND_SEC - 60 ? ' (letzte 4 h)' : ' (seit Aufzeichnungsbeginn)'}`;
-    vm.aria = `${mv.short} ${mv.id}: ${restHold ? 'Keine Schicht' : st.label}, ${vm.since}. ${vm.cause}`;
+    vm.aria = `${mv.short} ${mv.id}: ${label}, ${vm.since}. ${vm.cause}`;
     return vm;
   }
 
@@ -844,12 +935,13 @@
   function bottleneck(now) {
     const k = Math.floor(now / 60);
     if (bnCache.t === k) return bnCache;
-    let id = null, text = '', risk = false;
+    let id = null, text = '', risk = false, raw = null;
     if (WF.sim && typeof WF.sim.bottleneck === 'function') {
       try {
         const b = WF.sim.bottleneck();
         if (typeof b === 'string') id = b;
         else if (b) {
+          raw = b;
           id = b.stationId || b.machineId || b.id || b.station || null;
           text = b.why || b.text || b.reason || '';
           risk = !!b.atRisk;
@@ -857,13 +949,13 @@
       } catch (e) { id = null; }
     }
     if (id && !tiles[id]) id = null;
-    bnCache = { t: k, id, risk, text: id ? 'Engpass der Halle' + (text ? ': ' + text : '') : '' };
+    bnCache = { t: k, id, risk, raw: id ? raw : null, text: id ? 'Engpass der Halle' + (text ? ': ' + text : '') : '' };
     return bnCache;
   }
 
   // ------------------------------------------------------------------ Zusammenfassung / Filter / Sortierung
   function buildSummary() {
-    R.sum.innerHTML = STATE_GROUPS.map(g => `<button data-g="${g.key}" style="--c:${g.color}" aria-pressed="false" title="Nur ${esc(g.label)} anzeigen"><i></i><b>0</b>${esc(g.label)}</button>`).join('');
+    R.sum.innerHTML = STATE_GROUPS.map(g => `<button data-g="${g.key}" style="--c:${g.color}" aria-pressed="false" title="Nur ${esc(g.label)} anzeigen"${g.optional ? ' hidden' : ''}><i></i><b>0</b>${esc(g.label)}</button>`).join('');
     R.sum.querySelectorAll('[data-g]').forEach(b => b.onclick = () => {
       if (tv) return;
       filter = filter === b.dataset.g ? null : b.dataset.g;
@@ -873,8 +965,14 @@
   }
   function updateSummary() {
     const cnt = {};
-    for (const id in lastMVs) { const s = lastMVs[id].state; const g = STATE_GROUPS.find(x => x.match(s)); if (g) cnt[g.key] = (cnt[g.key] || 0) + 1; }
-    R.sum.querySelectorAll('[data-g]').forEach(b => { const n = cnt[b.dataset.g] || 0; setText(b.querySelector('b'), String(n)); b.classList.toggle('zero', n === 0 && filter !== b.dataset.g); });
+    for (const id in lastMVs) { const g = groupOf(lastMVs[id]); cnt[g] = (cnt[g] || 0) + 1; }
+    R.sum.querySelectorAll('[data-g]').forEach(b => {
+      const g = b.dataset.g, n = cnt[g] || 0, def = STATE_GROUPS.find(x => x.key === g);
+      setText(b.querySelector('b'), String(n));
+      b.classList.toggle('zero', n === 0 && filter !== g);
+      // „Keine Schicht“ nur, wenn es vorkommt (oder gerade danach gefiltert wird)
+      if (def && def.optional) setAttr(b, 'hidden', n === 0 && filter !== g);
+    });
   }
   /** Handlungsbedarf: Störung › Wartet › laufender Eingriff (Rüsten, Wechsel, Erstteil) › Werkzeugwechsel/Erstteil in ≤ 15 min ›
       später Auftrag › knapper Auftrag › frei mit Arbeit in der Warteschlange › Produktion › frei ohne fällige Arbeit */
@@ -891,7 +989,7 @@
     if (mv.fpi) soon = 0;
     if (soon <= 900) return [3, soon];
     if (mv.order) { const rk = riskOf(mv.order.id); if (rk === 'spät') return [4, 0]; if (rk === 'knapp') return [5, 0]; }
-    if (s === 'idle') return mv.queue.some(q => q.level >= 1) ? [6, 0] : [8, 0];
+    if (s === 'idle') return stateLabel(mv) === 'Keine Schicht' ? [8, 1] : mv.queue.some(q => q.level >= 1) ? [6, 0] : [8, 0];
     return [7, 0];
   }
   let orderSig = '';
@@ -903,7 +1001,7 @@
       ids.sort((a, b) => U0[a][0] - U0[b][0] || U0[a][1] - U0[b][1] || order.indexOf(a) - order.indexOf(b));
     }
     const g = filter ? STATE_GROUPS.find(x => x.key === filter) : null;
-    const vis = ids.map(id => !g || (lastMVs[id] && g.match(lastMVs[id].state)));
+    const vis = ids.map(id => !g || (lastMVs[id] && groupOf(lastMVs[id]) === g.key));
     const sig = ids.join(',') + '|' + vis.join(',');
     if (!force && sig === orderSig) return;
     orderSig = sig;
@@ -940,11 +1038,18 @@
     });
     return { el, r };
   }
+  /** Spaltenzahl wie das CSS-Raster (auto-fill, minmax(256px|290px TV, 1fr), Lücke 10 px) aus der gemessenen Breite –
+      ohne getComputedStyle (kein erzwungenes Layout) */
+  function gridColumns() {
+    if (MQ_PHONE.matches) return 1;
+    if (tv && MQ_TVFIT.matches) return 5;
+    const min = tv ? 290 : 256, gap = 10;
+    return Math.max(1, Math.floor((gridW + gap) / (min + gap)));
+  }
   /** Spannweite der Abschluss-Kachel = freie Zellen der letzten Reihe (volle Reihe, wenn keine frei ist) */
   function fitX() {
-    if (!X || !R.grid) return;
-    let cols = 1;
-    try { const gt = getComputedStyle(R.grid).gridTemplateColumns; cols = gt && gt !== 'none' ? gt.split(' ').filter(Boolean).length : 1; } catch (e) { cols = 1; }
+    if (!X || !R.grid || !gridW) return;
+    const cols = gridColumns();
     const n = order.filter(id => !tiles[id].el.hidden).length;
     const rem = n % cols, span = Math.max(1, rem ? cols - rem : cols);
     const v = 'span ' + span;
@@ -1029,8 +1134,7 @@
       }
       setHTML(r.xAx, ax);
     }
-    const max = tv ? 6 : 7;
-    const list = items.slice(0, max);
+    const list = items.slice(0, Math.min(tv ? 6 : 7, xCap));
     const sig = HZ.label + '|' + list.map(x => Math.floor(x.t / 60) + x.text).join('|');
     if (sig === lastNextSig) return;
     lastNextSig = sig;
@@ -1039,16 +1143,13 @@
     setHTML(r.xList, list.length ? list.map(x =>
       `<div class="ls-x-row" style="--c:${x.c}" ${x.ent ? `data-ent="${esc(x.ent)}"` : ''} title="${esc(U.fmtDayClock(x.t) + ' – ' + x.text)}"><span class="num">${esc(tclock(x.t, now))}</span>${icon(x.ic, 14)}<span>${esc(x.text)}</span></div>`).join('')
       : `<div class="ls-x-empty">Keine Werkzeugwechsel, Arbeitsgang-Abschlüsse oder Pausen ${sh.id ? 'in den nächsten 2 Stunden' : 'bis zum Schichtbeginn'}.</div>`);
-    clipX();
   }
-  /** Liste „Als Nächstes“: nur ganze Zeilen zeigen (Kachelhöhe folgt dem Raster) – keine angeschnittenen Texte */
-  function clipX() {
-    if (!X) return;
-    const box = X.r.xList, rows = box.querySelectorAll('.ls-x-row');
-    if (!rows.length) return;
-    for (const n of rows) if (n.style.visibility) n.style.visibility = '';
-    const bottom = box.getBoundingClientRect().bottom + 0.5;
-    for (const n of rows) if (n.getBoundingClientRect().bottom > bottom) n.style.visibility = 'hidden';
+  /** Liste „Als Nächstes“: nur ganze Zeilen (feste Zeilenhöhe --xr) – Zeilenzahl aus der gemessenen Listenhöhe.
+      Telefon: Liste wächst mit dem Inhalt (alle Einträge). Aufruf nur aus dem ResizeObserver bzw. beim TV-Wechsel. */
+  function fitXRows() {
+    const rowH = tv ? 30 : 24;
+    const cap = MQ_PHONE.matches ? 7 : Math.max(1, Math.floor((xListH + 0.5) / rowH));
+    if (cap !== xCap) { xCap = cap; lastNextSig = null; if (WF.sim && S()) updateX(WF.sim.t); }
   }
 
   // ------------------------------------------------------------------ Kopf: Schicht & Personal
@@ -1100,7 +1201,7 @@
       else if (here) others++;
     }
     // TV-Statuszeile: Schicht steht in der Abschluss-Kachel – hier nur Verantwortung und Besetzung
-    setHTML(R.tvInfo, sh.id ? `${lead ? esc(lead.label) + ' <b>' + esc(lead.p.name) + '</b> · ' : ''}<b>${present} von ${shiftSize}</b> im Dienst${inBreak ? ` · ${inBreak} in Pause` : ''}` : `${others ? `<b>${others}</b> noch in der Halle · ` : ''}autonome Maschinen laufen weiter`);
+    setHTML(R.tvInfo, sh.id ? `${lead ? esc(lead.label) + ' <b>' + esc(lead.p.name) + '</b> · ' : ''}<b>${present} von ${shiftSize}</b> im Dienst${inBreak ? ` · ${inBreak} in Pause` : ''}` : `${others ? `<b>${others}</b> noch in der Halle · ` : ''}Geisterschicht: ${esc(ghostLine())}`);
     if (sh.id) {
       setText(R.staff, `${present} von ${shiftSize} im Dienst`);
       setText(R.staffSub, [inBreak ? `${inBreak} in Pause` : '', others ? `+${others} aus Vorschicht` : '', !inBreak && !others ? `Fertigung: ${WF.profile.people.length} Personen, ${WF.profile.shifts.length} Schichten` : ''].filter(Boolean).join(' · '));
@@ -1165,35 +1266,98 @@
   function setHint(node, h) { if (node._hint !== h) { node._hint = h; node.classList.toggle('warn', h === 'warn'); node.classList.toggle('crit', h === 'crit'); } }
   const valUnit = (v, unit) => `${esc(v)}${unit ? `<small>${esc(unit)}</small>` : ''}`;
   const pctV = (x, dec) => (x == null ? '–' : valUnit(U.fmtNum(x * 100, dec), '%'));
+  const sameV = (a, b) => a != null && b != null && Math.abs(a - b) < 0.0005;
+  /** Anzahl aus einem Engine-Feld, das Zahl oder ID-Liste sein darf */
+  const num = (x) => (Array.isArray(x) ? x.length : typeof x === 'number' && isFinite(x) ? x : 0);
+  /** OEE-Kachel: nach einer Nacht ist der Tageswert (inkl. Geisterschicht) nicht die Schicht-Leistung. Liefert die Engine
+      kpis().oeeStaffedToday, zeigt die Kachel die besetzten Schichten und weist die Nacht getrennt aus. */
+  function oeeModel(k) {
+    const has = Object.prototype.hasOwnProperty.call(k, 'oeeStaffedToday');
+    const st = has ? k.oeeStaffedToday : undefined;
+    const nightPart = has && k.oee != null && !sameV(k.oee, st);
+    if (!nightPart) return { value: k.oee, staffed: false, label: 'OEE heute' };
+    if (st == null) return { value: k.oee, staffed: false, label: 'OEE heute · Nacht' };     // bisher nur Geisterschicht-Zeit
+    return { value: st, staffed: true, label: 'OEE heute · Schichten' };
+  }
+  /** Stillstandskosten: Wert = Schichtzeit; Nacht (kpis().lossEurNightToday) getrennt. Größter Posten und Hauptursache
+      nur, wenn sie zum Wert passen (je Maschine ohne Nacht – sonst würde eine nachts stehende Maschine „größter“). */
+  function lossModel(k) {
+    const night = typeof k.lossEurNightToday === 'number' && k.lossEurNightToday >= 0.5 ? k.lossEurNightToday : 0;
+    const value = typeof k.lossEurStaffedToday === 'number' ? k.lossEurStaffedToday : Math.max(0, (k.lossEur || 0) - night);
+    let top = null, cause = null;
+    const split = !night || Object.values(lastMVs).some(mv => typeof mv.lossEurNightToday === 'number');
+    if (split) {
+      const by = {}; let sum = 0;
+      for (const id in lastMVs) {
+        const mv = lastMVs[id], e = (mv.lossEurToday || 0) - (night ? mv.lossEurNightToday || 0 : 0);
+        if (e >= 0.5 && (!top || e > top.eur)) top = { id, eur: e };
+        if (!night && mv.lossByState) for (const st in mv.lossByState) { by[st] = (by[st] || 0) + mv.lossByState[st]; sum += mv.lossByState[st]; }
+      }
+      const kk = Object.keys(by).sort((a, b) => by[b] - by[a])[0];
+      if (kk && sum > 0) cause = { label: WF.STATE[kk] ? WF.STATE[kk].label : kk, share: by[kk] / sum };
+    }
+    return { value, night, top, cause };
+  }
+  /** Schichten gegen Nacht: zwei Balken mit gemeinsamer Ziel-Marke (statt einer Tageskurve, die die Nacht enthält) */
+  function oeeBars(v, col, nv, nl) {
+    const bar = (x, c) => `<span>${x != null ? `<i style="width:${(U.clamp(x, 0, 1) * 100).toFixed(1)}%;--c:${c}"></i>` : ''}<b style="left:${(TARGET_OEE * 100).toFixed(0)}%"></b></span>`;
+    return `<div class="ls-k-bars" aria-hidden="true"><em>Schichten</em>${bar(v, col)}${nv != null ? `<em>${esc(nl)}</em>${bar(nv, 'color-mix(in srgb,var(--text2) 45%,transparent)')}` : ''}</div>`;
+  }
   function updateKpis(now) {
     const k = WF.sim.kpis(), Sx = S(), H = Sx.history;
-    // OEE (eine Wahrheit: kpis(), Formatierung 1 Nachkommastelle für OEE, V, L, Q)
-    setHTML(R.kOeeV, pctV(k.oee, 1));
-    setHint(R.kOee, k.oee != null && k.oee < TARGET_OEE ? 'warn' : '');
+    // OEE (eine Wahrheit: kpis(), 1 Nachkommastelle überall – Wert, Schicht, Nacht, V, L, Q)
+    const M = oeeModel(k), g = k.ghost;   // g nur ohne Schicht: autonome, für den unbemannten Lauf freigegebene Maschinen
+    setText(R.kOeeL, M.label);
+    setHTML(R.kOeeV, pctV(M.value, 1));
+    setHint(R.kOee, M.value != null && M.value < TARGET_OEE ? 'warn' : '');
     const day0 = U.dayStart(now);
-    let idx = H.t.findIndex(t => t >= day0);
-    if (idx >= 0) while (idx < H.t.length - 1 && H.oee[idx] == null) idx++; // ab dem ersten Wert mit Planzeit (Schichtbeginn)
-    const oeeVals = idx >= 0 ? H.oee.slice(idx) : [];
-    const sig = 'o' + H.t.length + '|' + (H.t[H.t.length - 1] || 0) + '|' + (k.oee != null && k.oee >= TARGET_OEE);
-    if (R.kOeeSpark._sig !== sig) {
-      R.kOeeSpark._sig = sig;
-      R.kOeeSpark.innerHTML = sparkSVG(oeeVals, { target: TARGET_OEE, color: k.oee != null && k.oee >= TARGET_OEE ? 'var(--st-run)' : 'var(--st-wait)' });
-      R.kOeeSpark.title = 'OEE-Verlauf heute (5-min-Werte, kumuliert seit 00:00) – gestrichelt: Ziel 75 %';
-    }
-    const apq = `V ${U.fmtPct(k.availability, 1)} × L ${U.fmtPct(k.performance, 1)} × Q ${U.fmtPct(k.quality, 1)}`;
-    const g = k.ghost;   // nur ohne Schicht: autonome, für den unbemannten Lauf freigegebene Maschinen
-    const ghostTxt = g && g.autonomous ? `Geisterschicht: <b>${g.running} von ${g.autonomous}</b> autonomen Maschinen laufen` : g ? 'Geisterschicht: keine autonome Maschine eingeplant' : '';
-    R.kOee.classList.toggle('ghost', !!ghostTxt);
-    if (ghostTxt) setHTML(R.kOeeS1, ghostTxt);
-    else if (k.oee == null) setHTML(R.kOeeS1, `Ziel ${U.fmtPct(TARGET_OEE)} · noch keine Planzeit heute`);
+    const tgtTxt = (v) => { const d = (v - TARGET_OEE) * 100; return `Ziel ${U.fmtPct(TARGET_OEE)} · ${d >= 0 ? '+' : '−'}${U.fmtNum(Math.abs(d), 1)} Pkt.`; };
+    const shiftTxt = !g && k.oeeShift != null && !sameV(k.oeeShift, M.value) ? ` · Schicht <b>${U.fmtPct(k.oeeShift, 1)}</b>` : '';
+    let l1, l2 = '', nightV = null, nightL = 'Nacht';
+    if (g) {
+      l1 = g.autonomous ? `Geisterschicht: <b>${g.running} von ${g.autonomous}</b> laufen` : 'Geisterschicht: keine autonome Maschine';
+      if (M.staffed) { nightV = k.oeeShift; nightL = 'Nacht'; l2 = nightV != null ? `Nacht bisher <b>${U.fmtPct(nightV, 1)}</b>` : tgtTxt(M.value); }
+      else if (M.value != null) l2 = tgtTxt(M.value);
+    } else if (M.value == null) l1 = `Ziel ${U.fmtPct(TARGET_OEE)} · noch keine Planzeit heute`;
     else {
-      const d = (k.oee - TARGET_OEE) * 100;
-      setHTML(R.kOeeS1, `Ziel ${U.fmtPct(TARGET_OEE)} · ${d >= 0 ? '+' : '−'}${U.fmtNum(Math.abs(d), 1)} Pkt.${k.oeeShift != null ? ` · Schicht <b>${U.fmtPct(k.oeeShift, 0)}</b>` : ''}`);
+      l1 = tgtTxt(M.value) + shiftTxt;
+      if (M.staffed) {
+        const gn = k.ghostLastNight;
+        if (gn && gn.oee != null) {
+          const sp = num(gn.stopped), pv = num(gn.prevented);
+          nightV = gn.oee;
+          l2 = `Nacht <b>${U.fmtPct(gn.oee, 1)}</b> · ${sp || pv ? [sp ? sp + ' gestoppt' : '', pv ? pv + ' abgesichert' : ''].filter(Boolean).join(', ') : 'alle liefen durch'}`;
+        } else { nightV = null; l2 = `inkl. Geisterschicht <b>${U.fmtPct(k.oee, 1)}</b>`; }
+      }
     }
-    setAttr(R.kOeeS1, 'title', g ? `Ohne Schicht laufen nur autonome Maschinen (Stangenlader, Palettenwechsler, Portallader).${g.stoppedIds && g.stoppedIds.length ? ' Stehen: ' + g.stoppedIds.join(', ') + '.' : ''}` : null);
+    const two = !!l2;
+    R.kOee.classList.toggle('two', two);
+    setHTML(R.kOeeS1, two ? `<span class="ln">${l1}</span><span class="ln">${l2}</span>` : l1);
+    setAttr(R.kOeeS1, 'title', g ? `Ohne Schicht laufen nur autonome Maschinen (Stangenlader, Palettenwechsler, Portallader).${g.stoppedIds && g.stoppedIds.length ? ' Stehen: ' + g.stoppedIds.join(', ') + '.' : ''}`
+      : M.staffed ? 'Kennzahl über die besetzten Schichten. Die Nacht (Geisterschicht: nur autonome Maschinen) wird getrennt ausgewiesen – stehende Maschinen sind dort ungenutzte Kapazität.' : null);
     setHTML(R.kOeeS2, `V <b>${U.fmtPct(k.availability, 1)}</b> × L <b>${U.fmtPct(k.performance, 1)}</b> × Q <b>${U.fmtPct(k.quality, 1)}</b>`);
     setAttr(R.kOeeS2, 'title', 'Verfügbarkeit × Leistung × Qualität');
-    setAttr(R.kOee, 'title', `Gesamtanlageneffektivität der Bearbeitungsmaschinen seit 00:00 – ${apq}${k.oeeShift != null ? ' · ' + (g ? 'Geisterschicht' : 'laufende Schicht') + ' ' + U.fmtPct(k.oeeShift, 1) : ''}`);
+    const apq = `V ${U.fmtPct(k.availability, 1)} × L ${U.fmtPct(k.performance, 1)} × Q ${U.fmtPct(k.quality, 1)}`;
+    setAttr(R.kOee, 'title', M.staffed
+      ? `OEE der besetzten Schichten heute ${U.fmtPct(M.value, 1)} · ganzer Tag inkl. Geisterschicht ${U.fmtPct(k.oee, 1)} (${apq})`
+      : `Gesamtanlageneffektivität der Bearbeitungsmaschinen seit 00:00 – ${apq}${k.oeeShift != null ? ' · ' + (g ? 'Geisterschicht' : 'laufende Schicht') + ' ' + U.fmtPct(k.oeeShift, 1) : ''}`);
+    // Verlauf: Tageskurve (history.oee) passt nur, wenn der Wert der ganze Tag ist; sonst Schichten gegen Nacht als Balken
+    const hs = M.staffed && Array.isArray(H.oeeStaffed) && H.oeeStaffed.length === H.oee.length ? H.oeeStaffed : null;
+    const series = M.staffed ? hs : H.oee;
+    const sig = 'o' + H.t.length + '|' + (H.t[H.t.length - 1] || 0) + '|' + (M.value != null && M.value >= TARGET_OEE) + '|' + (series ? 's' : 'b' + Math.round((M.value || 0) * 1000) + '/' + (nightV == null ? '' : Math.round(nightV * 1000)));
+    if (R.kOeeSpark._sig !== sig) {
+      R.kOeeSpark._sig = sig;
+      const col = M.value != null && M.value >= TARGET_OEE ? 'var(--st-run)' : 'var(--st-wait)';
+      if (series) {
+        let idx = H.t.findIndex(t => t >= day0);
+        if (idx >= 0) while (idx < H.t.length - 1 && series[idx] == null) idx++; // ab dem ersten Wert mit Planzeit (Schichtbeginn)
+        R.kOeeSpark.innerHTML = sparkSVG(idx >= 0 ? series.slice(idx) : [], { target: TARGET_OEE, color: col });
+        R.kOeeSpark.title = `${hs ? 'OEE-Verlauf der Schichten heute' : 'OEE-Verlauf heute'} (5-min-Werte, kumuliert seit 00:00) – gestrichelt: Ziel ${U.fmtPct(TARGET_OEE)}`;
+      } else {
+        R.kOeeSpark.innerHTML = oeeBars(M.value, col, nightV, nightL);
+        R.kOeeSpark.title = `Schichten ${U.fmtPct(M.value, 1)}${nightV != null ? ' · Nacht ' + U.fmtPct(nightV, 1) : ''} – Marke: Ziel ${U.fmtPct(TARGET_OEE)}`;
+      }
+    }
     // Teile
     setHTML(R.kGoodV, valUnit(U.fmtNum(k.goodFinished), 'Stk'));
     setHTML(R.kGoodS, `Arbeitsgänge: <b>${U.fmtNum(k.goodOps)}</b> gut`);
@@ -1205,17 +1369,22 @@
     setHTML(R.kOtS, rc.late ? `<b>${rc.late}</b> verspätet${rc.tight ? ` · ${rc.tight} knapp` : ''}` : rc.tight ? `${rc.tight} knapp · keiner verspätet` : 'alle offenen Aufträge im Plan');
     setText(R.kOtS2, rc.worst ? `${rc.worst.id}: ${U.fmtDur(-rc.worst.slackSec)} Verzug` : `${rc.open} offene Aufträge`);
     setAttr(R.kOt, 'title', `Termintreue ${U.fmtPct(k.onTimePct, 0)} – ${rc.late} Auftrag/Aufträge verspätet, ${rc.tight} mit weniger als 4 h Puffer (Prognose)`);
-    // Stillstandskosten
-    const eur = U.fmtEur(k.lossEur);
-    setHTML(R.kLossV, valUnit(eur.replace(/\s*€$/, ''), '€'));
-    const top = topLoss();
-    setHTML(R.kLossS, top ? `heute · größter Posten <b>${esc(top.id)}</b> ${U.fmtEur(top.lossEurToday)}` : 'heute kein Stillstand');
-    setText(R.kLossS2, 'Rüsten, Warten, Störung');
+    // Stillstandskosten – Schichtzeit; die Nacht (Geisterschicht) ist ungenutzte Kapazität und steht getrennt daneben
+    const L = lossModel(k);
+    setHTML(R.kLossV, valUnit(U.fmtNum(L.value, 0), '€'));
+    const topTxt = L.top ? `größter: <b>${esc(L.top.id)}</b> · ${U.fmtEur(L.top.eur)}` : L.value > 0 ? 'Rüsten, Warten, Störung' : 'heute kein Stillstand';
+    R.kLoss.classList.toggle('two', L.night > 0);
+    if (L.night > 0) setHTML(R.kLossS, `<span class="ln">${L.top ? topTxt : 'nur Schichtzeit'}</span><span class="ln">zzgl. Nacht <b>${esc(U.fmtEur(L.night))}</b></span>`);
+    else setHTML(R.kLossS, topTxt);
+    setText(R.kLossS2, L.cause ? `meist ${L.cause.label} (${U.fmtPct(L.cause.share, 0)})` : 'Rüsten, Warten, Störung');
+    setAttr(R.kLoss, 'title', 'Maschinenstundensatz × Zeit in der Schicht, in der ein Auftrag eingeplant ist, die Maschine aber nicht produziert (Rüsten, Warten, Störung)' +
+      (L.night > 0 ? ` · Nacht (Geisterschicht): ${U.fmtEur(L.night)} ungenutzte Kapazität autonomer Maschinen – nicht im Wert enthalten` : ''));
     // Energie
     setHTML(R.kEnV, valUnit(U.fmtNum(k.powerKw, 0), 'kW'));
     setText(R.kEnS, `heute ${U.fmtNum(k.energyKwh, 0)} kWh · Ø ${U.fmtNum(avgPower(H, day0), 0)} kW`);
-    if (R.kEnSpark._sig !== sig) {
-      R.kEnSpark._sig = sig;
+    const esig = 'e' + H.t.length + '|' + (H.t[H.t.length - 1] || 0);
+    if (R.kEnSpark._sig !== esig) {
+      R.kEnSpark._sig = esig;
       const n = Math.round(BAND_SEC / (WF.profile.sim.historyStepSec || 300));
       R.kEnSpark.innerHTML = sparkSVG(H.powerKw.slice(-n), { color: 'var(--info)', min: 0 });
       R.kEnSpark.title = 'Leistungsaufnahme der letzten 4 h (5-min-Mittelwerte)';
@@ -1252,6 +1421,7 @@
     const LIMIT = tv ? 8 : 4;   // TV: so viele, wie in die rechte Spalte passen (clipNow)
     const show = nowExpanded && !tv ? list.slice(0, 40) : list.slice(0, LIMIT);
     const openN = list.filter(n => n.status === 'open').length, critN = list.filter(n => n.status === 'open' && n.sev === 'crit').length;
+    nowListSig = list.map(n => n.id + n.status).join(',');
     setText(R.nowCnt, String(openN));
     setAttr(R.nowCnt, 'class', 'ls-cnt' + (critN ? ' crit' : openN ? ' warn' : ''));
     const keep = new Set(show.map(n => n.id));
@@ -1270,7 +1440,12 @@
     });
     if (activeKey && document.activeElement !== active) { const n = nowNodes.get(activeKey[0]); const b = n && n.querySelector(`[data-k="${activeKey[1]}"]`); if (b) b.focus({ preventScroll: true }); }
     let hiddenN = list.length - show.length;
-    if (tv) hiddenN += clipNow(show);
+    if (tv) {
+      // TV: Höhen nur messen, wenn sich Inhalt oder Größe geändert haben (nicht 4× je Sekunde)
+      const csig = show.map(n => n.id + n.status + (n.updatedT || n.t) + n.title + (n.body || '').length + (n.suggestion || '').length).join('|');
+      if (nowClipDirty || csig !== nowClipSig) { nowClipSig = csig; nowClipDirty = false; nowClipped = clipNow(show); }
+      hiddenN += nowClipped;
+    } else if (nowClipped) { for (const node of nowNodes.values()) if (node.style.display) node.style.display = ''; nowClipped = 0; nowClipSig = ''; }
     setAttr(R.nowMore, 'hidden', !(hiddenN > 0 || (nowExpanded && !tv && list.length > 4)));
     setText(R.nowMore, tv ? `+ ${hiddenN} weitere ${hiddenN === 1 ? 'Meldung' : 'Meldungen'}` : nowExpanded ? 'Weniger anzeigen' : `${hiddenN} weitere ${hiddenN === 1 ? 'Meldung' : 'Meldungen'} anzeigen`);
     void force;
@@ -1278,8 +1453,7 @@
   /** TV-Wandtafel (feste Höhe): nur Meldungen zeigen, die ganz hineinpassen – keine abgeschnittenen Texte */
   function clipNow(show) {
     const nodes = show.map(n => nowNodes.get(n.id)).filter(Boolean);
-    let fit = false;
-    try { fit = window.matchMedia(TV_FIT).matches; } catch (e) { fit = false; }
+    const fit = MQ_TVFIT.matches;
     for (const node of nodes) if (node.style.display) node.style.display = '';
     if (!fit || !nodes.length) return 0;
     const bottom = R.nowList.getBoundingClientRect().bottom + 1;
@@ -1314,13 +1488,13 @@
     // Zeitstempel wie im Benachrichtigungscenter: Entstehungszeit, ggf. „aktualisiert hh:mm“ (UI_GUIDE Regel 16)
     setHTML(r.meta, `${WF.ui.notifTime(n)}${n.role ? ' · ' + esc(n.role) : ''}`);
     setAttr(r.meta, 'title', `entstanden ${U.fmtDayClock(n.t)}${n.updatedT != null && n.updatedT - n.t > 60 ? ' · aktualisiert ' + U.fmtDayClock(n.updatedT) : ''}`);
-    void now;
     const ent = n.entity && n.entity.id && LINKABLE[n.entity.kind] ? n.entity : null;
     setAttr(r.ent, 'hidden', !ent);
     if (ent) { setText(r.ent, ent.kind === 'machine' || ent.kind === 'order' ? ent.id : WF.app.entityLabel(ent)); setAttr(r.ent, 'title', 'Öffnen: ' + WF.app.entityLabel(ent)); }
-    setText(r.t, n.title); setText(r.b, n.body || ''); setAttr(r.b, 'hidden', !n.body);
+    // Zeitangaben wie in den Kacheln („morgen 06:00“ statt „Di 06:00“) – Inhalt unverändert aus der Meldung
+    setText(r.t, relDays(n.title, now)); setText(r.b, relDays(n.body || '', now)); setAttr(r.b, 'hidden', !n.body);
     setAttr(r.s, 'hidden', !n.suggestion);
-    if (n.suggestion) setHTML(r.s, `<b>Empfehlung</b> ${esc(n.suggestion)}`);
+    if (n.suggestion) setHTML(r.s, `<b>Empfehlung</b> ${esc(relDays(n.suggestion, now))}`);
     const sig = n.status + '|' + (n.actions || []).map(a => a.label).join('|') + '|' + (n.ackBy || '');
     if (r.a._sig !== sig) {
       r.a._sig = sig;
@@ -1333,99 +1507,140 @@
   }
 
   // ------------------------------------------------------------------ KI-Schichtbriefing
-  function refreshBrief(force) {
-    const now = WF.sim.t;
-    if (brief.pending) return;
-    const real = performance.now();
-    const aiMode = !!(WF.ai && typeof WF.ai.briefing === 'function');
-    // automatisch alle 15 Sim-Minuten – bei hohem Tempo höchstens alle 5 s (regelbasiert) bzw. 2 min (KI) Echtzeit
-    if (!force && brief.data && now >= brief.t && (now - brief.t < 15 * 60 || real - (brief.real || 0) < (aiMode ? 120000 : 5000))) return;
-    brief.t = now; brief.real = real;
-    let res = null;
-    if (WF.ai && typeof WF.ai.briefing === 'function') {
-      try { res = WF.ai.briefing(); } catch (e) { console.warn('[leitstand] WF.ai.briefing', e); res = null; }
-    }
-    const apply = (r) => { brief.pending = false; brief.data = normalizeBrief(r) || ruleBrief(); renderBrief(); };
-    if (res && typeof res.then === 'function') {
-      brief.pending = true;
-      if (!brief.data) brief.data = ruleBrief();
-      renderBrief();
-      res.then(apply, () => apply(null));
-    } else apply(res);
+  /* 3–5 knappe Punkte, die über die Karten darüber hinausgehen: Jetzt tun · Engpass · Heute Nacht (Geisterschicht-
+     Vorschau) · Termine · Material. Was „Jetzt wichtig“ schon als Meldung zeigt, wird nicht wiederholt. Live aus der
+     Engine (abgeleitete Sichten, die update() ohnehin liest), Neuaufbau nur bei geänderter Signatur. Das ausführliche
+     Briefing formuliert der Copilot („Im Copilot vertiefen“). */
+  const BRIEF_C = { crit: 'var(--st-fault)', warn: 'var(--st-wait)', tool: 'var(--st-tool)', ok: 'var(--st-run)', info: 'var(--info)', mat: 'var(--mat)' };
+  const NOSTOP = { done: 1, ahead: 1, through: 1 };
+  let ghostPrev = { k: -1, real: 0, v: null };
+  function setBriefOpen(open, save) {
+    briefOpen = !!open;
+    if (R.briefCard) R.briefCard.classList.toggle('closed', !briefOpen);
+    if (R.briefToggle) R.briefToggle.setAttribute('aria-expanded', String(briefOpen));
+    if (save) { try { localStorage.setItem(BRIEF_KEY, briefOpen ? '1' : '0'); } catch (e) { /* ohne Speicher */ } }
+    if (brief.items) setText(R.briefN, briefOpen ? '' : `${brief.items.length} Punkte`);
   }
-  function normalizeBrief(r) {
-    if (!r || (!r.headline && !(r.bullets && r.bullets.length))) return null;
-    return { headline: r.headline || '', bullets: (r.bullets || []).map(b => typeof b === 'string' ? { text: b, sev: 'info' } : { text: b.text || '', sev: b.sev || 'info', ent: b.entity || b.ent || null }), t: r.generatedT != null ? r.generatedT : WF.sim.t, mode: r.mode || 'KI' };
-  }
-  function ruleBrief() {
-    const snap = WF.sim.snapshot(), now = WF.sim.t;
-    const mvs = {};
-    for (const id of WF.profile.machines) { const mv = WF.sim.machineView(id); if (mv) mvs[id] = mv; }
-    const n = snap.machines.length;
-    const running = snap.machines.filter(m => m.st === 'running').length;
-    const faults = snap.machines.filter(m => m.st === 'fault');
-    const k = snap.kpi;
-    const sh = WF.sim.shift();
-    const bullets = [];
-    const machineLabel = (m) => `${m.id} ${m.name}`;
-    for (const m of faults) bullets.push({ sev: 'crit', ent: 'machine|' + m.id, text: `Störung ${machineLabel(m)}: ${m.why}.` });
-    const waits = Object.values(mvs).filter(mv => WAIT[mv.state] && mv.sinceSec >= 300).sort((a, b) => b.sinceSec - a.sinceSec);
-    for (const mv of waits.slice(0, 2)) bullets.push({ sev: 'warn', ent: 'machine|' + mv.id, text: `${mv.id} ${mv.short} ${WF.STATE[mv.state].label.toLowerCase()} seit ${U.fmtDur(mv.sinceSec)} – ${mv.cause}.` });
-    const late = snap.orders.filter(o => o.st !== 'fertig' && o.risk === 'spät');
-    for (const o of late.slice(0, 2)) bullets.push({ sev: 'warn', ent: 'order|' + o.id, text: `${o.id} (${custShort(o.cust)}) gefährdet: Prognose ${o.eta}, Termin ${o.due}${o.bottleneck ? ' – begrenzt durch ' + o.bottleneck : ''}.` });
-    const changes = [];
-    for (const id in mvs) {
-      for (const t of mvs[id].tools) { const pc = t.plannedChange; if (pc && pc.etaT != null && pc.etaT - now <= 3600 && pc.etaT >= now && (t.status === 'planned' || t.status === 'due')) { changes.push({ t: pc.etaT, text: `${id} ${toolShort(t.name)} ca. ${U.fmtClock(pc.etaT)}` }); break; } }
+  const entLink = (kind, id, txt) => `<button class="link" data-ent="${esc(kind + '|' + id)}">${esc(txt || id)}</button>`;
+  /** Was „Jetzt wichtig“ schon zeigt (alle offenen/quittierten Warnungen und Störungen) */
+  function coveredBy() {
+    const ents = new Set(), keys = [];
+    for (const n of openNotifs()) {
+      if (n.entity) ents.add(n.entity.kind + '|' + n.entity.id);
+      if (n.spc && n.spc.machineId) ents.add('machine|' + n.spc.machineId);
+      keys.push(String(n.key || ''));
     }
-    changes.sort((a, b) => a.t - b.t);
-    if (changes.length) bullets.push({ sev: 'tool', text: `Werkzeugwechsel in der nächsten Stunde: ${changes.slice(0, 3).map(c => c.text).join('; ')}${changes.length > 3 ? ` (+${changes.length - 3})` : ''}.` });
-    for (const mt of snap.materialsLow.filter(x => x.onHand < x.min).slice(0, 1)) bullets.push({ sev: 'warn', ent: 'material|' + mt.id, text: `${mt.name}: Bestand ${U.fmtNum(mt.onHand, mt.unit === 'm' ? 1 : 0)} ${mt.unit} unter Mindestbestand ${U.fmtNum(mt.min)} ${mt.unit}${mt.onOrder ? ` – ${U.fmtNum(mt.onOrder, 0)} ${mt.unit} bestellt` : ' – Nachbestellung empfohlen'}.` });
-    const finishing = Object.keys(S().orders).map(id => S().orders[id]).filter(o => o.status !== 'fertig').map(o => ({ o, f: WF.sim.forecast().orders[o.id] })).filter(x => x.f && x.f.eta != null).sort((a, b) => a.f.eta - b.f.eta)[0];
-    if (finishing && bullets.length < 5) bullets.push({ sev: 'ok', ent: 'order|' + finishing.o.id, text: `Als Nächstes fertig: ${finishing.o.id} ${finishing.o.part.name} (${custShort(finishing.o.customer)}) ca. ${tclock(finishing.f.eta, now)}${finishing.f.eta <= finishing.o.due ? ', termingerecht' : ''}.` });
-    if (sh.id && sh.endsAt - now <= 2 * 3600 && bullets.length < 6) {
-      const ghost = (S().notifications || []).filter(x => x.status === 'open' && String(x.key).startsWith('ghost:'));
-      bullets.push({ sev: ghost.length ? 'warn' : 'info', text: ghost.length ? `Vor Schichtende ${U.fmtClock(sh.endsAt)}: ${ghost.length} ${ghost.length === 1 ? 'Maschine würde' : 'Maschinen würden'} in der Geisterschicht stehen bleiben – vorbeugender Werkzeugwechsel empfohlen (siehe „Jetzt wichtig“).` : `Schichtende ${U.fmtClock(sh.endsAt)}: autonome Maschinen laufen in der Geisterschicht weiter, solange Material und Standzeit reichen.` });
-    }
-    if (!bullets.length) bullets.push({ sev: 'ok', text: 'Keine Störungen, keine gefährdeten Termine – alle Arbeitsplätze laufen planmäßig.' });
-    const oeeTxt = k.oee != null ? `OEE ${U.fmtPct(k.oee, 1)} ${k.oee >= TARGET_OEE ? 'über' : 'unter'} Ziel ${U.fmtPct(TARGET_OEE)}` : 'noch keine OEE-Bezugszeit';
-    const head = `${sh.id ? sh.name : 'Geisterschicht'}: ${running} von ${n} Arbeitsplätzen produzieren, ${oeeTxt}` +
-      (faults.length ? `, ${faults.length} ${faults.length === 1 ? 'Störung' : 'Störungen'}` : '') + (late.length ? `, ${late.length} ${late.length === 1 ? 'Termin' : 'Termine'} gefährdet` : '') + '.';
-    return { headline: head, bullets: bullets.slice(0, 6), t: now, mode: 'regelbasiert' };
+    const has = (kind, id) => ents.has(kind + '|' + id) || keys.some(k => k.split(':').slice(1).indexOf(id) >= 0);
+    return { has, ghost: keys.some(k => k.indexOf('ghost:') === 0) };
   }
-  /** Eine Wahrheit: Kennzahlen in der (zwischengespeicherten) Überschrift live aus kpis() und den Kacheln einsetzen;
-      der übrige Text ist ein Stand-Bild (Zeitstempel im Fuß). */
-  function liveHeadline(text) {
-    let h = String(text || '');
-    const k = WF.sim.kpis();
-    if (k && k.oee != null) {
-      h = h.replace(/OEE\s+\d+(?:,\d+)?\s*%(\s+(?:über|unter)\s+(?:dem\s+)?Ziel(?:\s+von)?\s+\d+(?:,\d+)?\s*%)?/, (m, tail) =>
-        `OEE ${U.fmtPct(k.oee, 1)}` + (tail ? ` ${k.oee >= TARGET_OEE ? 'über' : 'unter'} Ziel ${U.fmtPct(TARGET_OEE)}` : ''));
+  /** Geisterschicht-Vorschau aus der Engine (zwischengespeichert: höchstens alle 5 Sim-Minuten bzw. 3 s Echtzeit) */
+  function ghostPreviewNow(now) {
+    const fn = WF.sim && (typeof WF.sim.ghostPreview === 'function' ? WF.sim.ghostPreview : typeof WF.sim.ghostCheck === 'function' ? WF.sim.ghostCheck : null);
+    if (!fn) return null;
+    const k = Math.floor(now / 300), real = performance.now();
+    if (ghostPrev.k !== k && real - ghostPrev.real > 3000 || ghostPrev.k === -1) {
+      ghostPrev.k = k; ghostPrev.real = real;
+      try { ghostPrev.v = fn.call(WF.sim) || null; } catch (e) { ghostPrev.v = null; }
     }
-    let run = 0, n = 0;
-    for (const id of order) if (lastMVs[id]) { n++; if (lastMVs[id].state === 'running') run++; }
-    if (n) h = h.replace(/\b\d+ von \d+ Arbeitsplätzen produzieren/, `${run} von ${n} Arbeitsplätzen produzieren`);
-    return h;
+    return ghostPrev.v;
   }
-  const BRIEF_C = { crit: 'var(--st-fault)', warn: 'var(--st-wait)', tool: 'var(--st-tool)', ok: 'var(--st-run)', info: 'var(--info)' };
+  function briefItems(now) {
+    const C = coveredBy(), sh = WF.sim.shift(), out = [];
+    const mvs = order.map(id => lastMVs[id]).filter(Boolean);
+    // 1 · Jetzt tun – der eine Eingriff, der (noch) nicht als Meldung oben steht
+    const todo = [];
+    for (const mv of mvs) {
+      if (C.has('machine', mv.id)) continue;
+      if (mv.state === 'fault') todo.push({ r: 0, sev: 'crit', main: `Störung an ${entLink('machine', mv.id)} beheben`, sub: mv.fault ? `${mv.fault.code} · ${mv.fault.text}` : mv.cause });
+      else if (sh.id && WAIT[mv.state] && mv.sinceSec >= 300) todo.push({ r: 1, sev: 'warn', main: `${entLink('machine', mv.id)} ${esc(mv.short)} wieder anlaufen lassen`, sub: `${stateLabel(mv)} seit ${U.fmtDur(Math.floor(mv.sinceSec / 60) * 60)} – ${relDays(mv.cause, now)}` });
+      else if (sh.id && mv.fpi && mv.fpi.waitingSec >= 600) todo.push({ r: 3, sev: 'warn', main: `Erstteil ${entLink('machine', mv.id)} prüfen lassen`, sub: `Maschine wartet seit ${U.fmtDur(Math.floor(mv.fpi.waitingSec / 60) * 60)} auf die Freigabe` });
+      if (!sh.id) continue;
+      for (const t of mv.tools || []) {
+        const pc = t.plannedChange;
+        if (!pc || pc.by || pc.etaT == null || pc.etaT - now > 3600 || pc.stage === 'später' || (t.status !== 'planned' && t.status !== 'due')) continue;
+        if (pc.action === 'index' || t.nextAction === 'index') continue;   // Schneide wenden macht der Bediener selbst
+        todo.push({ r: 2, sev: 'tool', main: `Werkzeugwechsel ${entLink('machine', mv.id)} ca. ${esc(tclock(pc.etaT, now))} besetzen`, sub: `${toolShort(t.name)}${(pc.withTools || []).length ? ' + ' + pc.withTools.length : ''} – noch kein Einrichter zugeteilt`, t: pc.etaT });
+        break;
+      }
+    }
+    todo.sort((a, b) => a.r - b.r || (a.t || 0) - (b.t || 0));
+    if (todo[0]) out.push(Object.assign({ k: 'Jetzt tun' }, todo[0], todo.length > 1 ? { sub: todo[0].sub + ` · +${todo.length - 1} weitere` } : {}));
+    // 2 · Engpass – nur der Werks-Engpass (WF.sim.bottleneck, Regel 18)
+    const bn = bottleneck(now).raw;
+    if (bn && bn.stationId && tiles[bn.stationId]) {
+      const late = (bn.late || []).length;
+      out.push({ k: 'Engpass', sev: bn.atRisk ? 'warn' : 'info',
+        main: `${entLink('machine', bn.stationId)} ${esc(bn.short || WF.sim.stationName(bn.stationId))} ${late ? `bremst ${late} ${late === 1 ? 'Auftrag' : 'Aufträge'}` : '– größter Arbeitsvorrat'}`,
+        sub: `${bn.why || ''}${bn.atRisk ? ' – dort nichts warten lassen' : ''}` });
+    }
+    // 3 · Heute Nacht / Geisterschicht
+    if (!C.ghost) {
+      if (sh.id) {
+        const gp = ghostPreviewNow(now);
+        const ents = gp ? (Array.isArray(gp.machines) ? gp.machines : Object.values(gp.machines || {})).filter(e => e && e.machineId) : [];
+        if (ents.length) {
+          const stops = ents.filter(e => e.stopT != null && !NOSTOP[e.reason]).sort((a, b) => a.stopT - b.stopT);
+          out.push({ k: 'Heute Nacht', sev: stops.length ? 'warn' : 'ok',
+            main: stops.length ? `${stops.length} von ${ents.length} autonomen Maschinen stoppen` : `Alle ${ents.length} autonomen Maschinen laufen durch`,
+            sub: stops.length ? relDays(gp.body || stops.map(e => `${e.machineId} ca. ${tclock(e.stopT, now)}`).join(' · '), now) : `bis ${tclock(gp.nextStart || gp.until, now)} – Standzeit, Stangen und Puffer reichen`,
+            ent: stops[0] ? 'machine|' + stops[0].machineId : null });
+        }
+      } else {
+        const g = WF.sim.kpis().ghost;
+        if (g && g.autonomous) {
+          const st = (g.machines || []).filter(m => (g.stoppedIds || []).indexOf(m.id) >= 0);
+          out.push({ k: 'Geisterschicht', sev: st.length ? 'warn' : 'ok', main: `${g.running} von ${g.autonomous} autonomen Maschinen laufen`,
+            sub: st.length ? st.slice(0, 3).map(m => `${m.id} steht seit ${tclock(m.since, now)}`).join(' · ') : `bis ${tclock(g.until, now)} ohne Stopp`, ent: st[0] ? 'machine|' + st[0].id : null });
+        }
+      }
+    }
+    // 4 · Termine – knappe Aufträge (verspätete stehen als Meldung oben)
+    const rc = riskCounts(now);
+    const tight = Object.keys(rc.map).filter(id => rc.map[id] === 'knapp' && !C.has('order', id));
+    if (tight.length) {
+      const ovs = tight.map(id => WF.sim.orderView(id)).filter(Boolean).sort((a, b) => a.slackSec - b.slackSec);
+      if (ovs.length) out.push({ k: 'Termine', sev: 'warn', main: `${ovs.length} ${ovs.length === 1 ? 'Auftrag' : 'Aufträge'} knapp: ${ovs.slice(0, 3).map(o => entLink('order', o.id)).join(', ')}`,
+        sub: `geringster Puffer ${U.fmtDur(Math.max(0, ovs[0].slackSec))} (${ovs[0].id}${ovs[0].limitText ? ', ' + ovs[0].limitText : ''})` });
+    }
+    // 5 · Material
+    const mats = Object.values(S().materials || {});
+    const low = mats.filter(m => m.onHand < m.min && !C.has('material', m.id)).sort((a, b) => a.onHand / a.min - b.onHand / b.min);
+    const pur = (S().purchases || []).filter(p => p.status === 'bestellt').sort((a, b) => a.etaT - b.etaT);
+    const matName = (m) => String(m.name).replace(/\s+Zuschnitt\b/, '').replace(/\s*\(Beispiel\)/, '');
+    if (low.length) {
+      const open = low.filter(m => !m.onOrder);
+      const p0 = pur.find(p => low.some(m => m.id === p.materialId));
+      out.push({ k: 'Material', sev: open.length ? 'warn' : 'info', ent: 'material|' + (open[0] || low[0]).id,
+        main: `${low.length} unter Mindestbestand – ${open.length ? (open.length === low.length ? 'nicht bestellt' : `${open.length} nicht bestellt`) : low.length === 1 ? 'bestellt' : 'alle bestellt'}`,
+        sub: low.slice(0, 2).map(matName).join(', ') + (low.length > 2 ? ` +${low.length - 2}` : '') + (p0 ? ` · Lieferung ${tclock(p0.etaT, now)}` : '') });
+    } else {
+      const starved = mvs.filter(mv => mv.state === 'starved' && /material|rohteil|stange/i.test(mv.cause || '') && !C.has('machine', mv.id));
+      if (starved.length) out.push({ k: 'Material', sev: 'warn', main: `${entLink('machine', starved[0].id)} wartet auf Material`, sub: relDays(starved[0].cause, now) });
+      else out.push({ k: 'Material', sev: 'ok', main: 'Alle Bestände über Mindestbestand', sub: pur[0] && S().materials[pur[0].materialId] ? `nächste Lieferung ${matName(S().materials[pur[0].materialId])} ${tclock(pur[0].etaT, now)}` : 'keine Lieferung offen' });
+    }
+    // Auffüllen auf mindestens 3 Punkte: der nächste fertige Auftrag
+    if (out.length < 3) {
+      const f = WF.sim.forecast(), nx = Object.keys(f.orders || {}).map(id => ({ id, o: f.orders[id], so: S().orders[id] })).filter(x => x.so && x.so.status !== 'fertig' && x.o && x.o.eta != null && !x.o.done).sort((a, b) => a.o.eta - b.o.eta)[0];
+      if (nx) out.push({ k: 'Als Nächstes', sev: 'ok', main: `${entLink('order', nx.id)} fertig ca. ${esc(tclock(nx.o.eta, now))}`, sub: `${nx.so.part.name} · ${custShort(nx.so.customer)}${nx.o.eta <= nx.so.due ? ' · termingerecht' : ''}` });
+    }
+    return out.slice(0, 5);
+  }
   function renderBrief() {
-    const b = brief.data; if (!b) return;
     const now = WF.sim.t;
-    setText(R.briefMode, brief.pending ? 'erstellt …' : b.mode === 'regelbasiert' ? 'aus Live-Daten' : b.mode);
-    setAttr(R.briefMode, 'title', b.mode === 'regelbasiert' ? 'Offline-Modus: aus Live-Daten nach festen Regeln erstellt' : 'Vom KI-Modell erstellt');
-    const linkify = (x) => {
-      const txt = esc(x.text);
-      if (!x.ent) return txt;
-      const [, id] = x.ent.split('|');
-      return txt.replace(esc(id), `<button class="link" data-ent="${esc(x.ent)}">${esc(id)}</button>`);
-    };
-    const html = `<div class="ls-brief-h">${esc(liveHeadline(b.headline))}</div>
-      <ul>${b.bullets.map(x => `<li style="--c:${BRIEF_C[x.sev] || BRIEF_C.info}">${linkify(x)}</li>`).join('')}</ul>
-      <div class="ls-brief-f"><span title="Zeitpunkt der Lagebewertung; Kennzahlen in der Überschrift sind live">Stand ${esc(tclock(b.t, now))} · Kennzahlen live</span><span>·</span><span>neu alle 15 min</span><span class="spacer"></span>${WF.ai ? '<button class="link ls-tvhide" data-ask>Im Copilot vertiefen</button>' : ''}</div>`;
+    const k = Math.floor(now / 30);   // Inhalte ändern sich im Minutenraster; 4×/s neu zu rechnen bringt nichts
+    if (brief.k === k && brief.nowSig === nowListSig && brief.items) return;
+    brief.k = k; brief.nowSig = nowListSig;
+    let items;
+    try { items = briefItems(now); } catch (e) { console.warn('[leitstand] Briefing', e); items = brief.items || []; }
+    brief.items = items;
+    const html = `<ul class="ls-bl">${items.map(x => `<li style="--c:${BRIEF_C[x.sev] || BRIEF_C.info}"${x.ent && x.main.indexOf('data-ent') < 0 ? ` data-ent="${esc(x.ent)}" class="click"` : ''}><span class="ls-bl-k">${esc(x.k)}</span><div class="ls-bl-m"><b>${x.main}</b>${x.sub ? `<span title="${esc(x.sub)}">${esc(x.sub)}</span>` : ''}</div></li>`).join('')}</ul>
+      <div class="ls-brief-f"><span>Stand ${esc(U.fmtClock(now))} · nur, was nicht schon oben steht</span><span class="spacer"></span>${WF.ai ? '<button class="link ls-tvhide" data-ask>Im Copilot vertiefen</button>' : ''}</div>`;
     if (R.briefBody._h !== html) {
       setHTML(R.briefBody, html);
       const ask = R.briefBody.querySelector('[data-ask]');
       if (ask) ask.onclick = () => WF.bus.emit('ai:ask', { text: 'Erstelle mir ein ausführliches Schichtbriefing: Lage, Risiken für Termine, Werkzeugwechsel und Personal in den nächsten 2 Stunden, mit konkreten Empfehlungen.', context: { kind: 'view', id: 'leitstand' } });
     }
+    setText(R.briefN, briefOpen ? '' : `${items.length} Punkte`);
   }
 
   // ------------------------------------------------------------------ Gerade passiert
@@ -1448,6 +1663,9 @@
   function updateFeed(now) {
     const ev = S().events || [];
     const last = ev.length ? ev[ev.length - 1].id : null;
+    // Tageswechsel: Zeitangaben („gestern 23:50“) neu schreiben
+    const day = Math.floor(now / 86400);
+    if (day !== feedDay) { feedDay = day; feedLastId = null; for (const n of feedNodes.values()) n.remove(); feedNodes.clear(); }
     if (last === feedLastId) return;
     const first = feedLastId == null;
     feedLastId = last;
@@ -1468,6 +1686,7 @@
       }
       if (R.feed.children[k] !== node) R.feed.insertBefore(node, R.feed.children[k] || null);
     });
+    R.feed.classList.toggle('wd', pick.some(e => Math.floor(e.t / 86400) !== day));
     if (!pick.length && !R.feed.querySelector('.empty')) R.feed.innerHTML = '<div class="empty">Noch keine Ereignisse heute. Hier erscheinen Störungen, Werkzeugwechsel, Rüstvorgänge, Erstteilprüfungen und fertige Aufträge.</div>';
     else if (pick.length) { const em = R.feed.querySelector('.empty'); if (em) em.remove(); }
   }
@@ -1490,7 +1709,6 @@
     updateHead(now);
     updateKpis(now);
     renderNow(false);
-    refreshBrief(false);
     renderBrief();
     updateFeed(now);
   }
@@ -1509,7 +1727,7 @@
   });
   /** Öffentlich: Leitstand-Hilfen für andere Module (z. B. KI-Briefing-Fallback, Tests) */
   WF.leitstand = {
-    briefing: () => ruleBrief(),
-    refreshBriefing: () => refreshBrief(true),
+    briefing: () => briefItems(WF.sim.t).map(x => ({ category: x.k, sev: x.sev, text: (x.main.replace(/<[^>]+>/g, '') + (x.sub ? ' – ' + x.sub : '')).replace(/&amp;/g, '&') })),
+    refreshBriefing: () => { brief.k = -1; renderBrief(); },
   };
 })();

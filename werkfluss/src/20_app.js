@@ -167,44 +167,69 @@
   }
 
   // ------------------------------------------------------------ Detail-Drawer
+  // Fokus (Tastatur): Beim Öffnen springt der Fokus auf den Drawer-Titel (Tab erreicht dann den Inhalt), beim Schließen
+  // zurück auf das auslösende Element (Kachel, Tabellenzeile …). Wer gerade tippt (Copilot, Suche) oder die Tour bedient,
+  // behält den Fokus. Geschlossen ist der Drawer „inert“ – seine Knöpfe liegen nicht unsichtbar in der Tab-Reihenfolge.
   const drawer = () => document.getElementById('drawer');
-  let drawerSpec = null, drawerBody = null;
+  let drawerSpec = null, drawerBody = null, drawerOpener = null;
+  const isTyping = (n) => !!(n && n.nodeType === 1 && (n.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName)));
+  /** Element sichtbar und bedienbar (nicht ausgeblendet, nicht in einem inerten Bereich)? */
+  const focusable = (n) => !!(n && n.isConnected && typeof n.focus === 'function' && n.getClientRects().length && !n.closest('[inert],[hidden]'));
   app.select = (kind, id) => {
     app.selected = { kind, id };
     WF.bus.emit('select', { kind, id });
     openDetail(kind, id);
   };
-  function openDetail(kind, id) {
+  function openDetail(kind, id, refresh) {
     const factory = WF.details[kind];
     const d = drawer();
     let spec;
     try { spec = factory ? factory(id) : null; } catch (e) { console.error('[detail]', kind, id, e); spec = null; }
     if (!spec) spec = { title: app.entityLabel({ kind, id }), subtitle: kind, render: (b) => { b.append(el('div', { class: 'empty', text: 'Keine Detailansicht verfügbar.' })); } };
+    const ae = document.activeElement, wasOpen = d.classList.contains('open'), hadFocus = d.contains(ae);
+    if (!wasOpen && ae && ae !== document.body && !hadFocus) drawerOpener = ae;
     drawerSpec = spec;
     d.innerHTML = '';
+    const title = el('div', { class: 't', id: 'drawer-title', tabindex: '-1', text: spec.title || '' });
     const head = el('div', { class: 'drawer-h' },
-      el('div', { style: { flex: '1', minWidth: '0' } }, el('div', { class: 't', text: spec.title || '' }), el('div', { class: 's', html: spec.subtitle || '' })),
+      el('div', { style: { flex: '1', minWidth: '0' } }, title, el('div', { class: 's', html: spec.subtitle || '' })),
       WF.ai ? el('button', { class: 'icon-btn', title: 'Den Copilot dazu fragen', 'aria-label': 'Copilot fragen', html: icon('sparkles', 17),
         onclick: () => WF.bus.emit('ai:ask', { text: spec.askPrompt || ('Gib mir eine kurze Lageeinschätzung zu ' + app.entityLabel({ kind, id }) + ': was passiert gerade, was ist kritisch, was empfiehlst du?'), context: { kind, id } }) }) : null,
-      el('button', { class: 'icon-btn', title: 'Schließen (Esc)', 'aria-label': 'Schließen', html: icon('x'), onclick: () => app.closeDrawer() }));
+      el('button', { class: 'icon-btn', title: 'Schließen (Esc)', 'aria-label': 'Details schließen', html: icon('x'), onclick: () => app.closeDrawer() }));
     drawerBody = el('div', { class: 'drawer-b' });
     d.append(head, drawerBody);
     try { spec.render(drawerBody); } catch (e) { console.error('[detail render]', e); drawerBody.append(el('div', { class: 'empty', text: 'Fehler: ' + e.message })); }
+    d.inert = false;
     d.classList.add('open');
     d.setAttribute('aria-hidden', 'false');
     document.body.classList.add('drawer-open');
+    // Fokus in den Drawer – außer jemand tippt gerade oder bedient Tour/Copilot (deren Fokus bleibt)
+    const keep = !hadFocus && (isTyping(ae) || (ae && ae.closest && ae.closest('.tour-card, .ai-panel, .modal-back, .notif-panel')));
+    if (hadFocus || (!refresh && !keep)) { try { title.focus({ preventScroll: true }); } catch (e) { /* alt */ } }
+  }
+  /** Fokus beim Schließen zurückgeben (nur wenn er im Drawer lag – wer inzwischen woanders ist, bleibt dort) */
+  function releaseDrawer() {
+    const d = drawer(), op = drawerOpener;
+    drawerOpener = null;
+    if (d.contains(document.activeElement)) {
+      if (focusable(op)) { try { op.focus({ preventScroll: true }); } catch (e) { /* alt */ } }
+      else { try { document.activeElement.blur(); } catch (e) { /* alt */ } }
+    }
+    d.inert = true;
   }
   /** Drawer ausblenden, Auswahl (z. B. hervorgehobener Auftrag in der Halle) aber behalten. */
   app.hideDrawer = () => {
     const d = drawer(); d.classList.remove('open'); d.setAttribute('aria-hidden', 'true'); drawerSpec = null;
     document.body.classList.remove('drawer-open');
+    releaseDrawer();
   };
   app.closeDrawer = () => {
     const d = drawer(); d.classList.remove('open'); d.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('drawer-open');
+    releaseDrawer();
     drawerSpec = null; app.selected = null; WF.bus.emit('select', { kind: null, id: null });
   };
-  app.refreshDrawer = () => { if (app.selected) openDetail(app.selected.kind, app.selected.id); };
+  app.refreshDrawer = () => { if (app.selected) openDetail(app.selected.kind, app.selected.id, true); };
 
   // ------------------------------------------------------------ Aktionen aus Benachrichtigungen
   app.runAction = (action) => {
@@ -352,11 +377,40 @@
   }
 
   // ------------------------------------------------------------ Modal
+  // Fokus: beim Öffnen auf das erste Eingabefeld (sonst Hauptaktion, sonst Schließen; auf Touch-Geräten auf den Dialog
+  // selbst, damit keine Tastatur aufspringt), Tab bleibt im Dialog, beim Schließen zurück zum Auslöser.
+  const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  let modalSeq = 0;
   app.modal = ({ title, body, actions = [], width }) => {
+    const opener = document.activeElement;
     const back = el('div', { class: 'modal-back' });
-    const m = el('div', { class: 'modal', role: 'dialog', 'aria-label': title, style: width ? { width: `min(${width}px, 100%)` } : null });
-    const onKey = (e) => { if (e.key === 'Escape' && back.isConnected && back === document.querySelector('#overlay .modal-back:last-child')) { e.stopPropagation(); e.preventDefault(); close(); } };
-    const close = () => { back.remove(); document.removeEventListener('keydown', onKey, true); };
+    const tid = 'modal-t-' + (++modalSeq);
+    const m = el('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': tid, tabindex: '-1', style: width ? { width: `min(${width}px, 100%)` } : null });
+    const isTop = () => back.isConnected && back === document.querySelector('#overlay .modal-back:last-child');
+    const tabbables = () => [...m.querySelectorAll(FOCUSABLE)].filter(focusable);
+    const onKey = (e) => {
+      if (!isTop()) return;
+      if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); close(); return; }
+      if (e.key !== 'Tab') return;
+      const list = tabbables(), a = document.activeElement;
+      if (!list.length) { e.preventDefault(); m.focus(); return; }
+      const first = list[0], last = list[list.length - 1];
+      if (!m.contains(a) || a === m) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+      else if (e.shiftKey && a === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && a === last) { e.preventDefault(); first.focus(); }
+    };
+    let closed = false;
+    const close = () => {
+      if (closed) return; closed = true;
+      const had = m.contains(document.activeElement) || document.activeElement === document.body;
+      back.remove(); document.removeEventListener('keydown', onKey, true);
+      // Fokus zurück: zum Auslöser, sonst zum darunterliegenden Dialog
+      if (had) {
+        const below = document.querySelector('#overlay .modal-back:last-child .modal');
+        const target = focusable(opener) ? opener : below;
+        if (target) { try { target.focus({ preventScroll: true }); } catch (e) { /* alt */ } }
+      }
+    };
     document.addEventListener('keydown', onKey, true);
     const b = el('div', { class: 'modal-b' });
     if (typeof body === 'string') b.innerHTML = body; else if (body) b.append(body);
@@ -381,11 +435,17 @@
       try { yes.focus(); } catch (e) { /* alt */ }
     };
     fillFooter();
-    m.append(el('div', { class: 'modal-h' }, el('strong', { text: title }), el('span', { class: 'spacer' }), el('button', { class: 'icon-btn', 'aria-label': 'Schließen', html: icon('x'), onclick: close })), b);
+    m.append(el('div', { class: 'modal-h' }, el('strong', { id: tid, text: title }), el('span', { class: 'spacer' }), el('button', { class: 'icon-btn', 'aria-label': 'Schließen', title: 'Schließen (Esc)', html: icon('x'), onclick: close })), b);
     if (actions.length) m.append(f);
     back.append(m);
     back.addEventListener('click', e => { if (e.target === back) close(); });
     document.getElementById('overlay').append(back);
+    // Startfokus (der Aufrufer darf danach selbst fokussieren, z. B. Menge markieren)
+    let coarse = false; try { coarse = window.matchMedia('(pointer: coarse)').matches; } catch (e) { /* alt */ }
+    const start = coarse ? m
+      : b.querySelector('input:not([type="hidden"]):not([disabled]):not([type="checkbox"]):not([type="radio"]), select:not([disabled]), textarea:not([disabled])')
+        || f.querySelector('.btn.primary') || m.querySelector('.modal-h .icon-btn') || m;
+    try { (focusable(start) ? start : m).focus({ preventScroll: true }); } catch (e) { /* alt */ }
     return { close, body: b };
   };
 
@@ -401,7 +461,8 @@
         <select class="input" id="set-speed">${WF.profile.sim.speeds.map(s => `<option value="${s}" ${s === app.speed ? 'selected' : ''}>${s}× Echtzeit${s === 30 ? ' (Standard)' : ''}</option>`).join('')}</select></label>
       <div class="card"><div class="card-b" style="font-size:var(--fs-sm);color:var(--text2)">
         <b>Über diese Demo.</b> ${esc(WF.profile.company.demoNote)} Profil: ${esc(WF.profile.company.description)}
-        <br><span class="muted">werkfluss ${esc(WF.version)} · Simulation deterministisch (Seed ${WF.profile.sim.seed}).</span></div></div>`;
+        <br><span class="muted">werkfluss ${esc(WF.version)} · Simulation deterministisch (Seed ${WF.profile.sim.seed}) · <button type="button" class="link" data-keys>Tastenkürzel</button> <kbd class="kbd">?</kbd></span></div></div>`;
+    body.querySelector('[data-keys]').onclick = () => openKeys();
     app.modal({ title: 'Einstellungen', body, actions: [
       { label: 'Simulation neu starten', icon: 'refresh', danger: true, ghost: true, left: true,
         confirm: { html: '<b>Simulation neu starten?</b> Die Schicht beginnt wieder Mo 06:00 (vorgerechnet bis 08:40). Alle Eingriffe dieser Sitzung – Störungen, Bestellungen, KI-Aufträge – werden zurückgesetzt.', label: 'Jetzt neu starten' },
@@ -466,8 +527,45 @@
     WF.bus.emit('settings', settings);
   };
 
+  // ------------------------------------------------------------ Tastenkürzel (Hilfe mit „?“)
+  function openKeys() {
+    if (document.querySelector('#overlay .app-keys')) return;
+    const kbd = (k) => `<kbd class="kbd">${esc(k)}</kbd>`;
+    const row = (keys, label) => `<div class="kh-r"><span class="kh-k">${keys.map(kbd).join('')}</span><span class="kh-l">${label}</span></div>`;
+    const viewRows = WF.views.map(v => [keyOf(v), v]).filter(x => x[0] != null)
+      .sort((a, b) => (a[0] === '0' ? 3.5 : Number(a[0])) - (b[0] === '0' ? 3.5 : Number(b[0])))
+      .map(([k, v]) => row([k], esc(v.title))).join('');
+    const body = el('div', { class: 'app-keys' });
+    body.innerHTML = `
+      <section><h4 class="eyebrow">Ansichten</h4>${viewRows}</section>
+      <section><h4 class="eyebrow">Allgemein</h4>
+        ${row(['P'], 'Simulation anhalten / weiter')}
+        ${row(['T'], 'TV-Modus: Leitstand an der Hallenwand')}
+        ${row(['Esc'], 'Details, Meldungen oder Dialog schließen')}
+        ${row(['?'], 'Diese Übersicht')}
+        <h4 class="eyebrow">Demo-Tour</h4>
+        ${row(['←', '→'], 'Schritt zurück / weiter')}
+        ${row(['Esc'], 'Tour beenden')}
+        <h4 class="eyebrow">Copilot</h4>
+        ${row(['Enter'], 'Frage senden')}
+        ${row(['Shift', 'Enter'], 'Neue Zeile')}</section>`;
+    app.modal({ title: 'Tastenkürzel', body, width: 560, actions: [{ label: 'Schließen', primary: true }] }).body.closest('.modal').classList.add('app-keys-m');
+  }
+  app.showKeys = openKeys;
+  css(`.app-keys{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 28px}
+       .app-keys section{display:flex;flex-direction:column;gap:2px;min-width:0}
+       .app-keys h4{margin:12px 0 6px}.app-keys h4:first-child{margin-top:0}
+       .app-keys .kh-r{display:flex;align-items:center;gap:12px;min-height:30px;font-size:var(--fs-md);color:var(--text2)}
+       .app-keys .kh-k{display:inline-flex;gap:4px;flex:none;min-width:64px}
+       .app-keys .kh-l{min-width:0}
+       @media (max-width:560px){.app-keys{grid-template-columns:minmax(0,1fr)}.app-keys section+section h4:first-child{margin-top:12px}}`, 'app-keys');
+
   // ------------------------------------------------------------ Schleife
-  let last = 0, acc = 0, simAcc = 0, lastSim = 0;
+  // Simulation und UI-Takt folgen der echten Zeit: bei niedriger Bildrate (Software-GL) läuft die Simulation trotzdem in
+  // Echtzeit × Tempo, und Ansichten/Drawer/Meldungen werden weiter ~4×/s aktualisiert. Nur frame(dt) (Animationen)
+  // bekommt den auf 0,1 s begrenzten Schritt.
+  let last = 0, simAcc = 0, lastSim = 0, lastTick = 0;
+  const TICK_MS = 250;
   function tick() {
     updateTop();
     updateBadges();
@@ -487,8 +585,8 @@
     }
     lastSim = now;
     if (app.current && app.current.frame) { try { app.current.frame(dt); } catch (e) { console.error('[view frame]', e); } }
-    acc += dt;
-    if (acc >= 0.25) { acc = 0; tick(); }
+    // UI-Takt nach echter Zeit (nicht nach dem begrenzten dt) – ein verpasster Takt wird nicht nachgeholt
+    if (now - lastTick >= TICK_MS) { lastTick = now; tick(); }
     requestAnimationFrame(loop);
   }
 
@@ -497,16 +595,28 @@
     app.speed = settings.speed || WF.profile.sim.defaultSpeed;
     buildTop();
     buildNav();
+    { const d = drawer(); d.inert = true; d.setAttribute('role', 'dialog'); d.setAttribute('aria-modal', 'false'); d.setAttribute('aria-labelledby', 'drawer-title'); }
+    // Ältere Browser ohne overflow:clip: .main nie seitlich verschoben lassen (Fokus im einfahrenden Drawer)
+    { const mn = document.getElementById('main'); if (mn) mn.addEventListener('scroll', () => { if (mn.scrollLeft || mn.scrollTop) { mn.scrollLeft = 0; mn.scrollTop = 0; } }); }
     markExisting();
     WF.bus.on('sim:notify', onNotify);
     WF.bus.on('sim:reset', () => { toasted.clear(); markExisting(); tick(); });
     WF.bus.on('navigate-request', ({ view, params }) => app.navigate(view, params));
     document.addEventListener('keydown', (e) => {
-      const tag = (e.target && e.target.tagName) || '';
-      if (/INPUT|TEXTAREA|SELECT/.test(tag) || e.target.isContentEditable) return;
-      if (e.key === 'Escape') { if (npEl) toggleNotifPanel(false); else if (drawerSpec) app.closeDrawer(); else if (app.tv) app.setTv(false); }
-      else if (e.key === 'p' || e.key === 'P') app.togglePause();
-      else if (/^[0-9]$/.test(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey) { const v = viewForKey(e.key); if (v) app.navigate(v.id); }
+      const t = e.target && e.target.nodeType === 1 ? e.target : null;
+      if (isTyping(t) || e.defaultPrevented) return;
+      // Offener Dialog: nur er reagiert (Esc/Tab regelt app.modal) – keine Ansichtswechsel oder Pausen dahinter
+      if (document.querySelector('#overlay .modal-back')) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'Escape') { if (npEl) toggleNotifPanel(false); else if (drawerSpec) app.closeDrawer(); else if (app.tv) app.setTv(false); return; }
+      if (e.repeat) return; // gedrückt gehaltene Taste schaltet nicht im Takt der Tastenwiederholung
+      if (e.key === 'p' || e.key === 'P') app.togglePause();
+      else if (e.key === '?') { e.preventDefault(); openKeys(); }
+      else if (e.key === 't' || e.key === 'T') {
+        if (app.tv) app.setTv(false);
+        else if (WF.views.some(v => v.id === 'leitstand')) { if (!app.current || app.current.id !== 'leitstand') app.navigate('leitstand'); app.setTv(true); }
+      }
+      else if (/^[0-9]$/.test(e.key)) { const v = viewForKey(e.key); if (v) app.navigate(v.id); }
     });
     window.addEventListener('hashchange', () => { const id = location.hash.slice(1); if (id && (!app.current || app.current.id !== id) && WF.views.find(v => v.id === id)) app.navigate(id); });
     const fromHash = location.hash.slice(1);

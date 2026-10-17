@@ -19,7 +19,60 @@
   const LINKABLE = { machine: 1, order: 1, person: 1, agv: 1, tool: 1, material: 1, container: 1 };
 
   const S = () => WF.sim && WF.sim.state;
-  const tclock = (t, now) => (Math.floor(t / 86400) === Math.floor(now / 86400) ? U.fmtClock(t) : U.fmtDayClock(t));
+  /** Ein Zeitformat im ganzen Drawer (wie Leitstand und Aufträge): heute nur Uhrzeit, gestern/morgen relativ
+      („morgen 06:49“ – wie „Prognose fertig morgen 10:44“ aus fmtDue), weiter weg mit Wochentag. */
+  const tclock = (t, now) => {
+    const d = Math.floor(t / 86400) - Math.floor(now / 86400);
+    return d === 0 ? U.fmtClock(t) : (d === 1 || d === -1) ? U.fmtDue(t, now) : U.fmtDayClock(t);
+  };
+  const DAYN = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+  /** Zeitangaben in Engine-Texten („weiter Di 06:00“) für gestern/heute/morgen in dieselbe relative Schreibweise */
+  function relDays(s, now) {
+    if (!s || String(s).indexOf(':') < 0) return s;
+    return String(s).replace(/\b(Mo|Di|Mi|Do|Fr|Sa|So) (\d{2}):(\d{2})\b/g, (m, d, hh, mm) => {
+      const day0 = Math.floor(now / 86400), dow = ((day0 % 7) + 7) % 7;
+      let delta = DAYN.indexOf(d) - dow; if (delta > 3) delta -= 7; if (delta < -3) delta += 7;
+      if (Math.abs(delta) > 1) return m;
+      return U.fmtDue((day0 + delta) * 86400 + Number(hh) * 3600 + Number(mm) * 60, now);
+    });
+  }
+  /** Zustandsname/Pill wie Kachel und Halle (WF.ui.machineStateLabel/machinePill, UI_GUIDE Regel 19);
+      unbekannte Engine-Zustände mit Engine-Label und -Farbe */
+  function statePill(mv) {
+    if (!WF.STATE[mv.state]) return `<span class="pill" style="--c:${esc(mv.stateColor || 'var(--st-setup)')}"><i></i>${esc(mv.stateLabel || mv.state)}</span>`;
+    return WF.ui.machinePill ? WF.ui.machinePill(mv) : WF.ui.pill(mv.state);
+  }
+  const isNoShift = (mv) => !!(WF.ui.machineStateLabel && WF.ui.machineStateLabel(mv) === 'Keine Schicht');
+  /** Sekunden in [a, b) außerhalb aller Schichten (Mo–Fr laut Profil; Wochenende ganz) */
+  function offShiftSec(a, b) {
+    const spans = (WF.profile.shifts || []).map(x => [U.hm(x.start), U.hm(x.end) || 86400]);
+    let off = 0;
+    for (let d = Math.floor(a / 86400); d * 86400 < b; d++) {
+      const d0 = d * 86400, x0 = Math.max(a, d0), x1 = Math.min(b, d0 + 86400);
+      if (x1 <= x0) continue;
+      let on = 0;
+      if (((d % 7) + 7) % 7 < 5) for (const [s0, s1] of spans) on += Math.max(0, Math.min(x1, d0 + s1) - Math.max(x0, d0 + s0));
+      off += (x1 - x0) - on;
+    }
+    return off;
+  }
+  /** Zustandszeiten im Fenster [t0, now] aus dem Zustandsverlauf – „Bereit“ ohne Schicht heißt „Keine Schicht“
+      (wie die Pill): bei nicht autonomen Maschinen immer, bei autonomen nur im laufenden Abschnitt mit „Keine Schicht“ */
+  function stateSecs(mv, t0, now) {
+    const secs = {}, segs = mv.segments || [], auto = mv.loading === 'auto', cur = segs[segs.length - 1];
+    for (const sg of segs) {
+      const a = Math.max(t0, sg.t0), b = Math.min(now, sg.t1 == null ? now : sg.t1);
+      if (b <= a) continue;
+      if (sg.state === 'idle' && (!auto || (sg === cur && isNoShift(mv)))) {
+        const off = offShiftSec(a, b);
+        if (off > 0) secs.noshift = (secs.noshift || 0) + off;
+        if (b - a - off > 0) secs.idle = (secs.idle || 0) + (b - a - off);
+      } else secs[sg.state] = (secs[sg.state] || 0) + (b - a);
+    }
+    return secs;
+  }
+  const NOSHIFT = { label: 'Keine Schicht', color: 'var(--st-idle)' };
+  const stDef = (k) => (k === 'noshift' ? NOSHIFT : WF.STATE[k] || { label: k, color: 'var(--st-idle)' });
   const shortName = (n) => { const p = String(n || '').trim().split(/\s+/); return p.length > 1 ? p[0][0] + '. ' + p[p.length - 1] : String(n || ''); };
   const teile = (n) => U.fmtNum(n) + (n === 1 ? ' Teil' : ' Teile');
   const durS = (sec) => { if (sec == null) return '–'; sec = Math.max(0, Math.round(sec)); if (sec < 60) return sec + ' s'; if (sec < 600) return Math.floor(sec / 60) + ' min ' + String(sec % 60).padStart(2, '0') + ' s'; return U.fmtDur(sec); };
@@ -186,6 +239,7 @@
 
   .md-ev{display:grid;grid-template-columns:40px minmax(0,1fr);gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:var(--fs-sm);line-height:1.4}
   .md-ev:last-child{border-bottom:0}
+  .md-evl.wd .md-ev{grid-template-columns:76px minmax(0,1fr)}
   .md-ev .num{color:var(--muted);font-size:var(--fs-xs)}
   .md-ev span:last-child{color:var(--text2);overflow-wrap:anywhere}
   .md-ev i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--c);margin-right:6px;vertical-align:1px}
@@ -297,9 +351,9 @@
   function secStatus(mv, now) {
     const st = WF.STATE[mv.state] || WF.STATE.idle;
     let h = `<div class="md-hero">
-      <div class="md-st">${WF.ui.pill(mv.state)}<span class="md-since">seit ${esc(U.fmtDur(mv.sinceSec))} · ${esc(tclock(mv.since, now))}</span>
+      <div class="md-st">${statePill(mv)}<span class="md-since">seit ${esc(U.fmtDur(mv.sinceSec))} · ${esc(tclock(mv.since, now))}</span>
         ${mv.order ? `<span class="chip md-phase" title="Phase des aktuellen Arbeitsgangs">${esc(mv.phase)}</span>` : ''}</div>
-      <div class="md-cause">${esc(mv.cause || '–')}</div>`;
+      <div class="md-cause">${esc(relDays(mv.cause || '–', now))}</div>`;
     if (mv.fault) {
       const f = mv.fault, rp = f.repairBy ? personAt(f.repairBy) : null;
       let rep;
@@ -307,7 +361,7 @@
       else if (rp) rep = `<b>${esc(rp.name)}</b> ist zugeteilt (${esc(rp.activity || '')}) – Erfahrungswert ${f.repairMin[0]}–${f.repairMin[1]} min`;
       else rep = `Wartet auf Instandhaltung – Erfahrungswert ${f.repairMin[0]}–${f.repairMin[1]} min`;
       h += `<div class="md-box" style="--c:var(--st-fault)">
-        <div class="md-box-h">${icon('alert', 16)}<span>${esc(f.code)} · ${esc(f.text)}</span><span class="spacer"></span><small>seit ${esc(U.fmtClock(f.t0))} (${esc(U.fmtDur(f.sinceSec))})</small></div>
+        <div class="md-box-h">${icon('alert', 16)}<span>${esc(f.code)} · ${esc(f.text)}</span><span class="spacer"></span><small>seit ${esc(tclock(f.t0, now))} (${esc(U.fmtDur(f.sinceSec))})</small></div>
         <div>Wahrscheinliche Ursache: ${esc(f.cause)}</div>
         <div>${rep}</div>
         ${f.toolBreak ? `<div>Werkzeugbruch${f.toolName ? ': <b>' + esc(f.toolName) + '</b>' : ''} – das laufende Teil ist Ausschuss, das Werkzeug wird nach der Reparatur gewechselt.</div>` : ''}
@@ -343,16 +397,15 @@
     const ticks = [`<span class="a0" style="left:0">${esc(tclock(t0, now))}</span>`, `<span class="a1" style="left:100%">jetzt</span>`];
     const step = W > 5 * 3600 ? 7200 : 3600;
     for (let t = Math.ceil((t0 + 1) / step) * step; t < now; t += step) { const p = P(t); if (p > 13 && p < 87) ticks.push(`<span style="left:${p.toFixed(2)}%">${esc(U.fmtClock(t))}</span>`); }
-    const secs = {};
-    for (const sg of segs) { const a = Math.max(t0, sg.t0), b = Math.min(now, sg.t1 == null ? now : sg.t1); if (b > a) secs[sg.state] = (secs[sg.state] || 0) + (b - a); }
-    const leg = Object.keys(secs).sort((a, b) => secs[b] - secs[a]).slice(0, 5).map(k => `<span style="--c:${(WF.STATE[k] || {}).color}"><i></i>${esc((WF.STATE[k] || {}).label || k)} <b>${esc(U.fmtDur(secs[k]))}</b></span>`).join('');
+    const secs = stateSecs(mv, t0, now);
+    const leg = Object.keys(secs).sort((a, b) => secs[b] - secs[a]).slice(0, 5).map(k => `<span style="--c:${stDef(k).color}"><i></i>${esc(stDef(k).label)} <b>${esc(U.fmtDur(secs[k]))}</b></span>`).join('');
     h += `<div class="md-band" title="Zustände ${esc(tclock(t0, now))}–${esc(U.fmtClock(now))}">${WF.ui.stateBand(segs, t0, now, { w: 448, h: 10 })}<div class="md-band-ax">${ticks.join('')}</div><div class="md-legend">${leg}</div></div>`;
     void st;
     return h + '</div>';
   }
   function sigStatus(mv, now) {
     const f = mv.fault, rp = f && f.repairBy ? personAt(f.repairBy) : null;
-    return [mv.state, Math.floor(mv.sinceSec / 60), mv.cause, mv.phase, f ? f.code + f.repairBy + Math.floor(f.sinceSec / 60) + (rp ? rp.state + Math.floor((rp.workRem || 0) / 60) : '') : '',
+    return [mv.state, isNoShift(mv), Math.floor(mv.sinceSec / 60), mv.cause, mv.phase, f ? f.code + f.repairBy + Math.floor(f.sinceSec / 60) + (rp ? rp.state + Math.floor((rp.workRem || 0) / 60) : '') : '',
       mv.fpi ? mv.fpi.stage + mv.fpi.by + Math.floor(mv.fpi.waitingSec / 60) : '', JSON.stringify(mv.manualToolChange),
       mv.people.map(p => p.id + p.taskLabel + p.where).join(','), mv.operator ? mv.operator.id + mv.operator.activity : '', Math.floor(now / 120), (mv.segments || []).length].join('|');
   }
@@ -388,7 +441,7 @@
       String(n.key || '').split(':').slice(1).indexOf(id) >= 0))
       .sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1) || (sevR[a.sev] ?? 4) - (sevR[b.sev] ?? 4) || b.t - a.t).slice(0, 4);
   }
-  function secNotifs(mv) {
+  function secNotifs(mv, now) {
     const list = machineNotifs(mv.id);
     if (!list.length) return '';
     return '<div class="md-nl">' + list.map(n => {
@@ -396,18 +449,18 @@
       const acts = (n.actions || []).map((a, i) => ({ a, i })).filter(x => x.a.action && !(x.a.action.type === 'select' && x.a.action.kind === 'machine' && x.a.action.id === mv.id));
       return `<div class="md-n${n.status === 'ack' ? ' ack' : ''}" style="--c:${sv.color}">
         <div class="md-n-top"><span class="sev">${esc(sv.label)}</span><span>${WF.ui.notifTime(n)}${n.role ? ' · ' + esc(n.role) : ''}</span></div>
-        <div class="md-n-t">${esc(n.title)}</div>${n.body ? `<div class="md-n-b">${esc(n.body)}</div>` : ''}
-        ${n.suggestion ? `<div class="md-n-s"><b>Empfehlung</b> ${esc(n.suggestion)}</div>` : ''}
+        <div class="md-n-t">${esc(relDays(n.title, now))}</div>${n.body ? `<div class="md-n-b">${esc(relDays(n.body, now))}</div>` : ''}
+        ${n.suggestion ? `<div class="md-n-s"><b>Empfehlung</b> ${esc(relDays(n.suggestion, now))}</div>` : ''}
         <div class="md-n-a">${acts.map((x, k) => `<button type="button" class="btn sm${k === 0 && x.a.action.type !== 'select' && n.status === 'open' ? ' primary' : ''}" data-nact="run|${esc(n.id)}|${x.i}">${esc(x.a.label)}</button>`).join('')}${n.status === 'open' ? `<button type="button" class="btn sm ghost" data-nact="ack|${esc(n.id)}">Quittieren</button>` : `<span class="st">quittiert${n.ackBy ? ' von ' + esc(n.ackBy) : ''} · Ursache besteht noch</span>`}</div>
       </div>`;
     }).join('') + '</div>';
   }
-  function sigNotifs(mv) { return machineNotifs(mv.id).map(n => n.id + n.status + (n.updatedT || n.t) + n.title + (n.body || '') + (n.suggestion || '') + (n.actions || []).map(a => a.label).join('/')).join('|'); }
+  function sigNotifs(mv, now) { return Math.floor(now / 86400) + '|' + machineNotifs(mv.id).map(n => n.id + n.status + (n.updatedT || n.t) + n.title + (n.body || '') + (n.suggestion || '') + (n.actions || []).map(a => a.label).join('/')).join('|'); }
 
   function secOrder(mv, now) {
     if (!mv.order) {
       const q = mv.queue[0];
-      return `<div class="md-card"><div class="md-meta">Kein Arbeitsgang aktiv.${q ? ` Als Nächstes: <b>${esc(q.orderId)} AG ${esc(q.seq)} ${esc(q.op)}</b> – ${esc(q.why)}.` : ' Für diesen Arbeitsplatz ist derzeit nichts eingeplant.'}</div></div>`;
+      return `<div class="md-card"><div class="md-meta">Kein Arbeitsgang aktiv.${q ? ` Als Nächstes: <b>${esc(q.orderId)} AG ${esc(q.seq)} ${esc(q.op)}</b> – ${esc(relDays(q.why, now))}.` : ' Für diesen Arbeitsplatz ist derzeit nichts eingeplant.'}</div></div>`;
     }
     const o = mv.order, ov = WF.sim.orderView(o.id);
     const so = S().orders[o.id];
@@ -486,7 +539,7 @@
     const rows = ts.map((t, i) => {
       const key = t.id || t.typeId, c = TOOL_C[t.status] || 'var(--st-idle)', pc = t.plannedChange;
       let pcTxt = '';
-      if (pc) pcTxt = `${pc.manual ? 'Vorbeugend: ' : ''}Wechsel ${pc.text}${pc.by ? ' · ' + pc.by + (pc.stage && pc.stage !== 'offen' && pc.stage !== 'später' ? ' ' + pc.stage : '') : ''}${pc.bundled ? ' · wird mitgewechselt' : ''}`;
+      if (pc) pcTxt = `${pc.manual ? 'Vorbeugend: ' : ''}Wechsel ${relDays(pc.text, now)}${pc.by ? ' · ' + pc.by + (pc.stage && pc.stage !== 'offen' && pc.stage !== 'später' ? ' ' + pc.stage : '') : ''}${pc.bundled ? ' · wird mitgewechselt' : ''}`;
       else if (t.status === 'due') pcTxt = 'Standzeit reicht nicht für das nächste Teil';
       else if (t.status === 'broken') pcTxt = 'Wechsel vor dem nächsten Teil';
       const wear = t.wearPct != null ? t.wearPct : null;
@@ -503,7 +556,7 @@
       ${idle.length ? `<div class="md-idle-tools">Außerdem montiert, im Arbeitsgang nicht im Einsatz: ${idle.map(t => esc(t.name) + ' (' + esc(U.fmtNum(t.wearPct, 0)) + ' %)').join(', ')}</div>` : ''}
       <div class="md-explain" style="margin-top:10px">
         <div class="md-ex-h">${icon('info', 14)}<span>WARUM? · ${esc(sel.name)}</span><span class="spacer"></span>${sel.id ? `<button class="link" data-ent="tool|${esc(sel.id)}" style="font-size:var(--fs-xs);font-weight:500;letter-spacing:0">Werkzeugdetails</button>` : ''}</div>
-        <div>${esc(sel.explain || '–')}</div>
+        <div>${esc(relDays(sel.explain || '–', now))}</div>
         <div class="md-rule">${toolRule(sel)}</div>
       </div>`;
   }
@@ -519,7 +572,7 @@
     return `${esc(base)}<br><b>Ankündigung:</b> ${esc(teile(H))} vorher (Vorlauf zum Holen des Werkzeugs).<br>${change} Reicht die Reststandzeit bis zum Ende des Arbeitsgangs, wird nicht gewechselt.`;
   }
   function sigTools(mv, st) {
-    return st.toolSel + '|' + mv.tools.map(t => [t.id, t.status, t.remainingParts, t.wearPct != null ? Math.round(t.wearPct) : '', t.plannedChange ? t.plannedChange.text + t.plannedChange.by + t.plannedChange.stage : '', t.explain, t.changeAtParts, t.planHorizonParts].join('~')).join('||');
+    return st.toolSel + '|' + Math.floor(WF.sim.t / 86400) + '|' + mv.tools.map(t => [t.id, t.status, t.remainingParts, t.wearPct != null ? Math.round(t.wearPct) : '', t.plannedChange ? t.plannedChange.text + t.plannedChange.by + t.plannedChange.stage : '', t.explain, t.changeAtParts, t.planHorizonParts].join('~')).join('||');
   }
 
   function secSignals(mv, now) {
@@ -583,14 +636,22 @@
   function sigBuffers(mv) { return [mv.input.map(c => c.id + c.qty + c.state).join(','), mv.output.map(c => c.id + c.qty + c.state).join(','), mv.barStockM != null ? Math.round(mv.barStockM * 10) : ''].join('|'); }
 
   function secToday(mv) {
-    const o = mv.oeeToday || {}, os = mv.oeeShift || {};
+    const o = mv.oeeToday || {}, os = mv.oeeShift || {}, now = WF.sim.t;
     const apq = (l, v, c) => `<div><span>${l}</span>${WF.ui.bar(v || 0, { color: c, thin: true })}<b>${esc(U.fmtPct(v, 1))}</b></div>`;
-    const tot = Object.values(mv.stateTimes || {}).reduce((a, b) => a + b, 0) || 1;
-    const keys = Object.keys(WF.STATE).filter(k => (mv.stateTimes || {})[k] > 0);
-    const dist = keys.map(k => `<i style="--c:${WF.STATE[k].color};width:${((mv.stateTimes[k] / tot) * 100).toFixed(2)}%" title="${esc(WF.STATE[k].label)}: ${esc(U.fmtDur(mv.stateTimes[k]))}"></i>`).join('');
-    const leg = keys.sort((a, b) => mv.stateTimes[b] - mv.stateTimes[a]).slice(0, 6).map(k => `<span style="--c:${WF.STATE[k].color}"><i></i>${esc(WF.STATE[k].label)} <b>${esc(U.fmtDur(mv.stateTimes[k]))}</b></span>`).join('');
+    // Zustandszeiten heute (Engine): „Bereit“ außerhalb der Schicht als „Keine Schicht“ ausweisen (wie Pill und Zustandsband)
+    const T = Object.assign({}, mv.stateTimes || {});
+    if (T.idle > 0) {
+      const off = Math.min(T.idle, stateSecs(mv, U.dayStart(now), now).noshift || 0);
+      if (off >= 60) { T.noshift = off; T.idle -= off; }
+    }
+    const tot = Object.values(T).reduce((a, b) => a + b, 0) || 1;
+    const keys = Object.keys(WF.STATE).concat('noshift').filter(k => T[k] > 0);
+    const dist = keys.map(k => `<i style="--c:${stDef(k).color};width:${((T[k] / tot) * 100).toFixed(2)}%" title="${esc(stDef(k).label)}: ${esc(U.fmtDur(T[k]))}"></i>`).join('');
+    const leg = keys.sort((a, b) => T[b] - T[a]).slice(0, 6).map(k => `<span style="--c:${stDef(k).color}"><i></i>${esc(stDef(k).label)} <b>${esc(U.fmtDur(T[k]))}</b></span>`).join('');
+    // eine Rundung (1 Nachkommastelle wie Leitstand und Copilot); Schicht nur, wenn sie sich vom Tageswert unterscheidet
+    const shiftDiff = os.oee != null && !(o.oee != null && Math.abs(o.oee - os.oee) < 0.0005);
     return `<div class="md-card">
-      <div class="md-oee"><div class="md-oee-v">${esc(U.fmtPct(o.oee, 0))}<small>OEE heute${os.oee != null ? ' · Schicht ' + esc(U.fmtPct(os.oee, 0)) : ''}</small></div>
+      <div class="md-oee"><div class="md-oee-v">${esc(U.fmtPct(o.oee, 1))}<small>OEE heute${shiftDiff ? ' · Schicht ' + esc(U.fmtPct(os.oee, 1)) : ''}</small></div>
         <div class="md-apq">${apq('Verfügbarkeit', o.availability, 'var(--st-run)')}${apq('Leistung', o.performance, 'var(--info)')}${apq('Qualität', o.quality, 'var(--st-setup)')}</div></div>
       <div class="md-dist" aria-label="Zustandsverteilung heute">${dist}</div>
       <div class="md-legend">${leg}</div>
@@ -603,7 +664,7 @@
       <div class="md-meta sm">OEE = Verfügbarkeit × Leistung × Qualität; Bezugszeit ist die Schichtzeit ohne Pausen mit eingeplantem Auftrag. Stillstand = ${esc(U.fmtEur(mv.rate))}/h Maschinenstundensatz × Zeit ohne Produktion.</div>
     </div>`;
   }
-  function sigToday(mv) { const o = mv.oeeToday || {}; return [o.oee, o.availability, o.performance, o.quality].map(x => x == null ? '' : Math.round(x * 1000)).join(',') + '|' + Object.values(mv.stateTimes || {}).map(x => Math.floor(x / 60)).join(',') + '|' + mv.goodToday + mv.scrapToday + Math.round(mv.energyKwhToday) + mv.lossEurToday; }
+  function sigToday(mv) { const o = mv.oeeToday || {}, os = mv.oeeShift || {}; return [o.oee, os.oee, o.availability, o.performance, o.quality].map(x => x == null ? '' : Math.round(x * 1000)).join(',') + '|' + Object.values(mv.stateTimes || {}).map(x => Math.floor(x / 60)).join(',') + '|' + isNoShift(mv) + '|' + mv.goodToday + mv.scrapToday + Math.round(mv.energyKwhToday) + mv.lossEurToday; }
 
   function secQueue(mv, now) {
     if (!mv.queue.length) return '<div class="md-card"><div class="md-meta">Keine weiteren Arbeitsgänge für diesen Arbeitsplatz eingeplant.</div></div>';
@@ -611,7 +672,7 @@
     return '<div class="md-q">' + mv.queue.slice(0, 8).map(q => {
       const o = S().orders[q.orderId];
       return `<div class="md-qr" style="--c:${C[q.level] || C[0]}"><i title="${esc(L[q.level] || '')}"></i>
-        <div class="md-qm"><div><button class="link" data-ent="order|${esc(q.orderId)}">${esc(q.orderId)}</button> AG ${esc(q.seq)} ${esc(q.op)}${q.priority === 'eil' ? ' <span class="md-tag" style="--c:var(--accent)">Eil</span>' : ''}</div><div>${esc(o ? o.part.name + ' · ' : '')}${esc(teile(q.parts))} · ${esc(q.why)}</div></div>
+        <div class="md-qm"><div><button class="link" data-ent="order|${esc(q.orderId)}">${esc(q.orderId)}</button> AG ${esc(q.seq)} ${esc(q.op)}${q.priority === 'eil' ? ' <span class="md-tag" style="--c:var(--accent)">Eil</span>' : ''}</div><div>${esc(o ? o.part.name + ' · ' : '')}${esc(teile(q.parts))} · ${esc(relDays(q.why, now))}</div></div>
         <div class="md-qd">Termin<br>${esc(U.fmtDue(q.due, now))}</div></div>`;
     }).join('') + (mv.queue.length > 8 ? `<div class="md-meta" style="padding-top:6px">+ ${mv.queue.length - 8} weitere</div>` : '') + '</div>';
   }
@@ -652,9 +713,10 @@
   function secEvents(mv, now) {
     const list = machineEvents(mv.id, 10);
     if (!list.length) return '<div class="md-meta">Noch keine Ereignisse heute.</div>';
-    return list.map(e => `<div class="md-ev" style="--c:${evColor(e)}"><span class="num">${esc(tclock(e.t, now))}</span><span><i></i>${esc(e.msg)}</span></div>`).join('');
+    const wd = list.some(e => Math.floor(e.t / 86400) !== Math.floor(now / 86400));
+    return `<div class="md-evl${wd ? ' wd' : ''}">` + list.map(e => `<div class="md-ev" style="--c:${evColor(e)}"><span class="num">${esc(tclock(e.t, now))}</span><span><i></i>${esc(e.msg)}</span></div>`).join('') + '</div>';
   }
-  function sigEvents(mv) { const l = machineEvents(mv.id, 1); return l.length ? l[0].id : ''; }
+  function sigEvents(mv, now) { const l = machineEvents(mv.id, 1); return (l.length ? l[0].id : '') + '|' + Math.floor(now / 86400); }
 
   // ------------------------------------------------------------------ Aktionen
   function openFaultModal(id) {

@@ -2371,7 +2371,8 @@ function nightPhase() {
         const sl = Object.values(sx.lossEurBy).reduce((a, b) => a + b, 0), sp = Object.values(sx.plannedStateSec).reduce((a, b) => a + b, 0);
         if (Math.abs(sl - sx.lossEur) > 0.01) fail('night', `${mid}.${kk}: Σ lossEurBy ${sl.toFixed(2)} ≠ lossEur ${sx.lossEur.toFixed(2)}`, 'nsum:' + mid);
         if (Math.abs(sp - sx.planned) > 0.5) fail('night', `${mid}.${kk}: Σ plannedStateSec ${sp} ≠ planned ${sx.planned}`, 'nplan:' + mid);
-        if (sx.plannedStateSec.running !== sx.run) fail('night', `${mid}.${kk}: plannedStateSec.running ${sx.plannedStateSec.running} ≠ run ${sx.run}`, 'nrun:' + mid);
+        // Laufzeit = Produktion + Messmaschine belegt durch Erstteilprüfung (cmmSec, produktive Prüfzeit)
+        if (sx.plannedStateSec.running + (sx.cmmSec || 0) !== sx.run) fail('night', `${mid}.${kk}: plannedStateSec.running ${sx.plannedStateSec.running} + cmmSec ${sx.cmmSec || 0} ≠ run ${sx.run}`, 'nrun:' + mid);
       }
       R();
       if (!v.plannedStateTimes || !v.lossByState) fail('night', `machineView(${mid}) without plannedStateTimes / lossByState`, 'nview');

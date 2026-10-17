@@ -4,7 +4,39 @@
    Assistent „Maschine anbinden“ (5 Schritte): Typenschild-Erkennung, KI-Empfehlung des Anbindungswegs,
    KI-Signalzuordnung, Live-Test (Zustandserkennung gegen den Maschinenzustand), Aktivierung über
    WF.sim.actions.connectMachine. Die Live-Vorschau höherer Stufen bildet die Signalberechnung der Engine
-   exakt nach (gleiches 5-s-Raster, gleiche Formeln) – nach dem Aktivieren zeigt die Engine dieselben Werte. */
+   exakt nach (gleiches 5-s-Raster, gleiche Formeln) – nach dem Aktivieren zeigt die Engine dieselben Werte.
+
+   ─── Datenstufe je Station: was eine Ansicht zeigen darf (für Leitstand, Maschinendetail, Halle, Copilot) ───
+   Grundsatz: Eine Station zeigt nur Werte, die ihre Anbindung liefern kann – und erst ab dem Zeitpunkt, an dem sie
+   angebunden wurde. Nicht gemessene Werte nie sekundengenau, immer mit Quelle („laut Tablet“, „laut Plan“, „≈“).
+   Fähigkeiten = Zeilen der Matrix „Was jede Stufe freischaltet“ (CAPS unten):
+     'state'         Maschinenzustand            L0 manuell (Tablet) · ab L1 automatisch
+     'runtime'       Laufzeit & Stillstände      L0 manuell (Tablet) · ab L1 automatisch
+     'energy'        Energie kW/kWh              L0 geschätzt (Modell) · ab L1 gemessen
+     'count'         Stückzahl                   L0/L1 manuell (Tablet) · ab L2 aus der Steuerung
+     'alarms'        Alarme mit Code & Text      erst ab L2 (L1: nur Signalsäule rot, L0: Tablet-Meldung, beide ohne Code)
+     'program'       Programm, Spindel, Override erst ab L2 (darunter: laut Arbeitsplan) – Aliase 'spindle', 'override'
+     'toolInSpindle' Werkzeug in der Spindel     erst ab L3 (darunter: laut Arbeitsplan)
+     'toolLife'      Standzeit aus der Steuerung erst ab L3 (darunter: werkfluss-Planung aus Schnittzeit × Teile)
+   (Waschanlage, Messraum, Montage: keine Werkzeug-Fähigkeiten; Montage ohne Energie.)
+   API (WF.connect.*):
+     CAPABILITIES                 → die acht Schlüssel oben
+     dataLevel(id)                → { id, level, levelName, protocol, gateway, connectedT|null, lastReportT|null,
+                                      caps: { <cap>: { mode 'auto'|'manuell'|'geschätzt'|null, source, since, text } } }
+                                    since = Sim-Zeit, ab der die Fähigkeit gemessen wird (Anbindung in dieser Sitzung),
+                                    null = schon vor heute gemessen, undefined = nicht gemessen.
+                                    lastReportT = letzte Tablet-Meldung (L0: Zustand/Teil, L1: Teil) für „letzte Meldung 08:31“.
+     canShow(id, cap, t?)         → true nur bei mode 'auto'; mit t zusätzlich: war der Wert zum Zeitpunkt t schon gemessen?
+     measuredSince(id, cap)       → since (s. o.)
+     provenance(id, cap)          → Quelle als kurzer Text, z. B. 'Stückzahl manuell gemeldet (Tablet, letzte Meldung 08:31)',
+                                    'Zustand aus Nachrüst-Sensorik', 'Standzeit laut werkfluss-Planung (Schnittzeit × Teile)'
+     runtimeSince(id, t0?)        → { from, since, sec, measured } Laufzeit (Zustand 'running') ab max(t0 = Tagesbeginn,
+                                    Messbeginn) aus den Zustandssegmenten – z. B. „seit 08:46: 6 min Laufzeit“
+     fmtDur(id, cap, sec)         → Dauer passend zur Quelle: gemessen sekundengenau (WF.util.fmtDur), sonst „≈ 25 min“
+     stateBand(id, t0, t1, o)     → HTML-Zustandsband wie WF.ui.stateBand; nicht gemessene Abschnitte (L0, vor der Anbindung)
+                                    gedämpft + schraffiert; o.marker = true setzt die Marke „angebunden hh:mm“.
+   Beispiel: if (!WF.connect.canShow(id, 'count')) zeile = WF.connect.provenance(id, 'count');
+             (statt „Teil 24 von 24“ → „Stückzahl manuell gemeldet (Tablet, letzte Meldung 08:31)“) */
 (function () {
   'use strict';
   const WF = window.WF;
@@ -515,6 +547,47 @@
   .cn-where{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px}
   @media (pointer:coarse){.cn-chip{min-height:40px}.cn-mr select.input{height:40px}.cn-st.can{min-height:40px}.cn-crumb button{min-height:40px;padding:0 4px}.cn-road-r{min-height:44px}.cn-fm-c .cn-chip{padding-top:6px;padding-bottom:6px}}
   .cn-lbl{font:600 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-top:20px;display:block}
+  .cn-lbl .cn-live{vertical-align:-1px}
+
+  /* Zustand „laut Tablet“ (nicht gemessen): Ring statt Punkt */
+  .cn-dot.rep{background:transparent;border:2px solid var(--c);box-shadow:none;width:9px;height:9px}
+  /* Tastatur: Maschinen-Chips im Datenfluss-Diagramm */
+  .cn-flow .fx-chip{outline:none}
+  .cn-flow .fx-chip:focus-visible rect.bg{stroke:var(--accent);stroke-width:2;fill:var(--raise)}
+
+  /* Zustandsband mit Messbeginn (WF.connect.stateBand) – auch von anderen Ansichten genutzt */
+  .cn-sband{position:relative;display:block;height:var(--h,10px);min-width:40px}
+  .cn-sband > svg{display:block;width:100%;height:100%;border-radius:3px}
+  .cn-sband .cn-est{position:absolute;top:0;bottom:0;border-radius:3px 0 0 3px;pointer-events:none;
+    background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--bg) 46%,transparent) 0 1.5px,transparent 1.5px 5px)}
+  .cn-sband .cn-mk{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;border-radius:1px;background:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 22%,transparent)}
+  .cn-sband .cn-mk span{position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);white-space:nowrap;font:600 var(--fs-2xs)/1 var(--f-ui);letter-spacing:.04em;color:var(--accent)}
+  .cn-sband .cn-mk.r span{left:auto;right:-1px;transform:none}
+  .cn-sband .cn-mk.l span{left:-1px;transform:none}
+
+  /* Erfolgsseite: ab jetzt gemessen */
+  .cn-meas{margin-top:9px;border:1px solid var(--line);border-radius:12px;background:var(--bg2);padding:13px 15px 12px}
+  .cn-meas-h{display:flex;align-items:baseline;justify-content:space-between;gap:6px 16px;flex-wrap:wrap}
+  .cn-meas-h b{font-size:var(--fs-md);font-weight:600;color:var(--text)}
+  .cn-meas-lg{display:flex;gap:4px 14px;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--muted)}
+  .cn-meas-lg span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+  .cn-meas-lg i{width:18px;height:8px;border-radius:2px;background:var(--st-run)}
+  .cn-meas-lg i.est{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--bg) 46%,transparent) 0 1.5px,transparent 1.5px 5px),color-mix(in srgb,var(--st-run) 42%,var(--track))}
+  .cn-meas-band{margin-top:28px}
+  .cn-meas-ax{position:relative;height:14px;margin-top:6px;font:500 var(--fs-2xs)/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums}
+  .cn-meas-ax span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}
+  .cn-meas-ax span:first-child{transform:none}.cn-meas-ax span:last-child{transform:translateX(-100%)}
+  .cn-meas-n{margin-top:8px;font-size:var(--fs-sm);color:var(--text2);line-height:1.45}
+  .cn-meas-n b{color:var(--text);font-weight:600}
+  .cn-meas-g{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:8px;margin-top:8px}
+  .cn-meas-g .cn-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-content:start}
+  .cn-meas-g .cn-tiles>.cn-tile.wide{grid-column:1/-1}
+  .cn-meas-g .cn-chart{justify-content:flex-start;gap:6px}
+  .cn-meas-g .cn-chart-svg{position:relative;flex:1;min-height:104px}
+  .cn-meas-g .cn-chart-svg svg{position:absolute;inset:0;width:100%;height:100%}
+  .cn-tile .v.ok{color:var(--st-run)}
+  .cn-tile .d{font-size:var(--fs-xs);color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  @media (max-width:980px){.cn-meas-g{grid-template-columns:minmax(0,1fr)}}
   `, 'connect');
 
   // =================================================================== Grunddaten
@@ -552,6 +625,175 @@
     { k: 'tool', label: 'Werkzeug in der Spindel', v: [null, null, null, 'auto'], d: 'aktives Werkzeug je Teil' },
     { k: 'life', label: 'Standzeit aus der Steuerung', v: [null, null, null, 'auto'], d: 'Abgleich mit der Werkzeugplanung' },
   ];
+
+  // =================================================================== Datenstufe je Station (öffentliche API, siehe Kopf)
+  const CAP_ALIAS = { state: 'state', runtime: 'runtime', energy: 'energy', count: 'count', alarms: 'alarm', alarm: 'alarm',
+    program: 'nc', spindle: 'nc', override: 'nc', nc: 'nc', toolInSpindle: 'tool', tool: 'tool', toolLife: 'life', life: 'life' };
+  const CAP_PUBLIC = ['state', 'runtime', 'energy', 'count', 'alarms', 'program', 'toolInSpindle', 'toolLife'];
+  const NO_TOOLS = ['washer', 'cmm', 'assembly'];
+  const capApplies = (type, k) => !((k === 'tool' || k === 'life') && NO_TOOLS.includes(type)) && !(k === 'energy' && type === 'assembly');
+  /** Modus einer Fähigkeit auf Stufe lv: 'auto' | 'manuell' | 'geschätzt' | null (nicht verfügbar) – aus der Matrix CAPS */
+  function capModeAt(type, k, lv) {
+    if (!capApplies(type, k)) return null;
+    const row = CAPS.find(c => c.k === k);
+    return row ? (row.v[U.clamp(lv | 0, 0, 3)] || null) : null;
+  }
+  // Verlauf der Stufenwechsel je Station (Ereignis 'connect' der Engine) – für „gemessen seit …“
+  const CONN_LOG = {}, connSeen = new Set();
+  let connSeeded = false;
+  function logConn(e) {
+    if (!e || e.type !== 'connect' || !e.entity || connSeen.has(e.id)) return;
+    connSeen.add(e.id);
+    (CONN_LOG[e.entity.id] = CONN_LOG[e.entity.id] || []).push({ t: e.t, from: e.data ? e.data.from : null, to: e.data ? e.data.to : null });
+  }
+  WF.bus.on('sim:event', logConn);
+  WF.bus.on('sim:reset', () => { for (const k in CONN_LOG) delete CONN_LOG[k]; connSeen.clear(); connSeeded = false; for (const k in REC) delete REC[k]; });
+  function connLog(id) {
+    if (!connSeeded && WF.sim && WF.sim.state) {
+      connSeeded = true;
+      for (const e of WF.sim.state.events || []) logConn(e);
+      for (const k in CONN_LOG) CONN_LOG[k].sort((a, b) => a.t - b.t);
+    }
+    return CONN_LOG[id] || [];
+  }
+  /** Ab wann misst die Station die Fähigkeit k? Sim-Zeit · null = schon vor heute · undefined = gar nicht. */
+  function sinceOf(id, k) {
+    const s = WF.sim && WF.sim.state, m = s && s.machines[id], st = ST(id);
+    if (!m || !st) return undefined;
+    k = CAP_ALIAS[k] || k;
+    if (capModeAt(st.type, k, m.conn.level || 0) !== 'auto') return undefined;
+    const log = connLog(id);
+    for (let i = log.length - 1; i >= 0; i--) {
+      const e = log[i];
+      if (e.from == null || capModeAt(st.type, k, e.from) !== 'auto') return e.t;
+    }
+    if (!log.length && m.conn.connectedT != null) return m.conn.connectedT;   // Ereignis bereits verdrängt: vorsichtig ab Anbindung
+    return null;
+  }
+  const lastReportOf = (m) => (m.conn.level || 0) === 0 ? (m.lastPartT || m.since) : (m.lastPartT != null ? m.lastPartT : null);
+  const srcName = (type, lv) => lv <= 0 ? 'Tablet-Rückmeldung' : lv === 1 ? 'Nachrüst-Sensorik' : type === 'assembly' ? 'Montage-Terminal' : type === 'cmm' ? 'Messsoftware' : 'Steuerung';
+  function capInfo(id, k) {
+    const s = WF.sim.state, m = s.machines[id], st = ST(id), lv = m.conn.level || 0, type = st.type;
+    const mode = capModeAt(type, k, lv), since = sinceOf(id, k);
+    const lr = lastReportOf(m), lrT = lr != null ? ', letzte Meldung ' + U.fmtClock(lr) : '';
+    const src = srcName(type, lv), sinceT = since != null && since !== undefined && since >= U.dayStart(s.t) ? ` · gemessen seit ${U.fmtClock(since)}` : '';
+    const aus = lv === 1 ? 'aus Nachrüst-Sensorik' : 'aus der ' + src;
+    let text;
+    switch (k) {
+      case 'state': text = mode === 'auto' ? `Zustand ${aus}` : `Zustand laut Tablet-Rückmeldung (letzte Meldung ${U.fmtClock(lr != null ? lr : s.t)})`; break;
+      case 'runtime': text = mode === 'auto' ? `Laufzeit gemessen (${src})` : 'Laufzeit aus Tablet-Rückmeldungen (geschätzt)'; break;
+      case 'energy': text = !capApplies(type, k) ? 'Energie entfällt (Handarbeitsplatz)' : mode === 'auto' ? `Energie gemessen (${src})` : 'Energie geschätzt (Leistungsmodell)'; break;
+      case 'count': text = mode === 'auto' ? `Stückzahl ${aus}` : `Stückzahl manuell gemeldet (Tablet${lrT})`; break;
+      case 'alarm': text = mode === 'auto' ? `Störungen mit Code ${aus}` : lv === 1 ? 'Störung aus Signalsäule (rot) – ohne Code' : 'Störung per Tablet gemeldet – ohne Code'; break;
+      case 'nc': text = mode === 'auto' ? `Programm, Spindel und Override ${aus}` : 'Programm laut Arbeitsplan – keine Spindeldaten'; break;
+      case 'tool': text = !capApplies(type, k) ? 'entfällt (keine Zerspanwerkzeuge)' : mode === 'auto' ? `Werkzeug in der Spindel ${aus}` : 'Werkzeug laut Arbeitsplan'; break;
+      case 'life': text = !capApplies(type, k) ? 'entfällt (keine Zerspanwerkzeuge)' : mode === 'auto' ? `Standzeit ${aus}` : 'Standzeit laut werkfluss-Planung (Schnittzeit × Teile)'; break;
+      default: text = '';
+    }
+    const source = mode === 'auto' ? src : mode === 'manuell' ? 'Tablet' : mode === 'geschätzt' ? 'Modell'
+      : !capApplies(type, k) ? null : k === 'alarm' ? (lv === 1 ? 'Nachrüst-Sensorik' : 'Tablet') : 'Planung';
+    return { mode, source, since, text: text + (mode === 'auto' ? sinceT : '') };
+  }
+  function dataLevel(id) {
+    const s = WF.sim && WF.sim.state, m = s && s.machines[id];
+    if (!m || !ST(id)) return null;
+    const lv = m.conn.level || 0, caps = {};
+    for (const pub of CAP_PUBLIC) caps[pub] = capInfo(id, CAP_ALIAS[pub]);
+    return { id, level: lv, levelName: LV[lv].name, protocol: m.conn.protocol, gateway: m.conn.gateway,
+      connectedT: m.conn.connectedT != null ? m.conn.connectedT : null, lastReportT: lastReportOf(m), caps };
+  }
+  function canShow(id, cap, t) {
+    const since = sinceOf(id, cap);
+    if (since === undefined) return false;
+    return t == null || since == null || t >= since;
+  }
+  /** Laufzeit (Zustand 'running') ab max(t0, Messbeginn) – nur aus gemessenen Zustandssegmenten. */
+  function runtimeSince(id, t0) {
+    const s = WF.sim && WF.sim.state, m = s && s.machines[id];
+    if (!m) return null;
+    const since = sinceOf(id, 'runtime');
+    if (since === undefined) return { from: null, since: undefined, sec: null, measured: false };
+    const from = Math.max(t0 != null ? t0 : U.dayStart(s.t), since != null ? since : -Infinity);
+    let sec = 0;
+    for (const g of m.segments || []) {
+      if (g.state !== 'running') continue;
+      const a = Math.max(g.t0, from), b = g.t1 == null ? s.t : Math.min(g.t1, s.t);
+      if (b > a) sec += b - a;
+    }
+    return { from, since, sec, measured: true };
+  }
+  /** Dauer passend zur Quelle: gemessen sekundengenau, sonst gerundet mit „≈“. */
+  function fmtDurFor(id, cap, sec) {
+    if (sec == null || !isFinite(sec)) return '–';
+    if (canShow(id, cap)) return U.fmtDur(sec);
+    if (sec < 60) return '< 1 min';
+    const min = sec < 600 ? Math.round(sec / 60) : Math.round(sec / 300) * 5;
+    return '≈ ' + U.fmtDur(min * 60);
+  }
+  /** Zustandsband (HTML) – nicht gemessene Abschnitte gedämpft und schraffiert, optional Marke „angebunden hh:mm“. */
+  function stateBandHtml(id, t0, t1, o) {
+    o = o || {};
+    const s = WF.sim && WF.sim.state, m = s && s.machines[id];
+    if (!m) return '';
+    const w = o.w || 600, h = o.h || 10, span = Math.max(1, t1 - t0);
+    const since = sinceOf(id, 'state');
+    const cut = since === undefined ? Infinity : since == null ? -Infinity : since;
+    const X = (t) => (t - t0) / span * w;
+    const rect = (x0, x1, state, est) => `<rect x="${X(x0).toFixed(2)}" y="0" width="${Math.max(0.6, X(x1) - X(x0)).toFixed(2)}" height="${h}" fill="${WF.STATE_HEX[state] || '#555'}"${est ? ' opacity=".42"' : ''}/>`;
+    let rects = '';
+    // Nicht gemessener Teil so grob, wie ihn Tablet-Meldungen liefern: Abschnitte unter o.estMinSec (10 min) gehen im Vorgänger auf
+    const estMin = o.estMinSec != null ? o.estMinSec : 600, coarse = [];
+    for (const g of m.segments || []) {
+      const a = Math.max(t0, g.t0), b = Math.min(t1, g.t1 == null ? t1 : g.t1);
+      if (b <= a) continue;
+      const ea = a, eb = Math.min(b, cut);
+      if (eb > ea) {
+        const last = coarse[coarse.length - 1];
+        if (last && (last.state === g.state || eb - ea < estMin) && Math.abs(last.b - ea) < 1) last.b = eb;
+        else coarse.push({ a: ea, b: eb, state: g.state });
+      }
+      const ma = Math.max(a, cut);
+      if (b > ma) rects += rect(ma, b, g.state, false);
+    }
+    rects = coarse.map(c => rect(c.a, c.b, c.state, true)).join('') + rects;
+    const estW = cut === Infinity ? 100 : cut <= t0 ? 0 : U.clamp((cut - t0) / span * 100, 0, 100);
+    const mT = o.markAt != null ? o.markAt : since;
+    const lab = o.label != null ? o.label : mT != null ? 'angebunden ' + U.fmtClock(mT) : '';
+    const mP = mT != null ? U.clamp((mT - t0) / span * 100, 0, 100) : 0;
+    const mk = o.marker && mT != null && mT > t0 && mT <= t1
+      ? `<b class="cn-mk${mP > 72 ? ' r' : mP < 14 ? ' l' : ''}" style="left:${mP.toFixed(2)}%" title="${esc(lab)}">${o.markerLabel !== false && lab ? `<span>${esc(lab)}</span>` : ''}</b>` : '';
+    const tip = since === undefined ? 'Zustand laut Tablet-Rückmeldung – nicht gemessen' : since == null ? 'Zustand gemessen' : `Zustand gemessen seit ${U.fmtClock(since)}, davor laut Tablet-Rückmeldung`;
+    return `<span class="cn-sband" style="--h:${h}px" title="${esc(tip)}"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><rect width="${w}" height="${h}" style="fill:var(--track)"/>${rects}</svg>${estW > 0 ? `<i class="cn-est" style="left:0;width:${estW.toFixed(2)}%"></i>` : ''}${mk}</span>`;
+  }
+
+  // Messreihe seit der Anbindung (Leistung) – Abtastung im 5-s-Raster der Engine, Lücken aus den Zustandssegmenten
+  const REC = {};
+  function recSample(id) {
+    const s = S(), m = s.machines[id];
+    if (!m || (m.conn.level || 0) < 1 || m.conn.connectedT == null) return;
+    let r = REC[id];
+    if (!r || r.since !== m.conn.connectedT) r = REC[id] = { since: m.conn.connectedT, pts: [] };
+    const x = fullCtx(id);
+    const last = r.pts[r.pts.length - 1];
+    if (!last || last.t !== x.T) { r.pts.push({ t: x.T, kw: x.kw, a: x.amps }); if (r.pts.length > 2000) r.pts.splice(0, r.pts.length - 2000); }
+  }
+  /** Leistungsverlauf [t0, t1] in n Stützstellen: gemessene Abtastwerte, sonst Modellwert aus dem Zustandssegment (gleiche Formel wie die Engine) */
+  function powerSeries(id, t0, t1, n) {
+    const m = S().machines[id], st = ST(id), idx = WF.profile.machines.indexOf(id);
+    const r = REC[id] && REC[id].since === m.conn.connectedT ? REC[id].pts : [];
+    const p = (st && st.power) || { idle: 1, run: 5 };
+    const stateAt = (t) => { let res = 'idle'; for (const g of m.segments || []) { if (g.t0 <= t && (g.t1 == null || g.t1 > t)) { res = g.state; break; } } return res; };
+    const model = (t) => { const T = t - (t % 5), stt = stateAt(t); const kw = stt === 'running' ? p.run : stt === 'fault' ? p.idle * 0.8 : stt === 'setup' || stt === 'toolchange' ? p.idle * 1.1 : p.idle; return Math.round(kw * (1 + 0.03 * hnoise(T, idx + 1)) * 10) / 10; };
+    const out = [], step = Math.max(5, (t1 - t0) / Math.max(1, n - 1));
+    let j = 0;
+    for (let t = t0; t <= t1 + 0.001; t += step) {
+      while (j < r.length && r[j].t < t - step / 2) j++;
+      let sum = 0, c = 0, k = j;
+      while (k < r.length && r[k].t <= t + step / 2) { sum += r[k].kw; c++; k++; }
+      out.push({ t, v: c ? sum / c : model(t), rec: c > 0 });
+    }
+    return out;
+  }
 
   /** Fähigkeiten je Stationstyp: Handarbeitsplatz, Waschanlage und Messraum haben weder Spindel noch Zerspanwerkzeug */
   function capsFor(type) {
@@ -644,7 +886,7 @@
     if (!force && lv === (m.conn.level || 0)) return m.signals;
     const x = fullCtx(id);
     if (lv <= 0) return m.signals;
-    if (lv === 1) return { t: x.T, level: 1, source: 'Stromsensor + Signalsäule', powerKw: x.kw, currentA: x.amps, stackLight: x.light, stackLightLabel: WF.sim.label('stackLight', x.light), runtimeTodaySec: x.runtime, partCounter: null };
+    if (lv === 1) return { t: x.T, level: 1, source: 'Stromsensor + Signalsäule', powerKw: x.kw, currentA: x.amps, stackLight: x.light, stackLightLabel: WF.sim.label('stackLight', x.light), runtimeTodaySec: canShow(id, 'runtime') ? x.runtime : null, partCounter: null };
     const sg = { t: x.T, level: lv, source: m.conn.protocol, mode: x.mode, stackLight: x.light, stackLightLabel: WF.sim.label('stackLight', x.light),
       spindleRpm: x.rpm, spindleLoadPct: x.load, feedOverridePct: x.ovr, program: x.prog, partCounter: x.count, totalCounter: x.total,
       toolInSpindle: lv >= 3 && x.spindle && x.tool ? x.tool : null, toolInSpindleName: lv >= 3 && x.spindle && x.tool ? x.toolName : null, alarm: x.alarm, coolant: x.coolant };
@@ -1322,7 +1564,7 @@
         <div class="card">
           <div class="card-h"><h3>Datenfluss: Maschine → Gateway → werkfluss</h3><span class="cn-live"><i></i>live<span class="cn-hs"> · 5-s-Raster</span></span></div>
           <div class="cn-flow" data-k="flow"></div>
-          <div class="cn-flow-f"><span><i class="ln"></i>automatisch (Steuerung / Sensorik)</span><span><i class="ln d"></i>manuell (Tablet)</span><span><i class="pk"></i>Datenpaket</span><span><span class="cn-dot" style="--c:var(--st-run)"></span>Punkt = Maschinenzustand</span></div>
+          <div class="cn-flow-f"><span><i class="ln"></i>automatisch (Steuerung / Sensorik)</span><span><i class="ln d"></i>manuell (Tablet)</span><span><i class="pk"></i>Datenpaket</span><span><span class="cn-dot" style="--c:var(--st-run)"></span>Zustand gemessen</span><span><span class="cn-dot rep" style="--c:var(--st-run)"></span>laut Tablet</span></div>
         </div>
         <div class="card">
           <div class="card-h"><h3>Was jede Stufe in werkfluss freischaltet</h3></div>
@@ -1390,7 +1632,7 @@
       : `<span class="cn-opt-ok">${icon('check', 14)}Optimal angebunden</span>`;
     const gwT = lv === 0 ? 'manuell' : /direkt/i.test(c.gateway) ? 'direkt an werkfluss' : c.gateway;
     return `<div class="cn-lr${isNew && nowT() - c.connectedT < 120 ? ' fresh' : ''}" data-act="sel" data-id="${esc(id)}" role="button" tabindex="0" title="Details zu ${esc(st.short)} öffnen">
-      <div class="cn-mc cn-c-m"><span class="cn-dot" data-r="dot" style="--c:${stColor(m.state)}" title="${esc(stLabel(m.state))}"></span><div><div><b>${esc(st.short)}</b><span class="mono">${esc(id)}</span>${isNew ? '<span class="cn-new">neu</span>' : ''}</div><div class="cn-sub">${esc(st.name)}</div></div></div>
+      <div class="cn-mc cn-c-m"><span class="cn-dot${lv === 0 ? ' rep' : ''}" data-r="dot" style="--c:${stColor(m.state)}" title="${esc(stLabel(m.state))}"></span><div><div><b>${esc(st.short)}</b><span class="mono">${esc(id)}</span>${isNew ? '<span class="cn-new">neu</span>' : ''}</div><div class="cn-sub">${esc(st.name)}</div></div></div>
       <div class="cn-cell cn-c-d"><div class="t2">${esc(st.vendor !== '–' ? st.vendor + ' ' + st.model : st.model)} · Bj. ${esc(st.year)} · ${esc(ctrlShort(st.control))}</div></div>
       <div class="cn-cell cn-c-year num">${esc(st.year)}</div>
       <div class="cn-cell cn-c-ctrl"><div class="t1" title="${esc(st.control)}">${esc(ctrlShort(st.control))}</div><div class="t2">${esc(st.vendor !== '–' ? st.vendor + ' ' + st.model : st.model)} · Bj. ${esc(st.year)}</div></div>
@@ -1405,12 +1647,12 @@
     const m = S().machines[id], st = ST(id), lv = m.conn.level || 0, sg = m.signals || {};
     if (lv === 0) {
       const age = sg.lastFeedbackT != null ? nowT() - sg.lastFeedbackT : null;
-      return { l1: `Tablet: „${esc(sg.lastFeedback || stLabel(m.state))}“`, l2: 'Zustand aus Rückmeldung und Planung', age, old: age != null && age > 600, light: null, t: sg.lastFeedbackT };
+      return { l1: `Tablet: „${esc(sg.lastFeedback || stLabel(m.state))}“${sg.lastFeedbackT != null ? ' · ' + esc(U.fmtClock(sg.lastFeedbackT)) : ''}`, l2: 'Zustand und Stückzahl laut Tablet – nicht gemessen', age, old: age != null && age > 600, light: null, t: sg.lastFeedbackT };
     }
     const age = msgAge(id);
     const prog = sg.program && sg.program !== '–' ? sg.program : 'kein Programm aktiv';
     let l1, l2;
-    if (lv === 1) { l1 = `${U.fmtNum(sg.powerKw, 1)} kW · ${U.fmtNum(sg.currentA, 1)} A`; l2 = `Signalsäule ${LIGHT_DE[sg.stackLight] || '–'} · Laufzeit heute ${U.fmtDur(sg.runtimeTodaySec)}`; }
+    if (lv === 1) { l1 = `${U.fmtNum(sg.powerKw, 1)} kW · ${U.fmtNum(sg.currentA, 1)} A`; l2 = `Signalsäule ${LIGHT_DE[sg.stackLight] || '–'} · ${runtimeText(id, sg)}`; }
     else if (st.type === 'cmm') { l1 = `${MODE_DE[sg.mode] || sg.mode} · Taster ${sg.probe || '–'}${sg.feature ? ' · ' + sg.feature : ''}`; l2 = `${prog} · Zähler ${U.fmtNum(sg.partCounter)}`; }
     else if (st.type === 'washer') { l1 = `${MODE_DE[sg.mode] || sg.mode} · ${U.fmtNum(sg.bathTempC)} °C · ${sg.cycle && sg.cycle !== '–' ? sg.cycle : 'bereit'}`; l2 = `${prog} · Zähler ${U.fmtNum(sg.partCounter)}`; }
     else if (st.type === 'assembly') { l1 = `${sg.terminalStep && sg.terminalStep !== '–' ? 'Montage ' + sg.terminalStep : 'kein Montageschritt aktiv'}`; l2 = `${prog} · Zähler ${U.fmtNum(sg.partCounter)}`; }
@@ -1421,6 +1663,13 @@
     }
     if (sg.alarm) l1 = `Alarm ${sg.alarm}`;
     return { l1: esc(l1), l2: esc(l2), age, old: false, light: sg.stackLight, t: sg.t, alarm: !!sg.alarm };
+  }
+  /** „Laufzeit heute 2 h 20 min“ – bei Anbindung heute nur ab Messbeginn: „Laufzeit seit 08:52 6 min“ */
+  function runtimeText(id, sg) {
+    const rt = runtimeSince(id);
+    if (!rt || !rt.measured) return 'Laufzeit laut Tablet';
+    if (rt.since != null && rt.since >= U.dayStart(nowT())) return `Laufzeit seit ${U.fmtClock(rt.since)} ${U.fmtDur(rt.sec)}`;
+    return `Laufzeit heute ${U.fmtDur(sg && sg.runtimeTodaySec != null ? sg.runtimeTodaySec : rt.sec)}`;
   }
   const setT = (e, v) => { if (e && e.textContent !== v) e.textContent = v; };
   const setH = (e, v) => { if (e && e._h !== v) { e._h = v; e.innerHTML = v; } };
@@ -1438,12 +1687,14 @@
       let sec = 0, eur = 0;
       for (const id of IDS()) { if (lvOf(id) !== 0) continue; const kd = S().machines[id].kd || {}; sec += kd.lossSec || 0; eur += kd.lossEur || 0; }
       const names = esc(IDS().filter(id => lvOf(id) === 0).map(id => ST(id).short).join(', '));
-      setH(ovRefs['h-loss'], sec > 0 ? `${names} · Stillstand heute <b>${esc(U.fmtDur(sec))}</b> (${esc(U.fmtEur(eur))}) – nur per Rückmeldung erfasst` : `${names} – Zustand nur so aktuell wie die letzte Meldung`);
+      const approx = sec < 600 ? Math.max(1, Math.round(sec / 60)) * 60 : Math.round(sec / 300) * 300;
+      setH(ovRefs['h-loss'], sec > 0 ? `${names} · Stillstand heute <b>≈&nbsp;${esc(U.fmtDur(approx)).replace(/ /g, '&nbsp;')}</b> (≈&nbsp;${esc(U.fmtEur(eur)).replace(/ /g, '&nbsp;')}) – nur per Rückmeldung erfasst` : `${names} – Zustand nur so aktuell wie die letzte Meldung`);
     }
     for (const id in ovRefs.rows) {
       const r = ovRefs.rows[id], m = S().machines[id]; if (!m) continue;
       const lv = liveOf(id);
-      if (r.dot) { r.dot.style.setProperty('--c', stColor(m.state)); setA(r.dot, 'title', stLabel(m.state) + ' – ' + (m.cause || '')); }
+      if (r.dot) { r.dot.style.setProperty('--c', stColor(m.state)); setA(r.dot, 'title', (m.conn.level || 0) === 0 ? `${stLabel(m.state)} – laut Tablet-Rückmeldung (nicht gemessen)` : stLabel(m.state) + ' – ' + (m.cause || '')); }
+      if ((m.conn.level || 0) >= 1 && m.conn.connectedT != null) recSample(id);
       setH(r.l1, lv.l1); setH(r.l2, lv.l2);
       if (r.sl && lv.light) setA(r.sl, 'data-l', lv.light);
       const agoTxt = ago(lv.age);
@@ -1508,9 +1759,9 @@
         const dur = (2.4 + (parseInt(U.hash(r.id), 16) % 7) * 0.12).toFixed(2), off = ((parseInt(U.hash(r.id + 'o'), 16) % 100) / 100 * dur).toFixed(2);
         pk += `<circle class="fx-pkg" r="4.5"><animateMotion dur="${dur}s" begin="-${off}s" repeatCount="indefinite" path="${d}"/></circle><circle class="fx-pk" r="2.2"><animateMotion dur="${dur}s" begin="-${off}s" repeatCount="indefinite" path="${d}"/></circle>`;
       }
-      chips += `<g class="fx-chip" data-chip="${esc(r.id)}" data-act="sel" data-id="${esc(r.id)}" transform="translate(0,${r.y.toFixed(1)})"><title>${esc(st.name)} – ${esc(stLabel(m.state))}</title>
+      chips += `<g class="fx-chip" data-chip="${esc(r.id)}" data-act="sel" data-id="${esc(r.id)}" tabindex="0" role="button" aria-label="${esc(st.short)} (${esc(r.id)}) – Details öffnen" transform="translate(0,${r.y.toFixed(1)})"><title>${esc(st.name)} – ${esc(stLabel(m.state))}${lv === 0 ? ' (laut Tablet)' : ''}</title>
         <rect class="bg" x="0.5" y="0" width="${mW - 1}" height="${chipH}" rx="6"/>
-        <circle data-dot cx="12" cy="${chipH / 2}" r="4" style="fill:${stColor(m.state)}"/>
+        <circle data-dot${lv === 0 ? ' data-rep' : ''} cx="12" cy="${chipH / 2}" r="${lv === 0 ? 3.4 : 4}" style="${lv === 0 ? `fill:none;stroke:${stColor(m.state)};stroke-width:1.8` : `fill:${stColor(m.state)}`}"/>
         <text x="23" y="${chipH / 2 + 4}"><tspan class="fx-n">${esc(st.short)}</tspan><tspan class="fx-id" dx="6">${esc(r.id)}</tspan></text>
         <rect x="${mW - 33}" y="5" width="26" height="14" rx="3.5" style="fill:color-mix(in srgb,${lvVar(lv)} 15%,transparent);stroke:color-mix(in srgb,${lvVar(lv)} 45%,transparent)"/>
         <text class="fx-lvt" x="${mW - 20}" y="${chipH / 2 + 3.5}" text-anchor="middle" style="fill:${lvVar(lv)}">L${lv}</text></g>`;
@@ -1552,7 +1803,7 @@
       const dpG = g.ids.reduce((a, id) => a + dpMin(id), 0);
       return `<div class="cn-fm-g${tab ? ' tab' : ''}"><div class="cn-fm-h">${tab ? '<span class="cn-dot" style="--c:var(--st-wait)"></span>' : '<span class="cn-dot" style="--c:var(--st-run)"></span>'}<b>${esc(gwTitle(g.key))}</b>
         <span class="m" ${tab ? 'data-fk="tab-last"' : `data-fk="mlat-${esc(g.key)}"`}>${tab ? 'manuell' : 'online'}</span></div>
-        <div class="cn-fm-c">${g.ids.map(id => { const m = S().machines[id]; return `<button class="cn-chip" data-act="sel" data-id="${esc(id)}" data-chip="${esc(id)}"><span class="cn-dot" data-dot style="--c:${stColor(m.state)}"></span>${esc(ST(id).short)}<span class="mono">${esc(id)}</span>${lvBadge(m.conn.level || 0)}</button>`; }).join('')}</div>
+        <div class="cn-fm-c">${g.ids.map(id => { const m = S().machines[id]; return `<button class="cn-chip" data-act="sel" data-id="${esc(id)}" data-chip="${esc(id)}"><span class="cn-dot${(m.conn.level || 0) === 0 ? ' rep' : ''}" data-dot style="--c:${stColor(m.state)}"></span>${esc(ST(id).short)}<span class="mono">${esc(id)}</span>${lvBadge(m.conn.level || 0)}</button>`; }).join('')}</div>
         ${!tab ? `<div class="cn-fm-c" style="padding-top:0;font-size:var(--fs-xs);color:var(--muted)">${g.ids.length} ${g.ids.length === 1 ? 'Station' : 'Stationen'} · ${U.fmtNum(dpG)} Datenpunkte/min${meta.net ? ' · ' + esc(meta.net) : ''}</div>` : ''}</div>`;
     }).join('')}<div class="cn-fm-srv"><span class="ic">${icon('cpu', 18)}</span><div class="tx"><span class="t">werkfluss Server · Büro</span><span class="s">→ Leitstand, Analyse, Copilot, Meldungen</span></div><div class="nv"><b data-fk="srv-dp">–</b><span>Datenpunkte/min</span></div></div></div>`;
   }
@@ -1573,7 +1824,7 @@
     }
     for (const id in flowRefs.chips) {
       const e = flowRefs.chips[id], m = S().machines[id]; if (!e || !m) continue;
-      if (e.tagName === 'circle') { const c = stColor(m.state); if (e.style.fill !== c) e.style.fill = c; }
+      if (e.tagName === 'circle') { const c = stColor(m.state); if (e.hasAttribute('data-rep')) { if (e.style.stroke !== c) e.style.stroke = c; } else if (e.style.fill !== c) e.style.fill = c; }
       else e.style.setProperty('--c', stColor(m.state));
     }
   }
@@ -1673,7 +1924,6 @@
     if (WZ.mode === 'new') {
       WZ.done = { demo: true, from: 0, to: p.level, protocol: p.protocol, gateway: p.gateway || sj.demoGw, t: nowT(), title: p.title };
       WZ.step = 4; WZ.reached = 4;
-      WF.app.toast(`${sj.short}: Anbindung gespeichert (Level ${p.level} · ${p.protocol})`, 'ok', { title: 'Neue Maschine vorbereitet' });
       renderWizard(); return;
     }
     const before = sj.cur;
@@ -1683,7 +1933,7 @@
     const c = S().machines[sj.id].conn;
     WZ.done = { demo: false, from: before, to: c.level, protocol: c.protocol, gateway: c.gateway, t: c.connectedT != null ? c.connectedT : nowT(), title: p.title };
     WZ.step = 4; WZ.reached = 4;
-    WF.app.toast(`${sj.short} liefert jetzt Daten über ${/direkt/i.test(c.gateway) ? 'das Firmennetz' : c.gateway} (Level ${before} → ${c.level}).`, 'ok', { title: (r && r.msg) || `${sj.id} angebunden` });
+    // Keine Bestätigungs-Meldung: die Erfolgsseite ist die Bestätigung (ein Toast läge über „Nächste Maschine“)
     renderWizard();
   }
 
@@ -2004,7 +2254,7 @@
       const a = v('current'); if (a) t.push(['Laststrom L1', U.fmtNum(a.sv, 1), 'A', null]);
       if (rows.some(r => sel[r.id] === 'power')) t.push(['Wirkleistung', U.fmtNum(x.kw, 1), 'kW', null]);
       if (rows.some(r => r.kind === 'bit' && ['run', 'wait', 'fault'].includes(sel[r.id]))) t.push(['Signalsäule', LIGHT_DE[x.light] || '–', '', null]);
-      if (x.runtime != null) t.push(['Laufzeit heute', U.fmtDur(x.runtime), '', null]);
+      if (WZ && WZ.samples) t.push(['Seit Teststart', U.fmtNum(WZ.samples.length), WZ.samples.length === 1 ? 'Messwert' : 'Messwerte', null]);
     } else {
       const mo = v('mode'); if (mo) t.push(['Betriebsart', mo.txt, '', null]);
       const li = v('light'); if (li) t.push(['Signalsäule', li.txt, '', null]);
@@ -2124,12 +2374,11 @@
         <div class="cn-note" style="--c:var(--muted)">${icon('info', 16)}<div>Demo: Die Simulation der Donau-Halle wird dabei nicht verändert.</div></div>`;
     }
     return `<div class="cn-done"><span class="cn-done-ic">${icon('check', 30)}</span><div><h3>${esc(sj.short)} ist jetzt digital angebunden</h3>
-        <p>Level ${D.from} → <b>Level ${D.to}</b> · ${esc(D.protocol)} · ${esc(gwT)} · aktiv seit ${esc(U.fmtClock(D.t))}</p></div></div>
+        <p>Level ${D.from} → <b>Level ${D.to}</b> · ${esc(D.protocol)} · ${esc(gwT)} · gemessen seit ${esc(U.fmtClock(D.t))}</p></div></div>
       <span class="cn-lbl">Jetzt automatisch in werkfluss</span>
       <div class="cn-caps">${gain.map((c, i) => `<div class="cn-cap" style="animation-delay:${i * 0.07}s">${icon('check', 16)}<div>${esc(c.label)}<span>${esc(c.d)}</span></div></div>`).join('')}
         ${keep.map(c => `<div class="cn-cap keep">${icon('dot', 16)}<div>${esc(c.label)}<span>weiter per Tablet-Rückmeldung</span></div></div>`).join('')}</div>
-      <span class="cn-lbl">Erste Live-Werte aus der Engine <span class="cn-live" style="margin-left:8px"><i></i>live</span></span>
-      <div class="cn-tiles" style="margin-top:9px" data-w="dtiles"></div>
+      ${measuredHtml(sj, D)}
       <span class="cn-lbl">Wo Sie es sehen</span>
       <div class="cn-where">
         <button class="btn" data-act="sel" data-id="${esc(sj.id)}">${icon('eye', 15)}Maschinendetail · Live-Signale</button>
@@ -2137,25 +2386,98 @@
         ${WF.views.some(v => v.id === 'halle') ? `<button class="btn" data-act="nav" data-view="halle">${icon('cube', 15)}Halle 3D · Datenfluss</button>` : ''}
       </div>`;
   }
+  /** Erfolgsseite „ab jetzt gemessen“: Zustandsband heute (vor der Anbindung schraffiert = Tablet), Kennwerte nur seit
+      Messbeginn, Leistungsverlauf ab der Anbindung. Gerüst hier, Werte in patchDone(). */
+  function measuredHtml(sj, D) {
+    const at = U.fmtClock(D.t), stNew = sinceOf(sj.id, 'state') === D.t;
+    const gain = capsFor(sj.type).filter(c => c.v[D.to] === 'auto' && c.v[D.from] !== 'auto');
+    const energy = capApplies(sj.type, 'energy');
+    return `<span class="cn-lbl">Ab jetzt gemessen <span class="cn-live" style="margin-left:8px"><i></i>live</span></span>
+      <div class="cn-meas">
+        <div class="cn-meas-h"><b>${esc(sj.short)} heute · Maschinenzustand</b><span class="cn-meas-lg">
+          ${stNew ? `<span><i class="est"></i>bis ${esc(at)} laut Tablet (geschätzt)</span><span><i></i>ab ${esc(at)} gemessen</span>` : `<span><i></i>gemessen (seit Level ${esc(D.from)})</span>`}</span></div>
+        <div class="cn-meas-band" data-w="dband"></div>
+        <div class="cn-meas-ax" data-w="dax"></div>
+        <div class="cn-meas-n" data-w="dnote">${stNew ? '' : `Neu seit ${esc(at)}: ${esc(gain.map(c => c.label).join(', ') || '–')}.`}</div>
+      </div>
+      <div class="cn-meas-g">
+        <div class="cn-tiles" data-w="dtiles"></div>
+        ${energy ? `<div class="cn-chart"><div class="cn-chart-h"><span class="l">Leistung seit ${esc(at)}</span><span class="v" data-w="dchartV">–</span></div><div class="cn-chart-svg" data-w="dchartSvg"></div></div>` : ''}
+      </div>
+      <div class="cn-meas-n" data-w="dsrc" style="font-size:var(--fs-xs);color:var(--muted)"></div>`;
+  }
+  /** Verlauf auf Zeitachse [t0, t1] ab der Anbindung (eine Skala ab 0, Endpunkt betont, Start = Messbeginn). */
+  function sinceSvg(series, t0, t1, o) {
+    const w = o.w, h = o.h, L = 34, R = 10, T = 12, B = 18;
+    if (series.length < 2 || t1 - t0 < 20) return `<svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><text x="${L}" y="${h / 2}" style="fill:var(--muted);font:var(--fs-xs) var(--f-ui)">Messwerte werden gesammelt …</text></svg>`;
+    const vals = series.map(p => p.v);
+    const vmax = Math.max(...vals) * 1.15 || 1;
+    const stp = Math.pow(10, Math.floor(Math.log10(vmax))), top = Math.ceil(vmax / stp * 2) / 2 * stp;
+    const X = (t) => L + (t - t0) / Math.max(1, t1 - t0) * (w - L - R), Y = (v) => T + (1 - v / top) * (h - T - B);
+    const pts = series.map(p => X(p.t).toFixed(1) + ',' + Y(p.v).toFixed(1));
+    const last = series[series.length - 1], lx = X(last.t), ly = Y(last.v);
+    const fmt = (v) => U.fmtNum(v, top < 10 ? 1 : 0);
+    let g = `<line x1="${L}" x2="${w - R}" y1="${Y(0)}" y2="${Y(0)}" style="stroke:var(--line2)"/><line x1="${L}" x2="${w - R}" y1="${Y(top).toFixed(1)}" y2="${Y(top).toFixed(1)}" style="stroke:var(--line)" stroke-dasharray="2 4"/>`;
+    g += `<text x="${L - 6}" y="${Y(0) + 4}" text-anchor="end" style="fill:var(--faint);font:var(--fs-2xs) var(--f-ui)">0</text><text x="${L - 6}" y="${(Y(top) + 4).toFixed(1)}" text-anchor="end" style="fill:var(--faint);font:var(--fs-2xs) var(--f-ui)">${fmt(top)}</text>`;
+    g += `<path d="M${X(series[0].t).toFixed(1)},${Y(0)} L${pts.join(' L')} L${lx.toFixed(1)},${Y(0)} Z" style="fill:var(--info)" opacity=".13"/><polyline points="${pts.join(' ')}" style="fill:none;stroke:var(--info)" stroke-width="1.8" stroke-linejoin="round"/>`;
+    g += `<line x1="${L}" x2="${L}" y1="${T - 6}" y2="${Y(0)}" style="stroke:var(--accent)" stroke-width="1.6"/>`;
+    g += `<circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="5" style="fill:var(--info)" opacity=".25"/><circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="2.8" style="fill:var(--info)"/>`;
+    g += `<text x="${L + 4}" y="${h - 4}" style="fill:var(--accent);font:600 var(--fs-2xs) var(--f-ui)">${esc(o.startLabel)}</text><text x="${w - R}" y="${h - 4}" text-anchor="end" style="fill:var(--faint);font:var(--fs-2xs) var(--f-ui)">jetzt ${esc(U.fmtClock(t1))}</text>`;
+    return `<svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">${g}</svg>`;
+  }
   function patchDone() {
-    const box = wzRefs.content && wzRefs.content.querySelector('[data-w="dtiles"]'); if (!box) return;
-    const id = WZ.id, m = S().machines[id], sg = m.signals || {}, lv = m.conn.level || 0, st = ST(id);
+    const c = wzRefs.content; if (!c || !WZ || !WZ.done || WZ.done.demo) return;
+    const box = c.querySelector('[data-w="dtiles"]'); if (!box) return;
+    const id = WZ.id, D = WZ.done, m = S().machines[id], sg = m.signals || {}, lv = m.conn.level || 0, st = ST(id), now = nowT();
+    recSample(id);
+    const since = D.t, at = U.fmtClock(since);
+    // Zustandsband: heute ab Schichtbeginn (bzw. 1 h vor der Anbindung) bis jetzt
+    const day0 = U.dayStart(now), sh0 = PR().shifts && PR().shifts[0] ? day0 + U.hm(PR().shifts[0].start) : day0;
+    const t0 = Math.max(day0, Math.min(sh0, since - 3600)), t1 = Math.max(now, since + 60);
+    const bandHost = c.querySelector('[data-w="dband"]');
+    if (bandHost) setH(bandHost, stateBandHtml(id, t0, t1, { h: 22, marker: true, markAt: since, label: (sinceOf(id, 'state') === since ? 'angebunden ' : 'Level ' + D.to + ' seit ') + at }));
+    const ax = c.querySelector('[data-w="dax"]');
+    if (ax) {
+      const narrow = (ax.clientWidth || 600) < 480, stepH = (t1 - t0) > (narrow ? 4 : 8) * 3600 ? 2 : 1;
+      const pos = (t) => (t - t0) / (t1 - t0) * 100;
+      let ticks = `<span style="left:0">${esc(U.fmtClock(t0))}</span>`;
+      for (let t = Math.ceil(t0 / (3600 * stepH)) * 3600 * stepH; t < t1; t += 3600 * stepH) { const p = pos(t); if (p > (narrow ? 16 : 9) && p < (narrow ? 80 : 88)) ticks += `<span style="left:${p.toFixed(2)}%">${esc(U.fmtClock(t))}</span>`; }
+      ticks += `<span style="left:100%">jetzt ${esc(U.fmtClock(now))}</span>`;
+      setH(ax, ticks);
+    }
+    const rt = runtimeSince(id, since);
+    const changes = (m.segments || []).filter(g => g.t0 > since).length;
+    const note = c.querySelector('[data-w="dnote"]');
+    if (note && sinceOf(id, 'state') === since) setH(note, `Bis ${esc(at)} kannte werkfluss den Zustand nur aus Tablet-Meldungen – kurze Stillstände fehlten. Seit ${esc(at)} misst ${esc(lv === 1 ? 'der Stromsensor' : 'die Anbindung')} jeden Wechsel: <b>${changes} ${changes === 1 ? 'Zustandswechsel' : 'Zustandswechsel'}, ${esc(U.fmtDur(rt && rt.sec != null ? rt.sec : 0))} Laufzeit</b> in ${esc(U.fmtDur(now - since))}.`);
+    // Kennwerte – nur Gemessenes, Laufzeit erst ab Messbeginn
     const t = [];
-    if (lv === 1) { t.push(['Leistung', U.fmtNum(sg.powerKw, 1), 'kW'], ['Laststrom', U.fmtNum(sg.currentA, 1), 'A'], ['Signalsäule', LIGHT_DE[sg.stackLight] || '–', ''], ['Laufzeit heute', U.fmtDur(sg.runtimeTodaySec), '']); }
+    const rtNew = sinceOf(id, 'runtime') === since;
+    if (rt && rt.measured) t.push(rtNew ? ['Laufzeit seit ' + at, U.fmtDur(rt.sec), '', false, false, `in ${U.fmtDur(Math.max(0, now - since))} seit der Anbindung`] : ['Laufzeit heute', U.fmtDur(runtimeSince(id).sec), '', false, false, 'gemessen']);
+    // Leistung steht im Verlauf daneben (Wert oben rechts) – hier Strom und Signalsäule
+    if (lv === 1) t.push(['Laststrom', U.fmtNum(sg.currentA, 1), 'A', false, false, 'Stromwandler L1'], ['Signalsäule', LIGHT_DE[sg.stackLight] || '–', '', false, false, 'Abgriff 24 V']);
     else if (lv >= 2) {
       t.push(['Betriebsart', MODE_DE[sg.mode] || sg.mode || '–', ''], ['Signalsäule', LIGHT_DE[sg.stackLight] || '–', '']);
       if (sg.spindleRpm != null) t.push(['Spindeldrehzahl', U.fmtNum(sg.spindleRpm), '1/min']);
       if (sg.bathTempC != null) t.push(['Badtemperatur', U.fmtNum(sg.bathTempC), '°C']);
       if (sg.terminalStep != null) t.push(['Montageschritt', sg.terminalStep, '']);
-      t.push(['Stückzähler', U.fmtNum(sg.partCounter), '']);
+      t.push(['Stückzähler', U.fmtNum(sg.partCounter), '', false, false, 'aus der Steuerung']);
       if (lv >= 3 && sg.toolInSpindleName) t.push(['Werkzeug in der Spindel', sg.toolInSpindleName, '', true]);
       t.push(['Programm', sg.program || '–', '', true]);
       if (sg.alarm) t.push(['Alarm', sg.alarm, '', true]);
     }
-    t.push(['Zustand', stLabel(m.state), '', false, true]);
-    const html = t.map(x => `<div class="cn-tile${x[3] ? ' wide' : ''}"><div class="l">${esc(x[0])}</div><div class="v${x[3] ? ' s' : ''}">${x[4] ? WF.ui.pill(m.state) : esc(x[1]) + (x[2] ? `<small>${esc(x[2])}</small>` : '')}</div></div>`).join('') +
-      `<div class="cn-tile wide"><div class="l">Quelle</div><div class="v s">${esc(sg.source || m.conn.protocol)} · ${esc(/direkt/i.test(m.conn.gateway) ? 'direkt' : m.conn.gateway)} · Stand ${esc(U.fmtClock(sg.t != null ? sg.t : nowT()))} (${esc(ago(sg.t != null ? nowT() - sg.t : null))}) · ${esc(st.short)}</div></div>`;
-    setH(box, html);
+    t.push(['Zustand', '', '', false, true]);
+    setH(box, t.map(x => `<div class="cn-tile${x[3] ? ' wide' : ''}"><div class="l">${esc(x[0])}</div><div class="v${x[3] ? ' s' : ''}">${x[4] ? WF.ui.machinePill(WF.sim.machineView(id)) : esc(x[1]) + (x[2] ? `<small>${esc(x[2])}</small>` : '')}</div>${x[5] ? `<div class="d">${esc(x[5])}</div>` : ''}</div>`).join(''));
+    // Leistungsverlauf ab der Anbindung
+    const svgHost = c.querySelector('[data-w="dchartSvg"]');
+    if (svgHost) {
+      const ser = powerSeries(id, since, now, 90);
+      const cur = ser.length ? ser[ser.length - 1].v : null;
+      setH(c.querySelector('[data-w="dchartV"]'), cur != null ? `${esc(U.fmtNum(lv === 1 && sg.powerKw != null ? sg.powerKw : cur, 1))} <small>kW</small>` : '–');
+      const w = Math.max(240, Math.round(svgHost.clientWidth || 420)), hh = Math.max(96, Math.round(svgHost.clientHeight || 104));
+      const sig2 = w + '|' + hh + '|' + Math.floor(now / 5);
+      if (svgHost._s !== sig2) { svgHost._s = sig2; svgHost.innerHTML = sinceSvg(ser, since, now, { w, h: hh, startLabel: 'angebunden ' + at }); }
+    }
+    setH(c.querySelector('[data-w="dsrc"]'), `Quelle: ${esc(sg.source || m.conn.protocol)} · ${esc(/direkt/i.test(m.conn.gateway) ? 'direkt' : m.conn.gateway)} · Stand ${esc(U.fmtClock(sg.t != null ? sg.t : now))} (${esc(ago(sg.t != null ? now - sg.t : null))}) · Werte vor ${esc(at)} stammen aus Tablet-Meldungen und werden nicht nachträglich als „gemessen“ ausgewiesen.`);
   }
 
   // ---------------------------------------------------------------- Live-Patches im Assistenten
@@ -2222,7 +2544,13 @@
     if (t.matches('select[data-map]')) onMapChange(t.dataset.map, t.value);
   }
   function onKey(e) {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.cn-opt[data-act], .cn-lr[data-act]')) { e.preventDefault(); e.target.click(); }
+    // Klickbare Nicht-Knöpfe (Zeilen, Wege, SVG-Chips im Datenfluss) per Enter/Leertaste – Knöpfe und Felder machen das selbst
+    const t = e.target;
+    if ((e.key === 'Enter' || e.key === ' ') && t.matches && t.matches('[data-act][tabindex]') && !t.matches('button,a,select,input,textarea')) {
+      e.preventDefault();
+      if (typeof t.click === 'function' && t instanceof HTMLElement) t.click();
+      else t.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    }
   }
   function onHover(e) {
     const g = e.target.closest && e.target.closest('.fx-chip'); const host = ovRefs && ovRefs.flow; if (!host) return;
@@ -2276,6 +2604,15 @@
     openNew: (demo) => WF.app.navigate('anbindung', { newMachine: true, demo }),
     close: () => { if (WZ) closeWizard(); },
     previewSignals,
+    // Datenstufe je Station – was Ansichten zeigen dürfen (Doku im Dateikopf)
+    CAPABILITIES: CAP_PUBLIC.slice(),
+    dataLevel,
+    canShow,
+    measuredSince: (id, cap) => sinceOf(id, cap),
+    provenance: (id, cap) => { const k = CAP_ALIAS[cap] || cap; return WF.sim && WF.sim.state && WF.sim.state.machines[id] && ST(id) ? capInfo(id, k).text : ''; },
+    runtimeSince,
+    fmtDur: fmtDurFor,
+    stateBand: stateBandHtml,
     recommend: (id) => { const a = analyze(subjectOf(id)); return a.rec ? { level: a.rec.level, protocol: a.rec.protocol, title: a.rec.title, why: a.rec.why || [] } : null; },
     maxLevel: (id) => analyze(subjectOf(id)).max,
     get wizard() { return WZ ? { mode: WZ.mode, id: WZ.id, step: WZ.done ? 4 : WZ.step, path: WZ.pathKey, done: !!WZ.done } : null; },

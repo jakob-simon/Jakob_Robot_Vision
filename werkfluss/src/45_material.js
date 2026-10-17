@@ -94,9 +94,20 @@
       r.createdT = t.createdT; r.pickupT = t.pickupT; r.doneT = t.doneT; r.orderId = t.orderId || null; r.label = t.label;
       r.cancelled = !!t.cancelled; r.containerId = t.containerId || null; r.materialId = t.materialId || null;
       if (t.meters) r.meters = t.meters;
+      if (t.empties) r.empties = t.empties;
       if (r.weightKg == null || t.status !== 'done') r.weightKg = t.weightKg;
-      if (t.status === 'open') { r.waitReason = t.waitReason || null; if (t.waitReason) r.why = t.waitReason; }
+      // Phase (Engine §7.5): „geplant“ = Ziel voll, Behälter bereitgestellt/vorgemerkt – das ist keine Wartezeit der Logistik.
+      // Die Wartezeit beginnt erst, wenn der Transport fällig wird (Ziel frei): dueT (Engine-Feld, sonst vom Mitschreiber erkannt).
+      const ph = phaseOf(t), ph0 = r.phase;
+      r.phase = ph;
+      if (ph === 'geplant') { r.everPlanned = true; r.lastPlanT = s.t; r.dueT = null; if (t.waitReason) r.planWhy = t.waitReason; }
+      else if (r.dueT == null) {
+        const eDue = engineDueT(t);
+        r.dueT = eDue != null ? eDue : r.lastPlanT != null ? Math.max(t.createdT, r.lastPlanT) : t.createdT;
+      }
+      if (t.status === 'open') { r.waitReason = t.waitReason || null; if (t.waitReason && ph !== 'geplant') r.why = t.waitReason; }
       else r.waitReason = null;
+      if (ph0 !== ph) L.ver++;
       if (t.assignee) {
         r.assignee = t.assignee;
         r.carrier = s.agvs[t.assignee] ? s.agvs[t.assignee].name : shortName(personName(t.assignee));
@@ -136,8 +147,9 @@
     const push = (id, rec) => { const a = L.samp[id] || (L.samp[id] = []); a.push(rec); while (a.length && a[0].t < cut) a.shift(); };
     for (const id in s.agvs) { const a = s.agvs[id]; push(id, { t: s.t, b: a.battery, st: a.state }); }
     if (s.forklift) push(s.forklift.id, { t: s.t, st: s.forklift.state, load: !!s.forklift.load });
-    let open = 0; for (const id in s.transports) { const t = s.transports[id]; if (t.status !== 'done') open++; }
-    push('_q', { t: s.t, v: open });
+    // Verlauf „offene Transporte“ = fällige (vorgemerkte mit vollem Ziel zählen nicht – wie die Kennzahl)
+    let dueOpen = 0; for (const id in s.transports) { const t = s.transports[id]; if (t.status !== 'done' && !t.cancelled && phaseOf(t) !== 'geplant') dueOpen++; }
+    push('_q', { t: s.t, v: dueOpen });
     let cn = 0; for (const id in s.containers) { const c = s.containers[id]; if (c.state !== 'shipped' && c.state !== 'scrap') cn++; }
     push('_c', { t: s.t, v: cn });
   }
@@ -242,7 +254,7 @@
       e.modes[r.mode] = (e.modes[r.mode] || 0) + 1;
       if (r.kind === 'bars') { e.m += r.meters || 0; e.bars++; } else e.qty += r.qty || 0;
       e.kg += r.weightKg || 0;
-      if (r.pickupT != null) { e.waitSum += r.pickupT - r.createdT; e.waitN++; }
+      if (r.pickupT != null) { e.waitSum += waitOf(r, r.pickupT); e.waitN++; }
       const tt = done ? r.doneT : (r.pickupT || r.createdT);
       if (e.lastT == null || tt > e.lastT) e.lastT = tt;
       const ok = r.kind === 'bars' ? 'bars:' + (r.materialId || '') : (r.orderId || '–');
@@ -422,9 +434,44 @@
       if (a && a.task === r.id) { if (a.state === 'loading') return 'Wird beladen'; if (a.state === 'unloading') return 'Wird entladen'; }
     }
     if (r.status === 'assigned' && r.mode === 'Stapler') return 'Fahrer:in geht zum Stapler';
+    if (r.status === 'open') return isPlanned(r) ? 'Vorgemerkt' : r.kind === 'empty' ? 'Wartet (Leergut)' : 'Wartet auf Abholung';
     return lbl('transport', r.status);
   }
-  function waitOf(r, now) { return r.pickupT != null ? r.pickupT - r.createdT : now - r.createdT; }
+  /** Phase eines Transports (Engine §7.5, feature-detected): 'geplant' (Ziel voll – Behälter bereitgestellt und vorgemerkt,
+      keine Wartezeit), 'wartend' (fällig, Fahrzeug/Fahrer:in fehlt), 'unterwegs', 'erledigt'. Ohne phase-Feld aus waitCode/Text. */
+  function phaseOf(t) {
+    if (!t) return null;
+    if (t.status === 'done') return 'erledigt';
+    if (t.status && t.status !== 'open') return 'unterwegs';
+    const ph = t.phase;
+    if (ph === 'geplant' || ph === 'bereitgestellt' || ph === 'vorgemerkt') return 'geplant';
+    if (ph === 'wartend') return 'wartend';
+    if (t.waitCode === 'destFull') return 'geplant';
+    if (t.waitCode == null && /Zielpuffer|Ziel voll/.test(t.waitReason || '')) return 'geplant';
+    return 'wartend';
+  }
+  /** Zeitpunkt, ab dem ein Transport fällig ist – falls die Engine ihn liefert (Feldnamen tolerant), sonst null */
+  function engineDueT(t) {
+    for (const k of ['dueT', 'dueSince', 'waitFromT', 'waitSince']) if (typeof t[k] === 'number') return t[k];
+    return null;
+  }
+  const isPlanned = (r) => !!r && r.status === 'open' && phaseOf(r) === 'geplant';
+  /** Beginn der Logistik-Wartezeit (fällig seit) – vorgemerkte Zeit mit vollem Ziel zählt nicht */
+  const waitStart = (r) => (r.dueT != null ? r.dueT : r.createdT);
+  /** Logistik-Wartezeit: fällig → Abholung (bzw. → jetzt); vorgemerkte Transporte haben keine Wartezeit */
+  function waitOf(r, now) { if (r.pickupT == null && isPlanned(r)) return 0; return Math.max(0, (r.pickupT != null ? r.pickupT : now) - waitStart(r)); }
+  /** Zeit, die ein Transport vorgemerkt war (Ziel voll), bevor er fällig wurde */
+  const plannedSec = (r, now) => (r.everPlanned ? Math.max(0, (r.dueT != null ? r.dueT : r.pickupT != null ? r.pickupT : now) - r.createdT) : 0);
+  /** Grund eines vorgemerkten Transports, ohne Doppelung mit „bereitgestellt“ (Engine: 'bereitgestellt – Abruf, sobald INDEX G220
+      Platz hat (ca. 09:01)'; ältere Fassung: 'Ziel voll (Zielpuffer INDEX G220 3/3)') */
+  function planReason(w) {
+    w = String(w || '').replace(/^bereitgestellt(\s+im Pufferlager)?\s*[–-]\s*/, (m, p) => (p ? 'im Pufferlager – ' : ''));
+    if (!w) return 'Ziel voll – Abruf, sobald dort Platz ist';
+    w = w.charAt(0).toUpperCase() + w.slice(1);
+    return /sobald/.test(w) ? w : w + ' – Abruf, sobald dort Platz ist';
+  }
+  /** Ledger-Satz zu einem Engine-Transport (für fällig-seit) */
+  const recOf = (t) => L.tr.get(t.id) || { id: t.id, createdT: t.createdT, status: t.status, phase: phaseOf(t), pickupT: t.pickupT, dueT: engineDueT(t) };
   const whyShort = (w) => String(w || '');
   const whyTiny = (w) => { w = String(w || ''); return w.indexOf('Zielpuffer') >= 0 ? 'Ziel voll' : w.indexOf('kein AGV') >= 0 ? 'kein AGV frei' : w.indexOf('Stapler') >= 0 ? 'Stapler' : w; };
 
@@ -448,6 +495,8 @@
 
   .mt-kpis{display:grid;gap:10px;grid-template-columns:repeat(6,minmax(0,1fr))}
   .mt-kpis .kpi .s b{color:var(--text2);font-weight:600}
+  .mt-kpis .kpi .s .mt-plan{color:var(--text2);white-space:nowrap}
+  .mt-kpis .kpi .s .mt-plan::before{content:"";display:inline-block;width:7px;height:7px;margin-right:5px;border-radius:2px;border:1.4px solid var(--muted);vertical-align:0}
   .mt-kpis .kpi.click{cursor:pointer}
   .mt-kpis .kpi.click:hover{border-color:var(--line2)}
   .mt-kpis .kpi .viz{height:30px;display:flex;align-items:flex-end}
@@ -510,6 +559,8 @@
   .mt-e.pend .b{stroke:var(--mat);stroke-dasharray:3 5;opacity:.55}
   .mt-e.pend .a{fill:var(--mat);opacity:.6}
   .mt-e.pend .g,.mt-e.pend .f{display:none}
+  .mt-e.pend.plan .b{stroke:color-mix(in srgb,var(--text2) 55%,transparent);opacity:.5}
+  .mt-e.pend.plan .a{fill:color-mix(in srgb,var(--text2) 60%,transparent)}
   .mt-e.direct .b{stroke-dasharray:1.5 5;opacity:.75}
   .mt-e.direct .g,.mt-e.direct .f{display:none}
   .mt-el.direct rect{stroke-dasharray:2 2}
@@ -524,6 +575,8 @@
   .mt-el.pend rect{stroke:color-mix(in srgb,var(--mat) 45%,var(--line2));stroke-dasharray:3 2}
   .mt-el.pend text{fill:color-mix(in srgb,var(--mat) 75%,var(--text))}
   .mt-el.ext rect{stroke:color-mix(in srgb,var(--ext) 50%,var(--line2));stroke-dasharray:3 2}
+  .mt-el.pend.plan rect{stroke:var(--line2)}
+  .mt-el.pend.plan text{fill:var(--text2)}
 
   .mt-node{cursor:pointer;transition:opacity .2s ease}
   .mt-node .bg{fill:var(--card2);stroke:var(--line2);stroke-width:1.1;transition:stroke .15s ease}
@@ -558,6 +611,9 @@
   .mt-node .bdg circle{fill:var(--mat);stroke:var(--card);stroke-width:2}
   .mt-node .bdg text{font:700 var(--fs-xs) var(--f-ui);fill:color-mix(in srgb,var(--mat) 14%,black)}
   .mt-node.haswait .bdg{display:block}
+  .mt-node.hasplan .bdg{display:block}
+  .mt-node.hasplan .bdg circle{fill:var(--raise);stroke:var(--card)}
+  .mt-node.hasplan .bdg text{fill:var(--text2)}
   .mt-node .pk{fill:none;stroke:var(--info);stroke-width:1.5;opacity:0}
   .mt-node.pick .pk{animation:mtPick 1.4s ease-out infinite}
   @keyframes mtPick{0%{opacity:.85;stroke-width:3}100%{opacity:0;stroke-width:9}}
@@ -627,6 +683,7 @@
   .mt-svc{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:11px;padding-top:10px;border-top:1px dashed var(--line)}
   .mt-svc div{min-width:0}
   .mt-svc b{display:block;font:600 var(--fs-lg)/1.15 var(--f-cond);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .mt-svc b small{font:500 var(--fs-xs) var(--f-ui);color:var(--muted);margin-left:2px}
   .mt-svc b.warn{color:color-mix(in srgb,var(--st-wait) 90%,var(--text))}
   .mt-svc b.ok{color:color-mix(in srgb,var(--st-run) 85%,var(--text))}
   .mt-svc span{display:block;font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -726,6 +783,10 @@
   .mt-w{font-variant-numeric:tabular-nums;white-space:nowrap}
   .mt-w.warn{color:color-mix(in srgb,var(--st-wait) 90%,var(--text))}
   .mt-w.crit{color:color-mix(in srgb,var(--st-fault) 90%,var(--text))}
+  .mt-w.mt-wplan{color:var(--text2)}
+  .mt-planpill{display:inline-flex;align-items:center;gap:6px;padding:2px 9px 2px 7px;border-radius:999px;font-size:var(--fs-xs);font-weight:600;line-height:18px;white-space:nowrap;color:var(--text2);border:1px dashed var(--line2);background:color-mix(in srgb,var(--raise) 35%,transparent)}
+  .mt-planpill::before{content:"";width:7px;height:7px;border-radius:2px;border:1.4px solid var(--muted);flex:none;box-sizing:border-box}
+  .mt-tbl tr.plan td{color:var(--text2)}
   .mt-why{font-size:var(--fs-sm);color:var(--text2);max-width:260px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   .mt-why.muted{color:var(--faint)}
   .mt-filt{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 6px 0 10px;border-radius:999px;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);background:color-mix(in srgb,var(--accent) 10%,transparent);font-size:var(--fs-sm);font-weight:600;white-space:nowrap}
@@ -1453,7 +1514,8 @@
       [sw('<path style="stroke:var(--mat)" d="M2,7 H24" stroke-width="2" stroke-linecap="round" opacity=".55"/><path style="stroke:var(--mat)" d="M2,7 H24" stroke-width="7" stroke-linecap="round" opacity=".18"/>'), 'Fluss heute (Stärke = Menge)'],
       [sw('<circle style="fill:var(--mat)" cx="13" cy="7" r="6.5" opacity=".22"/><circle style="fill:color-mix(in srgb,var(--mat) 55%,white);stroke:var(--mat)" cx="13" cy="7" r="3.6" stroke-width="1.6"/>'), 'Behälter wird transportiert'],
       [sw('<circle style="fill:var(--mat)" cx="13" cy="7" r="6.5"/><text x="13" y="10.6" text-anchor="middle" style="font:700 var(--fs-2xs) var(--f-ui);fill:color-mix(in srgb,var(--mat) 14%,black)">2</text>'), 'Behälter abholbereit'],
-      [sw('<path style="stroke:var(--mat)" d="M2,7 H24" stroke-width="2" stroke-dasharray="3 4" opacity=".7"/>'), 'wartet, heute noch keine Fahrt'],
+      [sw('<circle style="fill:var(--raise);stroke:var(--line2)" cx="13" cy="7" r="6.5"/><text x="13" y="10.6" text-anchor="middle" style="font:700 var(--fs-2xs) var(--f-ui);fill:var(--text2)">3</text>'), 'vorgemerkt (Ziel voll, keine Wartezeit)'],
+      [sw('<path style="stroke:var(--mat)" d="M2,7 H24" stroke-width="2" stroke-dasharray="3 4" opacity=".7"/>'), 'offen, heute noch keine Fahrt'],
       [sw('<path style="stroke:var(--ext)" d="M2,7 H24" stroke-width="2.2" stroke-dasharray="6 4" opacity=".8"/>'), 'Fremdbearbeitung (Spedition)'],
       [sw('<path style="stroke:var(--mat)" d="M2,7 H24" stroke-width="2.4" stroke-dasharray="1.5 4" stroke-linecap="round" opacity=".8"/>'), 'Direktentnahme Säge (ohne Transport)'],
       [sw('<g transform="translate(13,7)" class="mt-veh" style="--c:var(--mat)"><rect class="vb" x="-9" y="-5" width="18" height="10" rx="3"/><rect class="vl" x="-3" y="-3" width="6" height="6" rx="1.2"/></g>'), 'AGV (mit Ladung)'],
@@ -1557,8 +1619,9 @@
       h += `<div>Die Säge zieht Stangenmaterial direkt aus dem Kragarmregal – ohne Transportauftrag. Entnommen heute:</div><div class="tl">${e.mats.map(x => `<div><span>${esc(x.name)}</span><b>${U.fmtNum(x.m, 1)} m</b></div>`).join('')}</div><div class="hint">Klick: zur Rohmaterial-Tabelle</div>`;
       return h;
     }
+    const openDue = e.open.filter(r => !isPlanned(r)), openPlan = e.open.filter(isPlanned);
     if (e.n === 0 && e.open.length) {
-      h += `<div>${e.open.length} ${e.open.length === 1 ? 'Behälter wartet' : 'Behälter warten'} auf Abholung – heute noch keine Fahrt auf dieser Verbindung.</div>`;
+      h += `<div>${openDue.length ? `${openDue.length} ${openDue.length === 1 ? 'Behälter wartet' : 'Behälter warten'} auf Abholung` : `${openPlan.length} ${openPlan.length === 1 ? 'Behälter ist' : 'Behälter sind'} vorgemerkt – Ziel voll`} · heute noch keine Fahrt auf dieser Verbindung.</div>`;
     } else if (isExt) {
       h += `<div>${e.from === 'EXT' ? 'Übergabe an die Spedition zur ' + esc(haertName()) : 'Rückkehr von der ' + esc(haertName()) + ' in den Wareneingang'}</div>`;
     }
@@ -1572,7 +1635,8 @@
       if (e.waitN) h += `<dt>Ø Wartezeit</dt><dd>${dur(e.waitSum / e.waitN)}</dd>`;
       if (e.lastT != null) h += `<dt>Letzte</dt><dd>${tclock(e.lastT, now)}</dd>`;
     }
-    if (e.open.length && e.n) h += `<dt>Wartend</dt><dd>${e.open.length} ${e.open.length === 1 ? 'Behälter' : 'Behälter'}</dd>`;
+    if (openDue.length && e.n) h += `<dt>Wartend</dt><dd>${openDue.length} Behälter</dd>`;
+    if (openPlan.length && e.n) h += `<dt>Vorgemerkt</dt><dd>${openPlan.length} Behälter · Ziel voll</dd>`;
     h += `</dl>`;
     const ords = [...e.orders.values()].sort((a, b) => b.n - a.n).slice(0, 5);
     if (ords.length) {
@@ -1581,9 +1645,13 @@
       if (e.orders.size > ords.length) h += `<div><span class="muted">+ ${e.orders.size - ords.length} weitere</span><b></b></div>`;
       h += `</div>`;
     }
-    if (e.open.length) {
-      const w = e.open.map(r => ({ r, w: now - r.createdT })).sort((a, b) => b.w - a.w)[0];
-      h += `<div class="tl"><div><span>wartet am längsten: ${esc(w.r.partName || '')}</span><b>${dur(w.w)}</b></div><div><span class="muted">${esc(whyShort(w.r.waitReason || w.r.why || 'wartet auf Zuteilung'))}</span><b></b></div></div>`;
+    if (openDue.length) {
+      const w = openDue.map(r => ({ r, w: waitOf(r, now) })).sort((a, b) => b.w - a.w)[0];
+      h += `<div class="tl"><div><span>wartet am längsten: ${esc(w.r.partName || (w.r.kind === 'empty' ? 'Leergut' : ''))}</span><b>${dur(w.w)}</b></div><div><span class="muted">${esc(whyShort(w.r.waitReason || w.r.why || 'wartet auf Zuteilung'))}</span><b></b></div></div>`;
+    }
+    if (openPlan.length) {
+      const p0 = openPlan.slice().sort((a, b) => a.createdT - b.createdT)[0];
+      h += `<div class="tl"><div><span>bereitgestellt seit ${tclock(p0.createdT, now)}: ${esc(p0.partName || '')}</span><b></b></div><div><span class="muted">${esc(planReason(p0.waitReason || p0.planWhy))}</span><b></b></div></div>`;
     }
     h += `<div class="hint">${isExt ? 'Klick: Behälter in Fremdbearbeitung anzeigen' : 'Klick: Transportaufträge dieser Verbindung filtern'}</div>`;
     return h;
@@ -1616,8 +1684,9 @@
     }
     if (inn.length) h += `<dt>Zugang heute</dt><dd>${sumN(inn)} Fahrten von ${inn.map(e => esc(stName(e.from))).join(', ')}</dd>`;
     if (out.length) h += `<dt>Abgang heute</dt><dd>${sumN(out)} Fahrten nach ${out.map(e => esc(stName(e.to))).join(', ')}</dd>`;
-    const wait = waitingAt(id);
+    const wAll = waitingAt(id), wait = wAll.filter(x => !x.planned), plan = wAll.filter(x => x.planned);
     if (wait.length) h += `<dt>Abholbereit</dt><dd>${wait.length} Behälter · ${esc(whyShort(wait[0].waitReason || (wait[0].carrier ? wait[0].carrier + ' ist unterwegs' : 'wartet auf Zuteilung')))}</dd>`;
+    if (plan.length) h += `<dt>Vorgemerkt</dt><dd>${plan.length} Behälter · ${esc(planReason(plan[0].waitReason))}</dd>`;
     h += `</dl>`;
     h += `<div class="hint">${n.kind === 'machine' ? 'Klick: Maschinendetails öffnen' : id === 'RAW' ? 'Klick: zur Rohmaterial-Tabelle' : id === 'CHG' ? 'Klick: AGV-Details' : 'Klick: Behälter anzeigen'}</div>`;
     return h;
@@ -1651,7 +1720,7 @@
       const t = s.transports[tid];
       if (t.from.station !== id || t.status === 'done' || t.pickupT != null || t.cancelled) continue;
       const r = L.tr.get(tid) || { waitReason: t.waitReason, createdT: t.createdT };
-      out.push(Object.assign({}, r, { status: t.status, waitReason: t.waitReason, carrier: t.assignee ? (s.agvs[t.assignee] ? s.agvs[t.assignee].name : shortName(personName(t.assignee))) : null }));
+      out.push(Object.assign({}, r, { status: t.status, waitReason: t.waitReason, planned: t.status === 'open' && phaseOf(t) === 'geplant', carrier: t.assignee ? (s.agvs[t.assignee] ? s.agvs[t.assignee].name : shortName(personName(t.assignee))) : null }));
     }
     return out.sort((a, b) => a.createdT - b.createdT);
   }
@@ -1664,7 +1733,8 @@
     const s = S(); if (!s || !s.agvs) return;
     const P = V.prof, T = P ? performance.now : null;
     let t = P ? T.call(performance) : 0;
-    const lap = (k) => { if (!P) return; const n = T.call(performance); P[k] = Math.max(P[k] || 0, n - t); t = n; };
+    const lap = (k) => { if (!P) return; const n = T.call(performance); P[k] = Math.max(P[k] || 0, n - t); P[k + '_sum'] = (P[k + '_sum'] || 0) + (n - t); t = n; };
+    if (P) P._n = (P._n || 0) + 1;
     tick(false); scanTransports(); L.lastScanT = s.t; lap('tick');
     const flows = flowsToday(); lap('flows');
     updateHead(s); lap('head');
@@ -1726,32 +1796,39 @@
   }
   function updateKpis(s, flows) {
     const now = s.t, d0 = dayStart(now);
-    // 1 offene Transporte
-    const act = Object.values(s.transports).filter(t => t.status !== 'done');
-    const waiting = act.filter(t => t.status === 'open'), moving = act.filter(t => t.status !== 'open');
-    const longest = waiting.slice().sort((a, b) => a.createdT - b.createdT)[0];
-    const lw = longest ? now - longest.createdT : 0;
+    // 1 offene Transporte = fällige (wartend + unterwegs). Vorgemerkte (Ziel voll, Behälter bereitgestellt) sind eine
+    //   neutrale Zusatzzeile – keine Wartezeit, kein Alarm (ENGINE_API §7.5). Längste Wartezeit nur über fällige Material-
+    //   transporte (Leergut fährt bewusst nachrangig), gezählt ab „fällig“.
+    const act = Object.values(s.transports).filter(t => t.status !== 'done' && !t.cancelled);
+    const planned = act.filter(t => phaseOf(t) === 'geplant'), due = act.filter(t => phaseOf(t) !== 'geplant');
+    const waiting = due.filter(t => t.status === 'open'), moving = due.filter(t => t.status !== 'open');
+    let lw = 0, longest = null;
+    for (const t of waiting) { if (t.kind === 'empty') continue; const w = waitOf(recOf(t), now); if (!longest || w > lw) { lw = w; longest = t; } }
     if (!V._spT || performance.now() - V._spT > 3000) {
       V._spT = performance.now();
       const q = (L.samp._q || []).filter(x => x.t >= now - 4 * 3600).map(x => x.v);
-      setHTML(V.r.kOpenSp, sparkSvg(q.concat([act.length]), 'var(--text2)', 4));
+      setHTML(V.r.kOpenSp, sparkSvg(q.concat([due.length]), 'var(--text2)', 4));
       const cv = (L.samp._c || []).filter(x => x.t >= now - 8 * 3600).map(x => x.v);
       setHTML(V.r.kWipSp, sparkSvg(cv, 'var(--mat)'));
-      V.r.kWipSp.title = 'Behälter im Umlauf – letzte 8 h'; V.r.kOpenSp.title = 'Offene Transporte – letzte 4 h';
+      V.r.kWipSp.title = 'Behälter im Umlauf – letzte 8 h'; V.r.kOpenSp.title = 'Offene (fällige) Transporte – letzte 4 h';
     }
-    kpiSet('kOpen', { v: U.fmtNum(act.length), sub: act.length ? `<b>${waiting.length}</b> wartend · <b>${moving.length}</b> in Fahrt${longest ? `<br>längste Wartezeit ${dur(lw)}` : ''}` : 'Alle Behälter sind zugestellt',
+    const planTxt = planned.length ? `<span class="mt-plan">${planned.length} vorgemerkt</span>` : '';
+    kpiSet('kOpen', { v: U.fmtNum(due.length),
+      sub: due.length ? `<b>${waiting.length}</b> wartend · <b>${moving.length}</b> in Fahrt<br>${longest && lw >= 60 ? `längste Wartezeit ${dur(lw)}${planTxt ? ' · ' : ''}` : ''}${planTxt}`
+        : planned.length ? `keiner fällig<br>${planTxt} – Ziel voll, Behälter bereitgestellt` : 'Alle Behälter sind zugestellt',
       sev: lw > WAIT_CRIT ? 'crit' : lw > WAIT_WARN ? 'warn' : null });
-    // 2 Ø Wartezeit (Bereitstellung → Abholung) heute
-    let sum = 0, n = 0, max = 0, full = 0, maxR = null;
+    V.r.kWait.title = 'Ø Wartezeit von „fällig“ (Ziel hat Platz) bis zur Abholung – Zeit, in der ein Behälter wegen vollem Ziel vorgemerkt war, zählt nicht. Leergut fährt nachrangig und ist nicht enthalten.';
+    V.r.kOpen.title = 'Offene Transporte = fällig (Ziel hat Platz) oder unterwegs. Vorgemerkte Behälter warten auf Platz am Ziel – das ist keine Wartezeit der Logistik.';
+    // 2 Ø Wartezeit (fällig → Abholung) heute – Zeit mit vollem Ziel (vorgemerkt) zählt nicht
+    let sum = 0, n = 0, max = 0, maxR = null;
     for (const r of L.tr.values()) {
-      if (r.cancelled || r.pickupT == null || r.pickupT < d0) continue;
-      const w = r.pickupT - r.createdT; sum += w; n++;
+      if (r.cancelled || r.pickupT == null || r.pickupT < d0 || r.kind === 'empty') continue;   // Leergut fährt bewusst nachrangig
+      const w = waitOf(r, now); sum += w; n++;
       if (w > max) { max = w; maxR = r; }
-      if (w > 300 && r.why && r.why.indexOf('Zielpuffer') >= 0) full++;
     }
     const avg = n ? sum / n : null;
     kpiSet('kWait', { v: avg == null ? '–' : avg < 60 ? '< 1' : U.fmtNum(Math.round(avg / 60)), unit: avg == null ? '' : 'min',
-      sub: n ? `aus <b>${n}</b> Abholungen heute<br>max. ${dur(max)}${maxR && maxR.why ? ' (' + esc(whyTiny(maxR.why)) + ')' : ''}` : 'heute noch keine Abholung',
+      sub: n ? `aus <b>${n}</b> Abholungen heute<br>max. ${dur(max)}${max >= 300 && maxR && maxR.why ? ' (' + esc(whyTiny(maxR.why)) + ')' : ''}` : 'heute noch keine Abholung',
       sev: avg != null && avg > WAIT_CRIT ? 'crit' : avg != null && avg > WAIT_WARN ? 'warn' : null });
     // 3 AGV-Auslastung
     const ids = Object.keys(s.agvs);
@@ -1790,15 +1867,21 @@
   function updateFlow(s, flows) {
     const r = V.r, now = s.t;
     const edges = flows.filter(e => V.nodeById[e.from] && V.nodeById[e.to] && (e.n > 0 || e.open.length || e.direct));
-    // Kanten neu aufbauen, wenn sich Zahlen/Kanten geändert haben
-    const sig = V.metric + '|' + edges.map(e => e.key + ':' + e.n + ':' + Math.round(metricVal(e)) + ':' + (e.open.length ? 1 : 0) + ':' + (e.live.length ? 1 : 0) + ':' + (e.direct ? Math.round(e.dm * 10) : '')).sort().join(',');
-    if (sig !== V.edgeSig) { V.edgeSig = sig; buildEdges(edges); }
-    else for (const e of edges) { const E = V.edges.get(e.key); if (E) E.data = e; }
+    // Kanten: Geometrie und DOM nur neu, wenn sich die Kantenmenge (oder die Kennzahl) ändert; sonst Breiten, Klassen und
+    // Beschriftungen gezielt nachführen. Bei hohem Tempo (≥ 120×) höchstens 1×/s – die Punkte laufen in frame() weiter.
+    const structSig = V.metric + '|' + edges.map(e => e.key).sort().join(',');
+    const realNow = performance.now(), fast = !!(WF.app && WF.app.speed >= 120);
+    const throttled = fast && V.edgeSig && realNow - (V._edgeT || 0) < 1000;
+    if (!throttled) {
+      V._edgeT = realNow;
+      if (structSig !== V.edgeSig) { V.edgeSig = structSig; buildEdges(edges); }
+      else patchEdges(edges, now);
+    } else for (const e of edges) { const E = V.edges.get(e.key); if (E) E.data = e; }
     r.empty.hidden = edges.length > 0;
     // Live-Zähler
     const live = []; for (const e of edges) for (const x of e.live) live.push(x);
     const loaded = live.filter(x => x.status === 'loaded' || x.status === 'toDrop');
-    setText(r.liveT, live.length ? `${live.length} Transport${live.length > 1 ? 'e' : ''} läuft${live.length > 1 ? 'en' : ''}` : 'kein Transport unterwegs');
+    setText(r.liveT, live.length ? `${live.length} ${live.length > 1 ? 'Transporte laufen' : 'Transport läuft'}` : 'kein Transport unterwegs');
     setCls(r.live, 'idle', !live.length);
     // Punkte für beladene Transporte
     const dsig = loaded.map(x => x.id).sort().join(',');
@@ -1817,11 +1900,13 @@
     }
     for (const [id, d] of V.dots) { const rec = L.tr.get(id); if (rec) d.rec = rec; }
     // Knoten: Zustand, Puffer, Abholbereit-Badge, Zusammenfassungen
-    const waitCount = {}, pickCount = {};
+    // Abholbereit (fällig, orange) vs. vorgemerkt (Ziel voll, neutral) – vorgemerkte Behälter sind kein Logistik-Rückstand
+    const waitCount = {}, planCount = {}, pickCount = {};
     for (const tid in s.transports) {
       const t = s.transports[tid];
       if (t.status === 'done' || t.pickupT != null || t.cancelled) continue;
-      waitCount[t.from.station] = (waitCount[t.from.station] || 0) + 1;
+      const cnt = t.status === 'open' && phaseOf(t) === 'geplant' ? planCount : waitCount;
+      cnt[t.from.station] = (cnt[t.from.station] || 0) + 1;
       if (t.status === 'toPickup') pickCount[t.from.station] = 1;
     }
     for (const n of V.nodes) {
@@ -1851,9 +1936,10 @@
           }
         }
       } else if (n.k.sub) fitSub(n, nodeSub(n.id, s, now));
-      const wc = waitCount[n.id] || 0;
+      const wc = waitCount[n.id] || 0, pcn = planCount[n.id] || 0;
       setCls(el, 'haswait', wc > 0);
-      if (n.k.bdg) setText(n.k.bdg, wc);
+      setCls(el, 'hasplan', wc === 0 && pcn > 0);
+      if (n.k.bdg) setText(n.k.bdg, wc || pcn);
       setCls(el, 'pick', !!pickCount[n.id]);
     }
     // Informationsfluss: neue Zuteilung (Transport → Fahrzeug) als kurzer Impuls von der Quelle zum Fahrzeug
@@ -1929,11 +2015,71 @@
     }
     return { text: '' };
   }
-  function buildEdges(edges) {
-    const r = V.r, now = S().t;
+  /** Linienstärke je Kante (auf 0,2 gerastert, damit kleine Mengenänderungen keine Attribut-Schreibvorgänge auslösen) */
+  function widthFn(edges) {
     const vals = edges.filter(e => e.n > 0).map(metricVal);
     const vmax = Math.max(1, ...vals, V.metric === 'n' ? 6 : 1);
-    const width = (e) => (e.n > 0 ? 1.8 + 7.2 * Math.sqrt(Math.max(0, metricVal(e)) / vmax) : e.direct ? 2.6 : 1.8);
+    return (e) => Math.round((e.n > 0 ? 1.8 + 7.2 * Math.sqrt(Math.max(0, metricVal(e)) / vmax) : e.direct ? 2.6 : 1.8) * 5) / 5;
+  }
+  /** Darstellungsart einer Kante: ext · pend (offen, heute noch keine Fahrt) · plan (nur vorgemerkt) · direct · live · recent */
+  function edgeKinds(e, now) {
+    const k = [];
+    if (e.ext) k.push('ext');
+    if (e.n === 0) {
+      if (e.direct && !e.open.length) k.push('direct');
+      else { k.push('pend'); if (e.open.length && e.open.every(isPlanned)) k.push('plan'); }
+    }
+    if (e.live.length) k.push('live');
+    else if (e.lastT != null && now - e.lastT < 20 * 60) k.push('recent');
+    return k;
+  }
+  const EDGE_KINDS = ['ext', 'pend', 'plan', 'direct', 'live', 'recent'];
+  function setKinds(el, kinds, labelOnly) {
+    for (const k of EDGE_KINDS) { if (labelOnly && (k === 'live' || k === 'recent')) continue; el.classList.toggle(k, kinds.indexOf(k) >= 0); }
+  }
+  function edgeLabel(e) {
+    if (e.n === 0) {
+      if (!e.open.length) return U.fmtNum(e.dm, 1) + ' m';
+      const nd = e.open.filter(x => !isPlanned(x)).length;
+      return nd ? `${nd} ${nd === 1 ? 'wartet' : 'warten'}` : `${e.open.length} vorgemerkt`;
+    }
+    return metricLabel(e);
+  }
+  const labelW = (txt) => Math.max(20, txt.length * 6.7 + 12);
+  /** Pfeil + gekürzte Kurve für eine Linienstärke (verändert g.r0..r2) */
+  function edgeShape(g, w) {
+    const ah = Math.max(4.2, w * 0.55 + 2.6), al = ah * 1.7;
+    trimEnd(g, al - 1);
+    const tip = g.tip, dir = g.dir, bx = tip.x - dir.x * al, by = tip.y - dir.y * al;
+    return { d: dPath(g), arrow: `M${f1(tip.x)},${f1(tip.y)} L${f1(bx - dir.y * ah)},${f1(by + dir.x * ah)} L${f1(bx + dir.y * ah)},${f1(by - dir.x * ah)} Z` };
+  }
+  /** Werte nachführen ohne Neuaufbau: Klassen, Linienstärken (inkl. Pfeil/Kürzung), Beschriftungen */
+  function patchEdges(edges, now) {
+    const wf = widthFn(edges);
+    for (const e of edges) {
+      const E = V.edges.get(e.key); if (!E || !E.g) continue;
+      E.data = e;
+      const kinds = edgeKinds(e, now), ks = kinds.join(' ');
+      if (ks !== E.ks) { E.ks = ks; setKinds(E.g, kinds); if (E.lab) setKinds(E.lab, kinds, true); }
+      const w = wf(e);
+      if (w !== E.w && E.geo) {
+        E.w = w;
+        const sh = edgeShape(E.geo, w);
+        for (const p of [E.pg, E.pb, E.pf]) p.setAttribute('d', sh.d);
+        E.pa.setAttribute('d', sh.arrow);
+        E.pg.style.strokeWidth = f1(w + 8); E.pb.style.strokeWidth = f1(w); E.pf.style.strokeWidth = f1(Math.max(1.3, w * 0.36)); E.ph.style.strokeWidth = f1(Math.max(16, w + 10));
+        E.lut = lutOf(E.geo);
+      }
+      const txt = edgeLabel(e);
+      if (txt !== E.txt && E.lt) {
+        E.txt = txt; E.lt.textContent = txt;
+        const tw = labelW(txt); E.lr.setAttribute('width', f1(tw)); E.lr.setAttribute('x', f1(-tw / 2));
+      }
+    }
+  }
+  function buildEdges(edges) {
+    const r = V.r, now = S().t;
+    const width = widthFn(edges);
     // breite Kanten zuerst platzieren (bekommen die „gute“ Seite), Gegenrichtung jeweils auf die andere Seite
     const sorted = edges.slice().sort((a, b) => metricVal(b) - metricVal(a) || b.open.length - a.open.length);
     const nodes = V.nodes.filter(n => n.kind !== 'charge');
@@ -1960,25 +2106,22 @@
     for (const it of list.slice().reverse()) {
       const e = it.e, g = it.g;
       const w = width(e);
-      const recent = e.live.length > 0 || (e.lastT != null && now - e.lastT < 20 * 60);
-      const cls = 'mt-e' + (e.ext ? ' ext' : '') + (e.n === 0 ? (e.direct && !e.open.length ? ' direct' : ' pend') : '') + (e.live.length ? ' live' : recent ? ' recent' : '');
-      const ah = Math.max(4.2, w * 0.55 + 2.6), al = ah * 1.7;
-      trimEnd(g, al - 1);
-      const d = dPath(g);
-      const tip = g.tip, dir = g.dir, bx = tip.x - dir.x * al, by = tip.y - dir.y * al;
-      const arrow = `M${f1(tip.x)},${f1(tip.y)} L${f1(bx - dir.y * ah)},${f1(by + dir.x * ah)} L${f1(bx + dir.y * ah)},${f1(by - dir.x * ah)} Z`;
+      it.w = w; it.ks = edgeKinds(e, now).join(' ');
+      const cls = 'mt-e' + (it.ks ? ' ' + it.ks : '');
+      const sh = edgeShape(g, w);
       eh += `<g class="${cls}" data-edge="${esc(e.key)}">
-        <path class="g" d="${d}" style="stroke-width:${f1(w + 8)}"/>
-        <path class="b" d="${d}" style="stroke-width:${f1(w)}" data-p="1"/>
-        <path class="f" d="${d}" style="stroke-width:${f1(Math.max(1.3, w * 0.36))}"/>
-        <path class="a" d="${arrow}"/>
+        <path class="g" d="${sh.d}" style="stroke-width:${f1(w + 8)}"/>
+        <path class="b" d="${sh.d}" style="stroke-width:${f1(w)}" data-p="1"/>
+        <path class="f" d="${sh.d}" style="stroke-width:${f1(Math.max(1.3, w * 0.36))}"/>
+        <path class="a" d="${sh.arrow}"/>
         <path class="h" d="${dFull(g)}" style="stroke-width:${f1(Math.max(16, w + 10))}"/>
       </g>`;
     }
     for (const it of list) {
       const e = it.e, g = it.g;
-      const txt = e.n === 0 ? (e.open.length ? `${e.open.length} wartet` : U.fmtNum(e.dm, 1) + ' m') : metricLabel(e);
-      const tw = Math.max(20, txt.length * 6.7 + 12), th = 18;
+      const txt = edgeLabel(e);
+      it.txt = txt;
+      const tw = labelW(txt), th = 18;
       let pos = null;
       for (const t of [0.5, 0.42, 0.58, 0.34, 0.66, 0.27, 0.73]) {
         const p = quad(g.r0, g.r1, g.r2, t);
@@ -1986,7 +2129,8 @@
       }
       if (!pos) pos = quad(g.r0, g.r1, g.r2, 0.5);
       labels.push({ x: pos.x, y: pos.y, w: tw, h: th });
-      lh += `<g class="mt-el${e.n === 0 ? (e.direct && !e.open.length ? ' direct' : ' pend') : ''}${e.ext ? ' ext' : ''}" data-lab="${esc(e.key)}" transform="translate(${f1(pos.x)},${f1(pos.y)})"><rect x="${f1(-tw / 2)}" y="${-th / 2}" width="${f1(tw)}" height="${th}" rx="${th / 2}"/><text y="4.2" text-anchor="middle">${esc(txt)}</text></g>`;
+      const lk = it.ks.split(' ').filter(k => k && k !== 'live' && k !== 'recent').join(' ');
+      lh += `<g class="mt-el${lk ? ' ' + lk : ''}" data-lab="${esc(e.key)}" transform="translate(${f1(pos.x)},${f1(pos.y)})"><rect x="${f1(-tw / 2)}" y="${-th / 2}" width="${f1(tw)}" height="${th}" rx="${th / 2}"/><text y="4.2" text-anchor="middle">${esc(txt)}</text></g>`;
     }
     plap('be_html');
     r.gEdges.innerHTML = eh;
@@ -1999,11 +2143,14 @@
     }
     plap('be_dom');
     V.edges = new Map();
-    const gm = new Map(list.map(it => [it.e.key, it.g]));
     const gEls = {}, lEls = {};
-    r.gEdges.querySelectorAll('[data-edge]').forEach(n => { gEls[n.dataset.edge] = n; });
-    r.gLabels.querySelectorAll('[data-lab]').forEach(n => { lEls[n.dataset.lab] = n; });
-    for (const e of edges) V.edges.set(e.key, { g: gEls[e.key], lab: lEls[e.key], lut: lutOf(gm.get(e.key)), data: e });
+    for (const n of r.gEdges.children) gEls[n.dataset.edge] = n;
+    for (const n of r.gLabels.children) lEls[n.dataset.lab] = n;
+    for (const it of list) {
+      const gE = gEls[it.e.key], lE = lEls[it.e.key], P = gE ? gE.children : [];
+      V.edges.set(it.e.key, { g: gE, lab: lE, pg: P[0], pb: P[1], pf: P[2], pa: P[3], ph: P[4], lr: lE ? lE.firstElementChild : null, lt: lE ? lE.lastElementChild : null,
+        geo: it.g, w: it.w, ks: it.ks, txt: it.txt, lut: lutOf(it.g), data: it.e });
+    }
     plap('be_len');
     if (V.hl) { const k = V.hl; V.hl = null; applyHl(k); }
     markPinned();
@@ -2011,6 +2158,8 @@
   }
   function updateFlowFoot(s, flows) {
     const r = V.r, now = s.t;
+    if (WF.app && WF.app.speed >= 120 && V.sig.top && performance.now() - (V._footT || 0) < 1000) return;
+    V._footT = performance.now();
     const inHouse = flows.filter(e => !e.ext);
     const n = inHouse.reduce((a, e) => a + e.n, 0), q = inHouse.reduce((a, e) => a + e.qty, 0), w = inHouse.reduce((a, e) => a + e.kg, 0);
     const extOut = L.ext.filter(x => x.t >= dayStart(now) && x.type === 'out'), extIn = L.ext.filter(x => x.t >= dayStart(now) && x.type === 'in');
@@ -2022,17 +2171,18 @@
     const tot = Math.max(1, agv + stp);
     setHTML(r.modesBar, `<i style="width:${(agv / tot * 100).toFixed(1)}%;background:var(--accent)"></i><i style="width:${(stp / tot * 100).toFixed(1)}%;background:var(--mat)"></i>`);
     setHTML(r.modesL, `<span style="--c:var(--accent)"><i></i>AGV <b>${agv}</b> Fahrten</span><span style="--c:var(--mat)"><i></i>Stapler <b>${stp}</b> Fahrten (über 250 kg, Stangen)</span>`);
-    // Servicegrad der Logistik: Abholung innerhalb 5 min, Ø Fahrzeit, Wartegründe
-    let n5 = 0, nP = 0, drive = 0, nD = 0, full = 0, noVeh = 0;
+    // Servicegrad der Logistik: ab „fällig“ (Ziel hat Platz) innerhalb 5 min abgeholt, Ø Fahrzeit; vorgemerkte Behälter
+    // (Ziel voll) sind kein Logistikverzug und stehen getrennt
+    let n5 = 0, nP = 0, drive = 0, nD = 0, nPlan = 0;
     const d0 = dayStart(now);
     for (const x of L.tr.values()) {
-      if (x.cancelled || x.pickupT == null || x.pickupT < d0) continue;
-      nP++; const w = x.pickupT - x.createdT; if (w <= 300) n5++;
-      else if (x.why && x.why.indexOf('Zielpuffer') >= 0) full++; else noVeh++;
+      if (x.cancelled || x.pickupT == null || x.pickupT < d0 || x.kind === 'empty') continue;
+      nP++; if (waitOf(x, now) <= 300) n5++;
+      if (plannedSec(x, now) > 60) nPlan++;
       if (x.doneT != null) { drive += x.doneT - x.pickupT; nD++; }
     }
     const sl = nP ? n5 / nP : null;
-    setHTML(r.svc, `<div><b class="${sl == null ? '' : sl >= 0.85 ? 'ok' : 'warn'}">${sl == null ? '–' : U.fmtPct(sl)}</b><span>abgeholt in ≤ 5 min</span></div><div><b>${nD ? dur(drive / nD) : '–'}</b><span>Ø Fahrt bis Ziel</span></div><div><b>${full}<small style="font-size:var(--fs-xs);color:var(--muted);font-weight:500"> × Ziel voll</small> ${noVeh}<small style="font-size:var(--fs-xs);color:var(--muted);font-weight:500"> × Fahrzeug</small></b><span>Grund bei Wartezeit über 5 min</span></div>`);
+    setHTML(r.svc, `<div><b class="${sl == null ? '' : sl >= 0.85 ? 'ok' : 'warn'}">${sl == null ? '–' : U.fmtPct(sl)}</b><span>fällig → abgeholt in ≤ 5 min</span></div><div><b>${nD ? dur(drive / nD) : '–'}</b><span>Ø Fahrt bis Ziel</span></div><div><b>${nPlan}<small> × vorgemerkt</small></b><span>Ziel war voll – keine Wartezeit</span></div>`);
     // stärkste Verbindungen
     const top = flows.filter(e => e.n > 0).sort((a, b) => metricVal(b) - metricVal(a)).slice(0, 5);
     const vmax = Math.max(1, ...top.map(metricVal));
@@ -2273,40 +2423,52 @@
   function trRow(r, now) {
     const s = S();
     const done = r.status === 'done';
-    const wOpen = r.status === 'open' ? waitOf(r, now) : 0;
-    // Farbe = Aussage: offen neutral, erst lange Wartezeit warnt; zugeteilt = Information, beladen = Material
-    const c = r.cancelled ? 'var(--faint)' : wOpen > WAIT_CRIT ? 'var(--st-fault)' : wOpen > WAIT_WARN ? 'var(--st-wait)' : TR_C[r.status] || 'var(--muted)';
+    const plan = isPlanned(r);
+    const wOpen = r.status === 'open' && !plan && r.kind !== 'empty' ? waitOf(r, now) : 0;
+    // Farbe = Aussage: vorgemerkt (Ziel voll) ruhig, fällig neutral, erst lange Wartezeit warnt; zugeteilt = Information, beladen = Material
+    const c = r.cancelled ? 'var(--faint)' : plan ? 'var(--line2)' : wOpen > WAIT_CRIT ? 'var(--st-fault)' : wOpen > WAIT_WARN ? 'var(--st-wait)' : TR_C[r.status] || 'var(--muted)';
     const o = r.orderId ? s.orders[r.orderId] : null;
     let content;
     if (r.kind === 'bars') {
       content = `<button class="lnk" data-sel="material|${esc(r.materialId)}"><b>${r.meters ? U.fmtNum(r.meters, 1) + ' m ' : ''}Stangen</b> ${esc(matName(r.materialId))}</button><span class="mt-s">${r.orderId ? `<button class="lnk mono" data-sel="order|${esc(r.orderId)}">${esc(r.orderId)}</button> · ` : ''}Nachschub Stangenlader ${esc(r.to)}</span>`;
+    } else if (r.kind === 'empty') {
+      const nE = r.empties || 1;
+      content = `<b>${nE} Leerbehälter</b>${nE > 1 ? ' gestapelt' : ''}<span class="mt-s">Leergut zurück an ${esc(stName(r.to))}</span>`;
     } else {
       const toOp = o && r.seq != null ? o.routing.find(x => x.seq === r.seq) : null;
       const kindTxt = r.kind === 'supply' ? 'Rohteile' : r.kind === 'ext-out' ? 'zur Härterei' : r.kind === 'ext-in' ? 'aus der Härterei' : null;
       content = `<b>${r.qty != null ? stk(r.qty) : '–'}</b> ${esc(r.partName || '')}<span class="mt-s">${r.orderId ? `<button class="lnk mono" data-sel="order|${esc(r.orderId)}" title="${esc(o ? o.customer : '')}">${esc(r.orderId)}</button> · ` : ''}${r.containerId ? `<button class="lnk mono" data-sel="container|${esc(r.containerId)}">${esc(r.containerId)}</button> · ` : ''}${toOp ? (toOp.station === 'VERSAND' ? 'in den Versand' : 'für AG ' + toOp.seq + ' ' + esc(toOp.op)) : r.to === 'VERSAND' ? 'in den Versand' : ''}</span>`;
     }
-    const KT = { container: 'Behälter', supply: 'Rohteile', 'ext-out': 'zur Härterei', 'ext-in': 'aus Härterei', bars: 'Stangen' };
+    const KT = { container: 'Behälter', supply: 'Rohteile', 'ext-out': 'zur Härterei', 'ext-in': 'aus Härterei', bars: 'Stangen', empty: 'Leergut' };
     const ord = `<span class="mono mt-trid">${esc(r.id)}</span><span class="mt-s">${esc(KT[r.kind] || r.kind)}</span>`;
     const rel = `<span class="mt-rel">${esc(stName(r.from))} ${ICO('arrowRight', 12)} ${esc(stName(r.to))}</span><span class="mt-s">${esc(r.from)} → ${esc(r.to)}</span>`;
     const mode = `<span class="mt-mode${r.mode === 'Stapler' ? ' stp' : ''}">${ICO(r.mode === 'AGV' ? 'agv' : 'forklift', 13)}${esc(r.mode)}</span>${r.carrier ? `<span class="mt-s">${esc(r.carrier)}</span>` : `<span class="mt-s">noch nicht zugeteilt</span>`}`;
-    const status = pill(c, trStatusLabel(r));
+    const status = plan ? `<span class="mt-planpill">${esc(trStatusLabel(r))}</span>` : pill(c, trStatusLabel(r));
     let time, why;
     const w = waitOf(r, now);
-    const wcls = w > WAIT_CRIT ? ' crit' : w > WAIT_WARN ? ' warn' : '';
+    const wcls = r.kind === 'empty' ? '' : w > WAIT_CRIT ? ' crit' : w > WAIT_WARN ? ' warn' : '';
+    const ps = plannedSec(r, now);
     if (done) {
-      time = `<span class="mt-w">fertig ${tclock(r.doneT, now)}</span><span class="mt-s">${r.pickupT != null ? `Wartezeit ${dur(r.pickupT - r.createdT)} · Fahrt ${dur(r.doneT - r.pickupT)}` : 'Dauer ' + dur(r.doneT - r.createdT)}</span>`;
-      why = r.cancelled ? '<span class="mt-why muted">Transport entfallen (Behälter umgebucht)</span>' : (r.pickupT != null && r.pickupT - r.createdT > 300 && r.why) ? `<span class="mt-why">wartete: ${esc(whyShort(r.why))}</span>` : '<span class="mt-why muted">–</span>';
+      time = `<span class="mt-w">fertig ${tclock(r.doneT, now)}</span><span class="mt-s">${r.pickupT != null ? `Wartezeit ${dur(w)} · Fahrt ${dur(r.doneT - r.pickupT)}` : 'Dauer ' + dur(r.doneT - r.createdT)}</span>`;
+      why = r.cancelled ? '<span class="mt-why muted">Transport entfallen (Behälter umgebucht)</span>'
+        : (r.pickupT != null && w > 300 && r.why) ? `<span class="mt-why">wartete: ${esc(whyShort(r.why))}</span>`
+        : ps > 300 ? `<span class="mt-why muted">vorgemerkt ${dur(ps)} – Ziel war voll</span>` : '<span class="mt-why muted">–</span>';
     } else if (r.pickupT != null) {
-      time = `<span class="mt-w">unterwegs ${dur(now - r.pickupT)}</span><span class="mt-s">Wartezeit ${dur(r.pickupT - r.createdT)}</span>`;
-      why = `<span class="mt-why">${esc((r.carrier || '') + (r.kind === 'bars' ? ' bringt die Stangen zu ' : ' bringt den Behälter nach ') + stName(r.to))}</span>`;
+      time = `<span class="mt-w">unterwegs ${dur(now - r.pickupT)}</span><span class="mt-s">Wartezeit ${dur(w)}${ps > 300 ? ' · vorher vorgemerkt' : ''}</span>`;
+      why = `<span class="mt-why">${esc((r.carrier || '') + (r.kind === 'bars' ? ' bringt die Stangen zu ' : r.kind === 'empty' ? ' bringt das Leergut zu ' : ' bringt den Behälter nach ') + stName(r.to))}</span>`;
+    } else if (plan) {
+      // vorgemerkt: Behälter steht bereit, das Ziel ist voll – keine Wartezeit-Uhr, keine Warnfarbe
+      time = `<span class="mt-w mt-wplan">bereitgestellt</span><span class="mt-s">seit ${tclock(r.createdT, now)}</span>`;
+      const s2 = s.transports[r.id];
+      why = `<span class="mt-why">${esc(planReason((s2 && s2.waitReason) || r.planWhy))}</span>`;
     } else {
-      time = `<span class="mt-w${wcls}">wartet ${dur(w)}</span><span class="mt-s">bereit seit ${tclock(r.createdT, now)}</span>`;
+      time = `<span class="mt-w${wcls}">wartet ${dur(w)}</span><span class="mt-s">${r.everPlanned ? 'fällig seit ' + tclock(waitStart(r), now) : 'bereit seit ' + tclock(r.createdT, now)}</span>`;
       const s2 = s.transports[r.id];
       const reason = r.status === 'open' ? (s2 && s2.waitReason) || r.waitReason || 'wartet auf Zuteilung' : r.status === 'assigned' ? `${r.carrier || 'Logistik'} geht zum Stapler` : `${r.carrier || 'Fahrzeug'} fährt zur Abholung`;
       why = `<span class="mt-why">${esc(reason)}</span>`;
     }
     const sel = r.kind === 'bars' ? 'material|' + r.materialId : r.containerId ? 'container|' + r.containerId : '';
-    return `<tr class="click${done ? ' done' : ''}" data-row="${esc(sel)}"><td class="st" style="--c:${c}"></td>
+    return `<tr class="click${done ? ' done' : ''}${plan ? ' plan' : ''}" data-row="${esc(sel)}"><td class="st" style="--c:${c}"></td>
       <td class="nw">${ord}</td><td>${content}</td><td class="nw">${rel}</td><td class="r nw">${r.weightKg ? kg(r.weightKg) : '–'}</td>
       <td class="nw">${mode}</td><td class="nw">${status}</td><td class="nw">${time}</td><td>${why}</td></tr>`;
   }
@@ -2314,24 +2476,34 @@
     const r = V.r, now = s.t;
     const all = transportsToday();
     const f = V.relFilter;
+    // hohes Tempo: Tabelle höchstens 1×/s neu (Uhrzeiten ändern sich sonst jeden Takt)
+    if (WF.app && WF.app.speed >= 120 && V.sig.tr && performance.now() - (V._trT || 0) < 1000) return;
+    V._trT = performance.now();
     const list = all.filter(x => relMatch(x, f));
-    const active = list.filter(x => x.status !== 'done').sort((a, b) => {
-      const pa = a.pickupT != null ? 0 : 1, pb = b.pickupT != null ? 0 : 1;   // in Fahrt zuerst, dann wartend (älteste zuerst)
-      return pa - pb || a.createdT - b.createdT;
+    const openAll = list.filter(x => x.status !== 'done');
+    // in Fahrt zuerst, dann fällig/wartend (am längsten wartend zuerst); vorgemerkte (Ziel voll) als eigener, ruhiger Block
+    const active = openAll.filter(x => !isPlanned(x)).sort((a, b) => {
+      const pa = a.pickupT != null ? 0 : 1, pb = b.pickupT != null ? 0 : 1;
+      return pa - pb || waitStart(a) - waitStart(b);
     });
+    const planned = openAll.filter(isPlanned).sort((a, b) => a.createdT - b.createdT);
     const done = list.filter(x => x.status === 'done' && !x.cancelled).sort((a, b) => b.doneT - a.doneT);
     const doneShown = V.showAllDone ? done : done.slice(0, V.trFilter === 'done' ? 25 : 10);
     // Signatur: Minutenraster
-    const sig = V.trFilter + '|' + (f ? f.key : '') + '|' + V.showAllDone + '|' + Math.floor(now / 60) + '|' + active.map(x => x.id + x.status + (x.carrier || '')).join(',') + '|' + done.length;
+    const sig = V.trFilter + '|' + (f ? f.key : '') + '|' + V.showAllDone + '|' + Math.floor(now / 60) + '|' + active.map(x => x.id + x.status + (x.carrier || '')).join(',') + '|' + planned.map(x => x.id).join(',') + '|' + done.length;
     if (sig !== V.sig.tr) {
       V.sig.tr = sig;
       let h = '';
       const showActive = V.trFilter !== 'done', showDone = V.trFilter !== 'active';
       if (showActive) {
         if (active.length) {
-          if (showDone) h += `<tr class="sep"><td colspan="9">Offen &amp; laufend · ${active.length}</td></tr>`;
+          if (showDone || planned.length) h += `<tr class="sep"><td colspan="9">Offen &amp; laufend · ${active.length}</td></tr>`;
           h += active.map(x => trRow(x, now)).join('');
-        } else h += `<tr><td colspan="9"><div class="empty" style="padding:16px">${f ? 'Auf dieser Verbindung ist gerade kein Transport offen.' : 'Kein Transport offen – alle abholbereiten Behälter sind zugestellt.'}</div></td></tr>`;
+        } else h += `<tr><td colspan="9"><div class="empty" style="padding:16px">${f ? 'Auf dieser Verbindung ist gerade kein Transport fällig.' : planned.length ? 'Kein Transport fällig – vorgemerkte Behälter fahren, sobald am Ziel Platz ist.' : 'Kein Transport offen – alle abholbereiten Behälter sind zugestellt.'}</div></td></tr>`;
+        if (planned.length) {
+          h += `<tr class="sep"><td colspan="9">Vorgemerkt · Ziel voll · ${planned.length}</td></tr>`;
+          h += planned.map(x => trRow(x, now)).join('');
+        }
       }
       if (showDone) {
         if (doneShown.length) {
@@ -2345,7 +2517,7 @@
       markSel();
     }
     const wait = active.filter(x => x.pickupT == null).length;
-    setHTML(r.trSub, `<b>${active.length}</b> offen/laufend (${wait} warten auf Abholung) · <b>${done.length}</b> heute erledigt${f ? ' · gefiltert' : ''}`);
+    setHTML(r.trSub, `<b>${active.length}</b> offen/laufend (${wait} ${wait === 1 ? 'wartet' : 'warten'} auf Abholung)${planned.length ? ` · ${planned.length} vorgemerkt` : ''} · <b>${done.length}</b> heute erledigt${f ? ' · gefiltert' : ''}`);
     const chipKey = f ? f.key : '';
     if (r.relChip._k !== chipKey) {
       r.relChip._k = chipKey;
@@ -2391,6 +2563,8 @@
   }
   function updateMaterials(s) {
     const r = V.r, now = s.t;
+    if (WF.app && WF.app.speed >= 120 && V.sig.mat && performance.now() - (V._matT || 0) < 1000) return;
+    V._matT = performance.now();
     const D = demandAll();
     const mats = Object.values(s.materials);
     const rows = mats.map(mt => {
@@ -2498,9 +2672,14 @@
       }
       case 'ready': {
         const tr = c.transportId && s.transports[c.transportId];
-        const w = c.readyT != null ? now - c.readyT : null;
+        const dest = esc(tr ? stName(tr.finalTo || tr.to.station) : toR ? stName(toR.station) : 'Versand');
+        if (tr && tr.status === 'open' && phaseOf(tr) === 'geplant') {
+          // Ziel voll: bereitgestellt und vorgemerkt – keine Wartezeit-Uhr, keine Warnfarbe
+          return { html: `<span>bereitgestellt seit ${tclock(c.readyT != null ? c.readyT : tr.createdT, now)} → ${dest} · vorgemerkt, Ziel voll${tr.roomEtaT != null ? ' · Abruf ca. ' + tclock(tr.roomEtaT, now) : ''}</span>`, sort: 1.5, planned: true };
+        }
+        const w = tr ? (tr.pickupT != null ? null : waitOf(recOf(tr), now)) : c.readyT != null ? now - c.readyT : null;
         const why = tr ? (tr.assignee ? (s.agvs[tr.assignee] ? s.agvs[tr.assignee].name : shortName(personName(tr.assignee))) + ' unterwegs' : tr.waitReason || 'wartet auf Zuteilung') : 'wartet';
-        return { html: `<span class="${w != null && w > WAIT_WARN ? 'warn' : ''}">abholbereit${w != null ? ' seit ' + dur(w) : ''} → ${esc(toR ? stName(toR.station) : 'Versand')} · ${esc(why)}</span>`, sort: 1 };
+        return { html: `<span class="${w != null && w > WAIT_WARN ? 'warn' : ''}">abholbereit${w != null ? ' seit ' + dur(w) : ''} → ${dest} · ${esc(why)}</span>`, sort: 1, waitSec: w };
       }
       case 'transit': {
         const who = l.kind === 'agv' ? (s.agvs[l.id] ? s.agvs[l.id].name : l.id) : 'Stapler (' + shortName(personName(l.personId)) + ')';
@@ -2520,6 +2699,8 @@
   }
   function updateContainers(s) {
     const r = V.r, now = s.t;
+    if (WF.app && WF.app.speed >= 120 && V.sig.ct && performance.now() - (V._ctT || 0) < 1000) return;
+    V._ctT = performance.now();
     const groups = new Map();
     const add = (key, c) => { let g = groups.get(key); if (!g) groups.set(key, g = { key, items: [] }); g.items.push(c); };
     let total = 0, qty = 0;
@@ -2571,7 +2752,7 @@
         // Telefon: Zusammenfassung je Ort; aufgeklappt nur, was Aufmerksamkeit braucht (unterwegs, Ausgang voll, lange abholbereit)
         const m = s.machines[k];
         const outFull = isMach && st.outCap > 0 && out.length >= st.outCap;
-        const waitLong = g.items.some(c => c.state === 'ready' && c.readyT != null && now - c.readyT > WAIT_WARN);
+        const waitLong = items.some(x => x.c.state === 'ready' && !x.ln.planned && x.ln.waitSec != null && x.ln.waitSec > WAIT_WARN);
         const att = k === 'transit' || (m && m.state === 'blocked') || outFull || waitLong;
         const isOpen = openMap.has(k) ? openMap.get(k) : att;
         const attTxt = (m && m.state === 'blocked') || outFull ? 'Ausgang voll' : waitLong ? 'wartet auf Abholung' : '';
@@ -2646,7 +2827,7 @@
     const what = r.kind === 'bars' ? `Stangen ${matName(r.materialId)}${r.meters ? ' · ' + U.fmtNum(r.meters, 1) + ' m' : ''}` : `${r.qty != null ? stk(r.qty) + ' ' : ''}${r.partName || ''}`;
     const tm = r.status === 'done' ? r.doneT : r.pickupT || r.createdT;
     const right = r.status === 'done' ? (r.pickupT != null ? 'Fahrt ' + dur(r.doneT - r.pickupT) : '') : trStatusLabel(r);
-    const sub = `${r.id}${r.orderId ? ' · ' + r.orderId : ''}${opts.carrier && r.carrier ? ' · ' + r.carrier : ''}${r.pickupT != null && r.pickupT - r.createdT > 60 ? ' · wartete ' + dur(r.pickupT - r.createdT) : ''}`;
+    const sub = `${r.id}${r.orderId ? ' · ' + r.orderId : ''}${opts.carrier && r.carrier ? ' · ' + r.carrier : ''}${r.pickupT != null && waitOf(r, now) > 60 ? ' · wartete ' + dur(waitOf(r, now)) : ''}`;
     const sel = r.kind === 'bars' ? 'material|' + r.materialId : r.containerId ? 'container|' + r.containerId : '';
     return `<div class="mt-d-li${sel ? ' click' : ''}" ${sel ? `data-sel="${esc(sel)}"` : ''}><span class="tm">${tclock(tm, now)}</span><span class="mn"><b>${esc(stName(r.from))} → ${esc(stName(r.to))}</b><span>${esc(what)} · ${esc(sub)}</span></span><span class="rt">${esc(right)}</span></div>`;
   }
@@ -2728,8 +2909,10 @@
       case 'toCharge': return ag.mustCharge ? `Akku unter ${cfg().batteryLow || 25} % – fährt zur Ladestation und nimmt bis ${cfg().batteryFull || 90} % keine Aufträge an.` : 'Kein Auftrag offen – fährt zur Ladestation.';
       case 'charging': return ag.mustCharge ? `Lädt – für Aufträge gesperrt, bis ${cfg().batteryFull || 90} % erreicht sind.` : 'Lädt an der Ladestation und übernimmt jederzeit den nächsten Behälter.';
       case 'idle': {
-        const waiting = Object.values(s.transports).filter(t => t.status === 'open' && t.mode === 'AGV');
-        if (waiting.length) return `Bereit – ${waiting.length} AGV-Transport${waiting.length > 1 ? 'e warten' : ' wartet'}, aber ${waiting[0].waitReason ? waiting[0].waitReason.replace(/^kein AGV frei.*$/, 'kein Ziel frei') : 'das Ziel ist nicht frei'}.`;
+        const open = Object.values(s.transports).filter(t => t.status === 'open' && t.mode === 'AGV');
+        const due = open.filter(t => phaseOf(t) !== 'geplant' && t.kind !== 'empty'), plan = open.filter(t => phaseOf(t) === 'geplant');
+        if (due.length) return `Bereit – ${due.length} AGV-Transport${due.length > 1 ? 'e warten' : ' wartet'}: ${due[0].waitReason || 'wird gleich zugeteilt'}.`;
+        if (plan.length) return `Bereit – ${plan.length} ${plan.length === 1 ? 'Behälter ist' : 'Behälter sind'} vorgemerkt, das Ziel ist voll; ${ag.name} fährt, sobald dort Platz ist.`;
         return 'Bereit an der Ladestation – kein Behälter wartet auf Abholung.';
       }
     }
@@ -2744,7 +2927,7 @@
     return `<div class="mt-d-box" style="--c:${c}"><div class="mt-d-box-h">${ICO('route', 15)}<span>${esc(stName(r.from))} → ${esc(stName(r.to))}</span><span class="spacer"></span><small class="mono">${esc(r.id)}</small></div>
       <div><b>${esc(what)}</b>${t.weightKg ? ' · ' + esc(kg(t.weightKg)) : ''}${r.orderId ? ` · <button class="link" data-sel="order|${esc(r.orderId)}">${esc(r.orderId)}</button>` : ''}${r.containerId ? ` · <button class="link" data-sel="container|${esc(r.containerId)}">${esc(r.containerId)}</button>` : ''}</div>
       <div class="mt-route" style="--c:${c}"><span class="ln"></span><span class="pr" style="width:calc((100% - 10px) * ${f.toFixed(3)})"></span><span class="e a"></span><span class="e b"></span><span class="vm" style="left:calc((100% - 12px) * ${f.toFixed(3)});--c:${c};opacity:${loaded ? 1 : .55}"></span></div>
-      <div class="row" style="justify-content:space-between;font-size:var(--fs-xs);color:var(--muted)"><span>${esc(trStatusLabel(r))}</span><span>bereit seit ${tclock(r.createdT, now)} · ${loaded ? 'abgeholt ' + tclock(t.pickupT, now) + ' (Wartezeit ' + dur(t.pickupT - r.createdT) + ')' : 'wartet ' + dur(now - r.createdT)}</span></div></div>`;
+      <div class="row" style="justify-content:space-between;font-size:var(--fs-xs);color:var(--muted)"><span>${esc(trStatusLabel(r))}</span><span>bereit seit ${tclock(r.createdT, now)} · ${loaded ? 'abgeholt ' + tclock(t.pickupT, now) + ' (Wartezeit ' + dur(waitOf(Object.assign({}, r, { pickupT: t.pickupT }), now)) + ')' : 'wartet ' + dur(waitOf(r, now))}</span></div></div>`;
   }
 
   // ------------------------------------------------------------------ Detail „material“
@@ -2889,8 +3072,8 @@
           } else items.push({ t: c.createdT, h: `<b>Behälter angelegt</b><span>${srcSt ? 'an ' + esc(stName(srcSt)) : 'im Lager'}</span>` });
         }
         for (const r of trs) {
-          if (r.pickupT != null) items.push({ t: r.pickupT, h: `<b>Abgeholt an ${esc(stName(r.from))}</b><span>${esc(r.carrier || r.mode)} · ${esc(r.id)} · Wartezeit ${dur(r.pickupT - r.createdT)}</span>` });
-          else if (r.status !== 'done') items.push({ t: r.createdT, h: `<b>Transport nach ${esc(stName(r.to))} angefordert</b><span>${esc(r.id)} · ${esc(trStatusLabel(r))}</span>` });
+          if (r.pickupT != null) items.push({ t: r.pickupT, h: `<b>Abgeholt an ${esc(stName(r.from))}</b><span>${esc(r.carrier || r.mode)} · ${esc(r.id)} · Wartezeit ${dur(waitOf(r, now))}${plannedSec(r, now) > 300 ? ' · vorher vorgemerkt ' + dur(plannedSec(r, now)) + ' (Ziel voll)' : ''}</span>` });
+          else if (r.status !== 'done') items.push({ t: r.createdT, h: `<b>Transport nach ${esc(stName(r.to))} ${isPlanned(r) ? 'vorgemerkt' : 'angefordert'}</b><span>${esc(r.id)} · ${esc(trStatusLabel(r))}${isPlanned(r) ? ' – Ziel voll' : ''}</span>` });
           if (r.status === 'done') items.push({ t: r.doneT, h: `<b>${r.cancelled ? 'Transport entfallen' : 'Abgestellt an ' + esc(stName(r.to))}</b><span>${esc(r.id)}${r.pickupT != null ? ' · Fahrt ' + dur(r.doneT - r.pickupT) : ''}</span>` });
         }
         for (const x of L.ext) if (x.containers.indexOf(id) >= 0) items.push({ t: x.t, h: x.type === 'out' ? `<b>An ${esc(haertName())} übergeben</b><span>${esc(x.process || '')}${x.returnT ? ' · Rückkehr ca. ' + esc(tclock(x.returnT, now)) : ''}</span>` : `<b>Zurück im Wareneingang</b><span>von ${esc(haertName())}</span>` });

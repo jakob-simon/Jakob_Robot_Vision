@@ -2695,7 +2695,18 @@
         cL.push([new THREE.BoxGeometry(0.114, 0.05, 0.075), xf(sx, 0.033, 0.54), TOE]);
       }
       cL.push([new THREE.CylinderGeometry(0.152, 0.165, 0.12, 14), xf(0, 0.48, -0.02, 0, 0, 0, 1.13, 1, 0.68), R0.coat ? R0.col : PANTS]);
-      for (const sx of [-1, 1]) armParts(cL, xf(sx * 0.215, 0.98, -0.02), xf(0, 0, 0, -1.2, 0, -sx * 0.14));
+      // Arme angewinkelt: Oberarm schräg nach vorn unten, Unterarme liegen auf der Tischkante (Tisch 0,78 m)
+      { const longS = !!(R0.coat || R0.jacket || R0.vest), sleeve = R0.vest ? R0.jacket : R0.col, fore = longS ? sleeve : skin;
+        for (const sx of [-1, 1]) {
+          const x0 = sx * 0.215, ex = sx * 0.17, ey = 0.8, ez = 0.2;
+          cL.push([new THREE.SphereGeometry(0.055, 10, 8), xf(x0, 0.97, -0.02), sleeve]);
+          const ux = ex - x0, uy = ey - 0.98, uz = ez + 0.02, ul = Math.hypot(ux, uy, uz);
+          const up = new THREE.Matrix4().lookAt(new THREE.Vector3(0, 0, 0), new THREE.Vector3(ux, uy, uz), new THREE.Vector3(0, 1, 0));
+          const seg = (k0, k1, r0, r1, c) => { const k = (k0 + k1) / 2; cL.push([new THREE.CylinderGeometry(r0, r1, ul * (k1 - k0), 10), new THREE.Matrix4().makeTranslation(x0 + ux * k, 0.98 + uy * k, -0.02 + uz * k).multiply(up).multiply(xf(0, 0, 0, PI / 2, 0, 0)), c]); };
+          if (longS) seg(0, 1, 0.054, 0.047, sleeve); else { seg(0, 0.42, 0.056, 0.052, sleeve); seg(0.4, 1, 0.041, 0.038, skin); }
+          cL.push([new THREE.CylinderGeometry(0.042, 0.035, 0.28, 10), xf(ex * 0.8, ey, ez + 0.14, PI / 2, 0, 0), fore]);
+          cL.push([new THREE.SphereGeometry(0.04, 10, 8), xf(ex * 0.65, ey + 0.005, ez + 0.3, 0, 0, 0, 0.8, 0.6, 1.2), skin]);
+        } }
       const chair = colored(cL);
       return { body, leg, arm, seated, chair };
     });
