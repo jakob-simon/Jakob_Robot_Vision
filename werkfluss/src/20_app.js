@@ -310,7 +310,9 @@
   app.modal = ({ title, body, actions = [], width }) => {
     const back = el('div', { class: 'modal-back' });
     const m = el('div', { class: 'modal', role: 'dialog', 'aria-label': title, style: width ? { width: `min(${width}px, 100%)` } : null });
-    const close = () => back.remove();
+    const onKey = (e) => { if (e.key === 'Escape' && back.isConnected && back === document.querySelector('#overlay .modal-back:last-child')) { e.stopPropagation(); e.preventDefault(); close(); } };
+    const close = () => { back.remove(); document.removeEventListener('keydown', onKey, true); };
+    document.addEventListener('keydown', onKey, true);
     const b = el('div', { class: 'modal-b' });
     if (typeof body === 'string') b.innerHTML = body; else if (body) b.append(body);
     const f = el('div', { class: 'modal-f' });

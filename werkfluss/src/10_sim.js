@@ -423,6 +423,7 @@
     const until = P.sim.warmupUntilT != null ? P.sim.warmupUntilT : t0;
     WARM = true;                       // Vorrechnen: reine Anzeige-Kennzahl S.kpi erst am Ende (liest die Simulation nie)
     try { while (S.t < until) step(); } finally { WARM = false; }
+    refreshToolNotes();
     S.kpi = kpis();
     WF.bus.emit('sim:reset', { t: S.t });
     return S;
@@ -1353,14 +1354,14 @@
       const mt = S.materials[r.material.id];
       if (mt.onHand + 1e-9 >= r.material.perPart) return OK;
       notifyMissing(m, mt, r);
-      return { ok: false, code: 'raw', cause: `Rohmaterial ${mt.name} fehlt (Bestand ${nm(mt.onHand, 2)} ${mt.unit}, Bedarf ${nm(r.material.perPart, 2)} ${mt.unit} je Teil)${mt.onOrder ? ' – Lieferung unterwegs' : ' – nicht bestellt'}` };
+      return { ok: false, code: 'raw', cause: cz(m, 'raw:' + mt.id + mt.onHand + '|' + mt.onOrder, () => `Rohmaterial ${mt.name} fehlt (Bestand ${nm(mt.onHand, 2)} ${mt.unit}, Bedarf ${nm(r.material.perPart, 2)} ${mt.unit} je Teil)${mt.onOrder ? ' – Lieferung unterwegs' : ' – nicht bestellt'}`) };
     }
     if (isBarFed(m, r)) {
       if (m.barMat === r.material.id && m.barStockM + 1e-9 >= r.material.perPart) return OK;
       const tr = barsTransportOf(m);
       const mt = S.materials[r.material.id];
       if (!tr && mt.onHand + 1e-9 < r.material.perPart) { notifyMissing(m, mt, r); return { ok: false, code: 'raw', cause: `Stangenmagazin leer und kein ${mt.name} mehr im Lager` }; }
-      return { ok: false, code: 'bars', cause: `Stangenmagazin leer (${nm(m.barStockM || 0, 2)} m) – ${tr ? trWhy(tr) : 'Nachschub wird beauftragt'}` };
+      return { ok: false, code: 'bars', cause: cz(m, 'bars:' + (tr ? tr.id + tr.status + (tr.assignee || '') : '-') + m.barStockM, () => `Stangenmagazin leer (${nm(m.barStockM || 0, 2)} m) – ${tr ? trWhy(tr) : 'Nachschub wird beauftragt'}`) };
     }
     if (firstInput(m.id, o.id, i)) return OK;
     return { ok: false, code: 'parts', cause: cz(m, 'in:' + o.id + i, () => inputWhy(m, o, i)) };
@@ -1821,6 +1822,10 @@
   // ------------------------------------------------------------------ Maschinen: Personalbedarf
   function waitOp(m, key, what) {
     const tk = S.tasks[m.tasks[key]];
+    // Ursache höchstens alle 5 s neu formulieren (gleiche Aufgabe, gleiche Person, gleicher Schritt)
+    const wk = key + '|' + what + '|' + (tk ? tk.id + (tk.assignee || '') + tk.si : '');
+    if (m.state === 'waitOperator' && m.woK === wk && S.t - m.woT < 5) return setState(m, 'waitOperator', m.cause, m.waitCode);
+    m.woK = wk; m.woT = S.t;
     let cause, code;
     if (tk && tk.assignee) {
       const p = S.people[tk.assignee];
@@ -3261,12 +3266,14 @@
       intakeTick();
       if (S.t % 600 === 0) { kanbanCheck(); archiveTick(); }
       // Werkzeug-Meldungen jede Sim-Minute aus der aktuellen Planung neu formulieren (Uhrzeit driftet sonst während langer Teile)
-      for (let j = 0; j < MA.length; j++) { const m = MA[j]; if (m.op && !m.toolchange && hasOpen('tool:' + m.id)) planTools(m); }
+      if (!WARM) refreshToolNotes();
       const s = S.t % DAY;
       if (s === 21 * 3600 && cur) ghostCheck();
       else if (S.t % 600 === 0 && cur) for (let j = 0; j < MA.length; j++) if (hasOpen('ghost:' + MA[j].id)) ghostEval(MA[j], false);
     }
   }
+  /** offene Werkzeug-Meldungen aus der aktuellen Planung neu formulieren (Uhrzeit nie veraltet) */
+  function refreshToolNotes() { for (let j = 0; j < MA.length; j++) { const m = MA[j]; if (m.op && !m.toolchange && hasOpen('tool:' + m.id)) planTools(m); } }
   /** Warte-Meldung anlegen bzw. (alle 10 s) mit der aktuellen Ursache, Empfehlung und Rolle aktualisieren */
   function notifyWait(m) {
     const key = 'wait:' + m.id;
@@ -3578,7 +3585,12 @@
   /** Prognose auf einem vorübergehend geänderten Plan (Priorität bzw. Station eines Arbeitsgangs) – vorher/nachher je
       offenem Auftrag. Der Zustand wird danach exakt wiederhergestellt (keine Caches, keine Ereignisse). */
   let RAWC = null;
-  function rawNow() { if (!RAWC || RAWC.v !== PV || RAWC.t !== S.t) RAWC = { v: PV, t: S.t, data: computeForecastRaw() }; return RAWC.data; }
+  /** ungeglättete Prognose „jetzt“: die eben berechnete Prognose (etaRaw) wiederverwenden, sonst neu rechnen */
+  function rawNow() {
+    if (FC && FC.v === PV && FC.t === S.t) return FC.data;
+    if (!RAWC || RAWC.v !== PV || RAWC.t !== S.t) RAWC = { v: PV, t: S.t, data: computeForecastRaw() };
+    return RAWC.data;
+  }
   function whatIf(spec) {
     if (!spec || !spec.type) return fail('Was-wäre-wenn: Art fehlt (setPriority | moveOp)');
     const o = S.orders[spec.orderId]; if (!o) return fail('Auftrag unbekannt: ' + spec.orderId);
@@ -3606,8 +3618,9 @@
     for (const id in S.orders) {
       const x = S.orders[id]; if (x.status === 'fertig') continue;
       const b = before.orders[id], a = after.orders[id]; if (!b || !a) continue;
-      rows.push({ orderId: id, due: x.due, before: b.eta, after: a.eta, deltaSec: a.eta - b.eta, lateBefore: b.eta > x.due, lateAfter: a.eta > x.due,
-        slackBefore: x.due - b.eta, slackAfter: x.due - a.eta, riskAfter: riskOf(x, a.eta) });
+      const be = b.etaRaw != null ? b.etaRaw : b.eta;   // beide Seiten ungeglättet vergleichen
+      rows.push({ orderId: id, due: x.due, before: be, after: a.eta, deltaSec: a.eta - be, lateBefore: be > x.due, lateAfter: a.eta > x.due,
+        slackBefore: x.due - be, slackAfter: x.due - a.eta, riskAfter: riskOf(x, a.eta) });
     }
     const target = rows.find(r => r.orderId === o.id) || null;
     const others = rows.filter(r => r.orderId !== o.id);

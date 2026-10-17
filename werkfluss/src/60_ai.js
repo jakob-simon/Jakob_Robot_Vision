@@ -58,6 +58,15 @@
   const matQty = (mt, q) => nm(q, matDec(mt)) + ' ' + (mt ? mt.unit : '');
   const label = (g, k) => (WF.sim && WF.sim.label ? WF.sim.label(g, k) : k);
   const listJoin = (arr) => (arr.length <= 1 ? arr.join('') : arr.slice(0, -1).join(', ') + ' und ' + arr[arr.length - 1]);
+  /** Veränderung als Text – unter 1 min gibt es keine „~0 s“, sondern „keine spürbare Änderung“ */
+  const NOCHG = 'keine spürbare Änderung';
+  const deltaTxt = (sec) => (sec == null || Math.abs(sec) < 60 ? NOCHG : (sec > 0 ? '+' : '−') + durR(Math.abs(sec)));
+  /** Puffer bzw. Verzug eines Auftrags (Sekunden bis Termin) */
+  const slackTxt = (s) => (s == null ? 'ohne Prognose' : s < 0 ? durR(-s) + ' Verzug' : s < 60 ? 'kein Puffer' : 'Puffer ' + durR(s));
+  /** Stückpreis: unter 100 € mit Cent (9,80 €), sonst ganze Euro */
+  const eurUnit = (n) => U.fmtEur(n, n < 100 && Math.round(n) !== n ? 2 : 0);
+  /** Strompreis (€/kWh): aus dem Profil, sonst Annahme Industrietarif */
+  const ENERGY_PRICE = () => { const p = PROF() || {}; const v = (p.energy && p.energy.eurPerKwh) || (p.company && p.company.eurPerKwh); return v > 0 ? { v, assumed: false } : { v: 0.19, assumed: true }; };
 
   // ================================================================== Arbeitszeit-Kalender (Schichten ohne Pausen)
   let WW = null;
@@ -106,7 +115,33 @@
   }
 
   // ================================================================== Daten je Anfrage (gecacht)
+  /** Prognose-Verlauf (für „vorher/nachher“ bei Störungen): letzte Liefertermin- und Arbeitsgang-Prognosen, höchstens
+      alle 30 Sim-Sekunden ein Eintrag. Gelesen wird nur die (gecachte) Prognose – wie in jeder Ansicht. */
+  const etaLog = [];
+  function logEta() {
+    if (!WF.sim || !S() || typeof WF.sim.forecast !== 'function') return;
+    const t = NOW(), last = etaLog[etaLog.length - 1];
+    if (last && t < last.t) etaLog.length = 0; // Neustart der Simulation
+    else if (last && t - last.t < 30) return;
+    let fc; try { fc = WF.sim.forecast(); } catch (e) { return; }
+    if (!fc) return;
+    const eta = {}, opEnd = {};
+    for (const id in fc.orders) { const x = fc.orders[id]; if (!x.done) eta[id] = x.etaRaw != null ? x.etaRaw : x.eta; }
+    for (const mid in fc.machines) for (const e of fc.machines[mid]) opEnd[e.orderId + '/' + e.seq] = e.opEnd != null ? e.opEnd : e.end;
+    const faulted = {};
+    for (const mid in S().machines) if (S().machines[mid].state === 'fault' || S().machines[mid].fault) faulted[mid] = 1;
+    const sig = JSON.stringify(eta) + Object.keys(faulted).join();
+    if (last && last.sig === sig && last.fcT === fc.t) { last.t = t; return; }
+    etaLog.push({ t, fcT: fc.t != null ? fc.t : t, eta, opEnd, faulted, sig });
+    if (etaLog.length > 80) etaLog.shift();
+  }
+  /** letzte Prognose vor einer Störung an mid (berechnet, als mid noch nicht gestört war; höchstens 2 h alt) */
+  const etaBefore = (t0, mid) => {
+    for (let i = etaLog.length - 1; i >= 0; i--) { const x = etaLog[i]; if (x.fcT <= t0 && !x.faulted[mid]) return t0 - x.fcT <= 7200 ? x : null; }
+    return null;
+  };
   function data() {
+    logEta();
     const c = { t: NOW() };
     const mvs = {}, ovs = {};
     let fc = null, k = null;
@@ -442,8 +477,10 @@
   const capableAlts = (orderId, seq, fromId) => altMachines(fromId).filter(x => !capReason(orderId, seq, x));
 
   // ================================================================== Erkennung: Entitäten in der Frage
+  // Umlaute wie im Alias-Wörterbuch (ä → ae), übrige diakritische Zeichen weg (Petrović → petrovic)
   const norm = (s) => String(s || '').toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
-    .replace(/[„“”"']/g, ' ').replace(/\s+/g, ' ').trim();
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[„“”"'?!]/g, ' ').replace(/\s+/g, ' ').trim();
   // Aliase je Arbeitsplatz (normalisiert; '*' = Wortanfang genügt)
   const MACHINE_ALIAS = {
     M01: ['saege', 'bandsaege*', 'saegeautomat*', 'behringer', 'zuschnitt*'],
