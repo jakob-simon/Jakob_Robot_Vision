@@ -173,17 +173,19 @@
   const graph = buildGraph();
 
   // ---------------------------------------------------------------- Werkzeugtypen
-  // lifeMin = Standzeit in Schnittminuten; presetMin = Voreinstellzeit; cost in €
+  // lifeMin = Standzeit in Schnittminuten (Wendeschneidplatten: je Schneide); presetMin = Voreinstellzeit; cost in € (je Platte)
+  // edges = Schneiden je Wendeschneidplatte – der Bediener wendet an der Maschine (1–2 min), erst nach der letzten
+  // Schneide kommt eine neue Platte aus der Werkzeugausgabe
   const toolTypes = [
     { id: 'TT-SB',     name: 'Bimetall-Sägeband 34×1,1 M42',      kind: 'saw',    lifeMin: 900,  cost: 95,  presetMin: 0 },
-    { id: 'TT-CNMG',   name: 'WSP CNMG 120408 (Schruppen)',        kind: 'insert', lifeMin: 32,   cost: 14,  presetMin: 3 },
-    { id: 'TT-VNMG',   name: 'WSP VNMG 160404 (Schlichten)',       kind: 'insert', lifeMin: 26,   cost: 16,  presetMin: 3 },
+    { id: 'TT-CNMG',   name: 'WSP CNMG 120408 (Schruppen)',        kind: 'insert', lifeMin: 50,   cost: 14,  presetMin: 3, edges: 4 },
+    { id: 'TT-VNMG',   name: 'WSP VNMG 160404 (Schlichten)',       kind: 'insert', lifeMin: 34,   cost: 16,  presetMin: 3, edges: 4 },
     { id: 'TT-DR68',   name: 'VHM-Bohrer Ø6,8',                     kind: 'drill',  lifeMin: 70,   cost: 68,  presetMin: 4 },
-    { id: 'TT-STECH',  name: 'Stechplatte 3 mm',                    kind: 'insert', lifeMin: 38,   cost: 18,  presetMin: 3 },
-    { id: 'TT-MIKRO',  name: 'Mikro-Drehwerkzeug VCGT 1103',        kind: 'insert', lifeMin: 44,   cost: 22,  presetMin: 3 },
-    { id: 'TT-ABST',   name: 'Abstechplatte 1,5 mm',                kind: 'insert', lifeMin: 36,   cost: 15,  presetMin: 3 },
-    { id: 'TT-CNMGL',  name: 'WSP CNMG 190612 (Schwerzerspanung)',  kind: 'insert', lifeMin: 130,  cost: 26,  presetMin: 4 },
-    { id: 'TT-DNMGL',  name: 'WSP DNMG 150608 (Schlichten)',        kind: 'insert', lifeMin: 60,   cost: 22,  presetMin: 4 },
+    { id: 'TT-STECH',  name: 'Stechplatte 3 mm',                    kind: 'insert', lifeMin: 38,   cost: 18,  presetMin: 3, edges: 2 },
+    { id: 'TT-MIKRO',  name: 'Mikro-Drehwerkzeug VCGT 1103',        kind: 'insert', lifeMin: 44,   cost: 22,  presetMin: 3, edges: 2 },
+    { id: 'TT-ABST',   name: 'Abstechplatte 1,5 mm',                kind: 'insert', lifeMin: 36,   cost: 15,  presetMin: 3, edges: 2 },
+    { id: 'TT-CNMGL',  name: 'WSP CNMG 190612 (Schwerzerspanung)',  kind: 'insert', lifeMin: 130,  cost: 26,  presetMin: 4, edges: 4 },
+    { id: 'TT-DNMGL',  name: 'WSP DNMG 150608 (Schlichten)',        kind: 'insert', lifeMin: 60,   cost: 22,  presetMin: 4, edges: 4 },
     { id: 'TT-VHM10',  name: 'VHM-Schaftfräser Ø10 Z4',             kind: 'mill',   lifeMin: 46,   cost: 82,  presetMin: 5 },
     { id: 'TT-PF63',   name: 'Planfräser Ø63 (WSP)',                kind: 'mill',   lifeMin: 90,   cost: 64,  presetMin: 5 },
     { id: 'TT-DR85',   name: 'VHM-Bohrer Ø8,5',                     kind: 'drill',  lifeMin: 70,   cost: 74,  presetMin: 4 },
@@ -200,15 +202,18 @@
   ];
 
   // ---------------------------------------------------------------- Rohmaterial
+  // kanban: true = Rahmenvertrag mit Abruf – reicht der Bestand (+ Bestellungen) nicht mehr für den offenen Bedarf der
+  // freigegebenen Aufträge, ruft die Kanban-Regel automatisch reorderQty (bzw. ein Vielfaches) ab. Mindestbestand-Warnungen
+  // bleiben davon unberührt (Einkauf kann früher nachbestellen). Titan ELI wird auftragsbezogen mit Zeugnis bestellt.
   const materials = [
-    { id: 'MAT-TI10',   name: 'Ti6Al4V ELI Ø10 h9', form: 'Stange', unit: 'm', onHand: 36, min: 24, reorderQty: 60, supplier: 'TitanTrade Europe (Beispiel)', leadMin: 360, pricePerUnit: 145, location: 'RAW' },
-    { id: 'MAT-14404',  name: '1.4404 Ø12 h9',      form: 'Stange', unit: 'm', onHand: 21, min: 12, reorderQty: 45, supplier: 'Edelstahl Service Ost (Beispiel)', leadMin: 240, pricePerUnit: 18, location: 'RAW' },
-    { id: 'MAT-42CR110',name: '42CrMo4+QT Ø110',    form: 'Stange', unit: 'm', onHand: 11.4, min: 6, reorderQty: 24, supplier: 'Stahlhandel Ost (Beispiel)', leadMin: 480, pricePerUnit: 62, location: 'RAW' },
-    { id: 'MAT-42CR65', name: '42CrMo4+QT Ø65',     form: 'Stange', unit: 'm', onHand: 24, min: 12, reorderQty: 36, supplier: 'Stahlhandel Ost (Beispiel)', leadMin: 360, pricePerUnit: 21, location: 'RAW' },
-    { id: 'MAT-16MNCR90',name: '16MnCr5 Ø90',       form: 'Stange', unit: 'm', onHand: 7.2, min: 3, reorderQty: 12, supplier: 'Stahlhandel Ost (Beispiel)', leadMin: 360, pricePerUnit: 38, location: 'RAW' },
-    { id: 'MAT-2842',   name: '1.2842 Flach 45×25', form: 'Stange', unit: 'm', onHand: 14, min: 6, reorderQty: 18, supplier: 'Werkzeugstahl Süd (Beispiel)', leadMin: 480, pricePerUnit: 44, location: 'RAW' },
-    { id: 'MAT-ALBL',   name: 'AlMgSi1 Zuschnitt 160×120×80', form: 'Stk', unit: 'Stk', onHand: 24, min: 20, reorderQty: 40, supplier: 'Alu Zuschnitt Wien (Beispiel)', leadMin: 300, pricePerUnit: 9.8, location: 'RAW' },
-    { id: 'MAT-GUSSLD', name: 'Rohguss Lagerdeckel EN-GJL-250', form: 'Stk', unit: 'Stk', onHand: 40, min: 10, reorderQty: 50, supplier: 'Gießerei Steiermark (Beispiel)', leadMin: 600, pricePerUnit: 18, location: 'RAW' },
+    { id: 'MAT-TI10',   name: 'Ti6Al4V ELI Ø10 h9', form: 'Stange', unit: 'm', onHand: 36, min: 24, reorderQty: 60, supplier: 'TitanTrade Europe (Beispiel)', leadMin: 360, pricePerUnit: 145, location: 'RAW', kanban: false },
+    { id: 'MAT-14404',  name: '1.4404 Ø12 h9',      form: 'Stange', unit: 'm', onHand: 21, min: 12, reorderQty: 45, supplier: 'Edelstahl Service Ost (Beispiel)', leadMin: 240, pricePerUnit: 18, location: 'RAW', kanban: true },
+    { id: 'MAT-42CR110',name: '42CrMo4+QT Ø110',    form: 'Stange', unit: 'm', onHand: 11.4, min: 6, reorderQty: 24, supplier: 'Stahlhandel Ost (Beispiel)', leadMin: 480, pricePerUnit: 62, location: 'RAW', kanban: true },
+    { id: 'MAT-42CR65', name: '42CrMo4+QT Ø65',     form: 'Stange', unit: 'm', onHand: 24, min: 12, reorderQty: 36, supplier: 'Stahlhandel Ost (Beispiel)', leadMin: 360, pricePerUnit: 21, location: 'RAW', kanban: true },
+    { id: 'MAT-16MNCR90',name: '16MnCr5 Ø90',       form: 'Stange', unit: 'm', onHand: 7.2, min: 3, reorderQty: 12, supplier: 'Stahlhandel Ost (Beispiel)', leadMin: 360, pricePerUnit: 38, location: 'RAW', kanban: true },
+    { id: 'MAT-2842',   name: '1.2842 Flach 45×25', form: 'Stange', unit: 'm', onHand: 14, min: 6, reorderQty: 18, supplier: 'Werkzeugstahl Süd (Beispiel)', leadMin: 480, pricePerUnit: 44, location: 'RAW', kanban: true },
+    { id: 'MAT-ALBL',   name: 'AlMgSi1 Zuschnitt 160×120×80', form: 'Stk', unit: 'Stk', onHand: 24, min: 20, reorderQty: 40, supplier: 'Alu Zuschnitt Wien (Beispiel)', leadMin: 300, pricePerUnit: 9.8, location: 'RAW', kanban: true },
+    { id: 'MAT-GUSSLD', name: 'Rohguss Lagerdeckel EN-GJL-250', form: 'Stk', unit: 'Stk', onHand: 40, min: 10, reorderQty: 50, supplier: 'Gießerei Steiermark (Beispiel)', leadMin: 600, pricePerUnit: 18, location: 'RAW', kanban: true },
   ];
 
   // ---------------------------------------------------------------- Personal
@@ -269,6 +274,89 @@
   // ext = Fremdbearbeitung (Station 'EXT'); 'QS' = Messraum; 'VERSAND' = Ablage am Ende (kein Bearbeitungsschritt)
   // char = Hauptmerkmal für Messwerte/SPC (driftAt100 = Maßabweichung bei 100 % Verschleiß)
   const HAERTEREI = 'Härterei Wolf GmbH (Beispiel)';
+  const CHROM = 'Hartchrom Linz GmbH (Beispiel)';
+  const CUST = {
+    medivia: ['Medivia Implants GmbH', 'Medizintechnik'], alpen: ['AlpenRail Systems GmbH', 'Schienenfahrzeuge'],
+    donau: ['Donau Verpackungstechnik (Schwesterfirma)', 'Maschinenbau intern'], hydrava: ['Hydrava Pumpen GmbH', 'Pumpenbau'],
+    kaernten: ['Kärntner Antriebstechnik GmbH', 'Antriebstechnik'],
+  };
+  // Arbeitspläne der Varianten (auch vom Auftragseingang genutzt)
+  const ROUTE = {
+    GW7810: [ // Getriebewelle Ø110×780 – vergütet; Lagersitze und Passfedernut in einer Aufspannung auf der Millturn
+      { seq: 10, op: 'Sägen', station: 'M01', setupMin: 10, cycleMin: 5, transferBatch: 5, material: { id: 'MAT-42CR110', perPart: 0.8 }, tools: [{ type: 'TT-SB', cutMinPerPart: 4.2 }] },
+      { seq: 20, op: 'Drehen und Nutfräsen komplett', station: 'M04', setupMin: 55, cycleMin: 40, transferBatch: 5, firstPiece: true,
+        tools: [{ type: 'TT-CNMGL', cutMinPerPart: 20 }, { type: 'TT-DNMGL', cutMinPerPart: 8 }, { type: 'TT-VHM16', cutMinPerPart: 5 }],
+        char: { name: 'Ø 95 m6 Lagersitz', nominal: 95.0205, tolMinus: -0.0075, tolPlus: 0.0075, unit: 'mm', sigma: 0.0022, driftAt100: 0.006 } },
+      { seq: 30, op: 'Prüfung', station: 'QS', setupMin: 0, cycleMin: 6, transferBatch: 5 },
+      { seq: 40, op: 'Versand', station: 'VERSAND' },
+    ],
+    KS1009: [ // Kolbenstange Ø100×900 – hartverchromt
+      { seq: 10, op: 'Sägen', station: 'M01', setupMin: 10, cycleMin: 4.5, transferBatch: 4, material: { id: 'MAT-42CR110', perPart: 0.92 }, tools: [{ type: 'TT-SB', cutMinPerPart: 3.8 }] },
+      { seq: 20, op: 'Drehen', station: 'M04', setupMin: 45, cycleMin: 30, transferBatch: 4, firstPiece: true,
+        tools: [{ type: 'TT-CNMGL', cutMinPerPart: 18 }, { type: 'TT-DNMGL', cutMinPerPart: 9 }],
+        char: { name: 'Ø 100 f7', nominal: 99.947, tolMinus: -0.017, tolPlus: 0.017, unit: 'mm', sigma: 0.004, driftAt100: 0.008 } },
+      { seq: 30, op: 'Hartverchromen', station: 'EXT', ext: { partner: CHROM, process: 'Hartverchromen 25 µm', leadMin: 600 }, transferBatch: 8 },
+      { seq: 40, op: 'Prüfung', station: 'QS', setupMin: 0, cycleMin: 5, transferBatch: 4 },
+      { seq: 50, op: 'Versand', station: 'VERSAND' },
+    ],
+    PD0416: [ // Pumpendeckel aus Alu-Zuschnitt
+      { seq: 10, op: '5-Achs-Fräsen komplett', station: 'M05', setupMin: 50, cycleMin: 14, transferBatch: 10, firstPiece: true,
+        material: { id: 'MAT-ALBL', perPart: 1 },
+        tools: [{ type: 'TT-VHM10', cutMinPerPart: 4.5 }, { type: 'TT-PF63', cutMinPerPart: 2 }, { type: 'TT-DR85', cutMinPerPart: 1.5 }, { type: 'TT-GBM10', cutMinPerPart: 1 }],
+        char: { name: 'Passung Ø 42 H7', nominal: 42.0125, tolMinus: -0.0125, tolPlus: 0.0125, unit: 'mm', sigma: 0.0035, driftAt100: -0.007 } },
+      { seq: 20, op: 'Reinigen', station: 'M11', setupMin: 5, cycleMin: 0.4, transferBatch: 10 },
+      { seq: 30, op: 'Prüfung KMG', station: 'QS', setupMin: 0, cycleMin: 3, transferBatch: 10 },
+      { seq: 40, op: 'Versand', station: 'VERSAND' },
+    ],
+    DH0425: [ // Distanzhülse Ø12×25
+      { seq: 10, op: 'Langdrehen komplett', station: 'M03', setupMin: 30, cycleMin: 1.1, transferBatch: 200, firstPiece: true,
+        material: { id: 'MAT-14404', perPart: 0.029 }, tools: [{ type: 'TT-MIKRO', cutMinPerPart: 0.6 }, { type: 'TT-ABST', cutMinPerPart: 0.3 }],
+        char: { name: 'Länge 25 ±0,02', nominal: 25.000, tolMinus: -0.020, tolPlus: 0.020, unit: 'mm', sigma: 0.004, driftAt100: 0.008 } },
+      { seq: 20, op: 'Reinigen', station: 'M11', setupMin: 5, cycleMin: 0.05, transferBatch: 200 },
+      { seq: 30, op: 'Losprüfung (Stichprobe)', station: 'QS', setupMin: 0, cycleMin: 0.03, transferBatch: 200 },
+      { seq: 40, op: 'Versand', station: 'VERSAND' },
+    ],
+    FS0630: [ // Fixierstift Ø6×30 aus Titan
+      { seq: 10, op: 'Langdrehen komplett', station: 'M03', setupMin: 40, cycleMin: 1.8, transferBatch: 100, firstPiece: true,
+        material: { id: 'MAT-TI10', perPart: 0.036 }, tools: [{ type: 'TT-MIKRO', cutMinPerPart: 1.0 }, { type: 'TT-ABST', cutMinPerPart: 0.4 }],
+        char: { name: 'Ø 6 h6', nominal: 6.000, tolMinus: -0.008, tolPlus: 0, unit: 'mm', sigma: 0.0011, driftAt100: -0.004 } },
+      { seq: 20, op: 'Reinigen', station: 'M11', setupMin: 5, cycleMin: 0.1, transferBatch: 100 },
+      { seq: 30, op: 'Losprüfung (Stichprobe)', station: 'QS', setupMin: 0, cycleMin: 0.06, transferBatch: 100 },
+      { seq: 40, op: 'Versand', station: 'VERSAND' },
+    ],
+    AW4032: [ // Antriebswelle Ø40×320 – induktiv gehärtete Laufflächen (Toleranz h9, kein Schleifen)
+      { seq: 10, op: 'Sägen', station: 'M01', setupMin: 10, cycleMin: 1.6, transferBatch: 15, material: { id: 'MAT-42CR65', perPart: 0.33 }, tools: [{ type: 'TT-SB', cutMinPerPart: 1.2 }] },
+      { seq: 20, op: 'Drehfräsen komplett (inkl. Passfedernut)', station: 'M02', setupMin: 50, cycleMin: 10, transferBatch: 15, firstPiece: true,
+        tools: [{ type: 'TT-CNMG', cutMinPerPart: 3.2 }, { type: 'TT-VNMG', cutMinPerPart: 2 }, { type: 'TT-STECH', cutMinPerPart: 0.6 }, { type: 'TT-VHM10', cutMinPerPart: 2.5 }],
+        char: { name: 'Ø 40 k6', nominal: 40.010, tolMinus: -0.008, tolPlus: 0.008, unit: 'mm', sigma: 0.003, driftAt100: 0.007 } },
+      { seq: 30, op: 'Induktionshärten', station: 'EXT', ext: { partner: HAERTEREI, process: 'Induktionshärten 52+4 HRC', leadMin: 360 }, transferBatch: 30 },
+      { seq: 40, op: 'Prüfung', station: 'QS', setupMin: 0, cycleMin: 2, transferBatch: 15 },
+      { seq: 50, op: 'Versand', station: 'VERSAND' },
+    ],
+    HK0050: [ // Hydraulikkolben Ø50×180
+      { seq: 10, op: 'Sägen', station: 'M01', setupMin: 10, cycleMin: 1.6, transferBatch: 20, material: { id: 'MAT-42CR65', perPart: 0.19 }, tools: [{ type: 'TT-SB', cutMinPerPart: 1.2 }] },
+      { seq: 20, op: 'Drehen', station: 'M02', setupMin: 40, cycleMin: 6.5, transferBatch: 20, firstPiece: true,
+        tools: [{ type: 'TT-CNMG', cutMinPerPart: 2.6 }, { type: 'TT-VNMG', cutMinPerPart: 1.6 }, { type: 'TT-STECH', cutMinPerPart: 0.5 }],
+        char: { name: 'Ø 50 f7', nominal: 49.9625, tolMinus: -0.0125, tolPlus: 0.0125, unit: 'mm', sigma: 0.0035, driftAt100: 0.007 } },
+      { seq: 30, op: 'Tieflochbohren Ø20 × 160', station: 'M07', setupMin: 30, cycleMin: 7.5, transferBatch: 20, firstPiece: true,
+        tools: [{ type: 'TT-ELB20', cutMinPerPart: 6 }] },
+      { seq: 40, op: 'Rundschleifen', station: 'M09', setupMin: 30, cycleMin: 5, transferBatch: 20, firstPiece: true,
+        tools: [{ type: 'TT-SSR', cutMinPerPart: 3.8 }],
+        char: { name: 'Ø 50 f7 geschliffen', nominal: 49.9625, tolMinus: -0.008, tolPlus: 0.008, unit: 'mm', sigma: 0.0016, driftAt100: 0.003 } },
+      { seq: 50, op: 'Reinigen', station: 'M11', setupMin: 5, cycleMin: 0.3, transferBatch: 20 },
+      { seq: 60, op: 'Prüfung', station: 'QS', setupMin: 0, cycleMin: 1.2, transferBatch: 20 },
+      { seq: 70, op: 'Versand', station: 'VERSAND' },
+    ],
+  };
+  const PART = {
+    GW7810: { no: 'GW-7810', name: 'Getriebewelle Ø110×780', material: '42CrMo4+QT', drawing: 'GW-7810 Rev. A', weightKg: 58 },
+    KS1009: { no: 'KS-1009', name: 'Kolbenstange Ø100×900', material: '42CrMo4+QT', drawing: 'KS-1009 Rev. C', weightKg: 55 },
+    PD0416: { no: 'PD-0416', name: 'Pumpendeckel', material: 'AlMgSi1', drawing: 'PD-0416 Rev. B', weightKg: 1.1 },
+    DH0425: { no: 'DH-0425', name: 'Distanzhülse Ø12×25', material: '1.4404', drawing: 'DH-0425 Rev. A', weightKg: 0.014 },
+    FS0630: { no: 'FS-0630', name: 'Fixierstift Ø6×30', material: 'Ti6Al4V ELI', drawing: 'FS-0630 Rev. B', weightKg: 0.004 },
+    AW4032: { no: 'AW-4032', name: 'Antriebswelle Ø40×320', material: '42CrMo4+QT', drawing: 'AW-4032 Rev. A', weightKg: 3.2 },
+    HK0050: { no: 'HK-0050', name: 'Hydraulikkolben Ø50×180', material: '42CrMo4+QT', drawing: 'HK-0050 Rev. A', weightKg: 2.8 },
+  };
   const orders = [
     { id: 'FA-24117', customer: 'Medivia Implants GmbH', sector: 'Medizintechnik',
       part: { no: 'GB-1120', name: 'Gelenkbolzen Ø8×42', material: 'Ti6Al4V ELI', drawing: 'GB-1120 Rev. C', weightKg: 0.02 },
@@ -458,6 +546,52 @@
       ],
       initial: { activeSeq: 10, setupDone: true, fpiReleased: true, ops: { 10: { atInput: [4] } } } },
   ];
+  // freigegebener Auftragsvorrat (noch nicht begonnen, Termine Do … übernächster Fr) – jede Maschine hat ab Start
+  // ca. 1–2 Tage Warteschlange; danach hält der Auftragseingang (profile.orderTemplates) den Vorrat
+  const rt = (id) => orders.find(o => o.id === id).routing;
+  const part = (id) => Object.assign({}, orders.find(o => o.id === id).part);
+  const book = (id, c, p, qty, due, routing, note) => ({ id, customer: CUST[c][0], sector: CUST[c][1], part: p, qty, due, priority: 'normal', note: note || '', routing, initial: { ops: {} } });
+  orders.push(
+    book('FA-24129', 'alpen',    PART.GW7810, 10,  at(3, '14:00'), ROUTE.GW7810),
+    book('FA-24130', 'donau',    part('FA-24128'), 4, at(3, '12:00'), rt('FA-24128')),
+    book('FA-24131', 'hydrava',  part('FA-24120'), 30, at(3, '16:00'), rt('FA-24120'), 'Wiederholauftrag'),
+    book('FA-24132', 'hydrava',  PART.PD0416, 30,  at(4, '12:00'), ROUTE.PD0416),
+    book('FA-24133', 'kaernten', part('FA-24121'), 30, at(4, '14:00'), rt('FA-24121'), 'Wiederholauftrag'),
+    book('FA-24134', 'medivia',  PART.DH0425, 500, at(4, '10:00'), ROUTE.DH0425),
+    book('FA-24135', 'hydrava',  PART.KS1009, 8,   at(7, '12:00'), ROUTE.KS1009),
+    book('FA-24136', 'kaernten', part('FA-24126'), 36, at(7, '10:00'), rt('FA-24126'), 'Wiederholauftrag'),
+    book('FA-24137', 'medivia',  PART.FS0630, 300, at(7, '14:00'), ROUTE.FS0630),
+    book('FA-24138', 'donau',    part('FA-24125'), 120, at(8, '12:00'), rt('FA-24125'), 'Wiederholauftrag'),
+    book('FA-24139', 'kaernten', PART.AW4032, 30,  at(8, '14:00'), ROUTE.AW4032),
+    book('FA-24140', 'alpen',    part('FA-24118'), 6, at(9, '12:00'), rt('FA-24118'), 'Wiederholauftrag'),
+    book('FA-24141', 'hydrava',  PART.HK0050, 40,  at(11, '12:00'), ROUTE.HK0050),
+  );
+
+  // ---------------------------------------------------------------- Auftragseingang (Wiederhol-/Variantenaufträge)
+  // Deterministisch über den geseedeten Eingangs-RNG: Menge aus [min, max, Schritt], Termin = jetzt + dueDays
+  // Werktage (Mo–Fr 06–22), weight = relative Häufigkeit. Freigabe belastungsorientiert (Engine: intakeTick).
+  const tpl = (id, c, p, qty, dueDays, weight, routing, note) => ({ id, customer: CUST[c][0], sector: CUST[c][1], part: p, qty, dueDays, weight, routing, note: note || '' });
+  const orderTemplates = [
+    tpl('T-HK0060', 'hydrava',  part('FA-24122'), [40, 80, 10],   [3, 4], 3, rt('FA-24122'), 'Abruf aus Rahmenvertrag'),
+    tpl('T-HK0050', 'hydrava',  PART.HK0050,      [30, 60, 10],   [3, 4], 2, ROUTE.HK0050, 'Abruf aus Rahmenvertrag'),
+    tpl('T-PG0415', 'hydrava',  part('FA-24120'), [20, 40, 10],   [2, 3], 2, rt('FA-24120'), 'Wiederholauftrag'),
+    tpl('T-PD0416', 'hydrava',  PART.PD0416,      [30, 60, 10],   [2, 3], 2, ROUTE.PD0416, 'Wiederholauftrag'),
+    tpl('T-KS1009', 'hydrava',  PART.KS1009,      [4, 10, 2],     [3, 4], 1, ROUTE.KS1009, 'Angebot angenommen'),
+    tpl('T-GB1120', 'medivia',  part('FA-24117'), [200, 400, 50], [2, 3], 2, rt('FA-24117'), 'Abruf aus Rahmenvertrag (Zeugnis 3.1)'),
+    tpl('T-FS0630', 'medivia',  PART.FS0630,      [200, 400, 100],[2, 4], 1, ROUTE.FS0630, 'Angebot angenommen (Zeugnis 3.1)'),
+    tpl('T-DH0412', 'medivia',  part('FA-24123'), [400, 800, 100],[2, 3], 2, rt('FA-24123'), 'Abruf aus Rahmenvertrag'),
+    tpl('T-DH0425', 'medivia',  PART.DH0425,      [300, 600, 100],[2, 3], 2, ROUTE.DH0425, 'Wiederholauftrag'),
+    tpl('T-AW7740', 'alpen',    part('FA-24118'), [3, 9, 3],      [4, 4], 1, rt('FA-24118'), 'Abruf aus Rahmenvertrag'),
+    tpl('T-GW7810', 'alpen',    PART.GW7810,      [5, 10, 5],     [3, 4], 1, ROUTE.GW7810, 'Angebot angenommen'),
+    tpl('T-LD5530', 'alpen',    part('FA-24124'), [30, 60, 10],   [2, 3], 1, rt('FA-24124'), 'Wiederholauftrag'),
+    tpl('T-ZR3802', 'donau',    part('FA-24119'), [40, 80, 20],   [3, 4], 1, rt('FA-24119'), 'interner Bedarf Montage'),
+    tpl('T-RZ1517', 'donau',    part('FA-24125'), [80, 160, 40],  [3, 4], 1, rt('FA-24125'), 'interner Bedarf Montage'),
+    tpl('T-ZM12',   'donau',    part('FA-24128'), [2, 6, 2],      [2, 3], 2, rt('FA-24128'), 'interner Bedarf'),
+    tpl('T-FL2210', 'kaernten', part('FA-24121'), [20, 40, 10],   [3, 4], 2, rt('FA-24121'), 'Wiederholauftrag'),
+    tpl('T-SB0812', 'kaernten', part('FA-24126'), [24, 48, 12],   [3, 4], 2, rt('FA-24126'), 'Wiederholauftrag'),
+    tpl('T-LZ3060', 'kaernten', part('FA-24127'), [24, 48, 12],   [3, 4], 1, rt('FA-24127'), 'Wiederholauftrag'),
+    tpl('T-AW4032', 'kaernten', PART.AW4032,      [20, 40, 10],   [3, 4], 2, ROUTE.AW4032, 'Angebot angenommen'),
+  ];
 
   WF.profile = {
     company: {
@@ -495,6 +629,7 @@
     shifts,
     faults,
     orders,
+    orderTemplates,
     sim: {
       seed: 20241014,
       startT: at(0, '06:00'),
@@ -507,6 +642,13 @@
       forkliftSpeed: 2.0,
       agvLoadSec: 30,
       historyStepSec: 300,
+      // Auftragseingang: Freigabe zu Schichtbeginn (perShift Aufträge, solange der Arbeitsvorrat < backlogMaxDays) und
+      // jederzeit in der Schichtzeit, wenn < openMin offene Aufträge oder Vorrat < backlogMinDays (Abstand ≥ minGapMin);
+      // Maschinen mit > stationMaxDays Vorrat bekommen keine neuen Aufträge (belastungsorientierte Freigabe)
+      intake: { openMin: 9, openMax: 40, backlogMinDays: 1.0, backlogMaxDays: 2.0, stationMaxDays: 2.5, perShift: [1, 2], minGapMin: 20,
+        eilProb: 0.05, notifyMin: 30, maxSameOpen: 2 },
+      archiveAfterH: 72,     // fertige Aufträge (inkl. Behälter, Messwerte) werden nach 72 h aus dem Zustand entfernt
+      shipPickupH: 2,        // Spedition holt Fertigteile ca. 2 h nach Auftragsende ab (Lieferfenster 06–20 Uhr)
     },
   };
 })();

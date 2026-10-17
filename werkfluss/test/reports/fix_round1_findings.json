@@ -294,5 +294,187 @@
    "fix": "Selektor auf '.cn-det-m>span:not(.cn-spin){flex:1;min-width:0}' ändern oder '.cn-det-m>.cn-spin{flex:0 0 14px;width:14px;height:14px}' ergänzen. Andere '.cn-spin'-Stellen in flex-Containern auf dasselbe Muster prüfen.",
    "lens": "prospect"
   }
+ ],
+ "copilot": [
+  {
+   "severity": "high",
+   "file": "werkfluss/src/60_ai.js",
+   "title": "orderAdvice suggests Eilauftrag for an order that is only 'knapp', at the cost of an order already 22 h late, and prints 'netto gewinnt … bis ~0 s'",
+   "evidence": "Current build. 'Wann ist FA-24122 fertig?' and 'Warum ist FA-24122 verspätet und was hilft?' both end with: '> Empfehlung: Termin hält knapp. Falls es enger wird: FA-24122 als Eilauftrag kennzeichnen – M02 zieht ihn dann vor FA-24119 AG 20 … Achtung: FA-24119 (schon 22 h 06 min Verzug) bekäme ~18 h 23 min mehr – netto gewinnt FA-24122 trotzdem bis ~0 s.' Cause in code (orderAdvice, around l.255–264): the 'hurt outweighs help' branch is only taken when late === true. For a 'knapp' order, helpSec = 0, so the Eil text is produced and dur0(0) renders as '~0 s'. Answers are in /tmp/rv-ai/answers.json (Q7, Q8).",
+   "fix": "In orderAdvice, for non-late orders with hurt.length > 0, return {text: `Kein Eilauftrag nötig – Puffer ${dur0(o.slackSec)} reicht; Vorziehen würde ${hurt ids} um ~${dur0(by)} weiter verspäten. ${protect}`, action: null}. Only build the 'netto gewinnt' clause when helpSec >= 600, and never render a duration of 0. Add a unit test: a knapp order whose overtaken order is already late must never get an Eil recommendation or an Eil action.",
+   "lens": "ai"
+  },
+  {
+   "severity": "high",
+   "file": "werkfluss/src/60_ai.js",
+   "title": "Tour and demo-script fault question gets a generic order card: no repair status, no impact on other orders, no 'what to do now'",
+   "evidence": "Tour step 'copilot' (70_tour.js l.171) asks: 'Die WFL M80 hat eine Störung. Was bedeutet das für FA-24118 und meine anderen Termine – und was soll ich jetzt tun?' with context machine M04, after triggerFault('M04','ALM 1021'). The offline answer (intent=order) is the FA-24118 status card. Its Empfehlung talks about the hardening return and M09. It does not say who repairs or for how long (F. Moser, 12–25 min), that AG 20 slips from 14:19 to 14:34, whether the Liefertermin still holds, or which other orders are affected. README demo step 4 ('Was bedeutet das für FA-24118?') behaves the same. The 'Was bedeutet die Störung an M04 für die Termine?' path (machine impact) does give a good answer, but classify() routes to 'order' as soon as an order ID appears. Screenshots: /tmp/rv-ai/28-tour-copilot-question.png, /tmp/rv-ai/23-fault-fa24118.png.",
+   "fix": "In classify(): if q matches /stoerung|ausfall|alarm|defekt|steht/ and a machine is named or in context (or any machine in E/context is in state fault), return {intent:'machine', focus:'impact'} even when orders are named, and pass E.orders so the named order is listed first. In ansOrder: when any op of the order runs on a machine in state 'fault', open with a block like: '**Störung an M04 (ALM 1021) – Reparatur F. Moser, Ende ca. 08:54.** AG 20 fertig ca. 14:34 statt 14:19; Liefertermin bleibt Di 15:35 (Puffer 25 min), weil …'. Close with a 'Jetzt tun' line (e.g. 'Ersatzteil Kühlmittelfilter bereitstellen; dauert die Reparatur > 25 min länger, kippt FA-24118').",
+   "lens": "ai"
+  },
+  {
+   "severity": "medium",
+   "file": "werkfluss/src/60_ai.js",
+   "title": "Wrong cause blamed for FA-24119's 22 h delay (Härterei instead of M09/M13 queues); overview recommendation doesn't name the order",
+   "evidence": "Current build. FA-24119 has 22 h 06 min Verzug and the engine bottleneck is 'M13 Montage'. The plan shows: EXT ends Mi 06:30, M09 only starts Mi 13:32 (busy with FA-24122 AG 40 Di 14:39–Mi 13:32), M13 runs Mi 17:07–Do 07:55, and AG 20 waits at M02 behind FA-24138 (6+ days of buffer) until 12:06. Yet overview, risk list, order answer and notification analysis all say: 'Termin hängt am Rücklauf aus der Fremdbearbeitung (Einsatzhärten) – Expressdurchlauf bei Härterei Wolf … anfragen'. In 'Wie läuft die Schicht?' that sentence stands alone, with no order ID. Cause in code: orderAdvice takes the `if (ext)` branch whenever any EXT op is still open.",
+   "fix": "Before using the ext branch, compute the waits in the op chain: wait_i = op.plannedStart − max(prev.plannedEnd, firstOutT). Name the 1–2 largest waits with their blocking orders, e.g. 'wartet 7 h auf M09 (FA-24122 AG 40) und 3 h auf M13 (FA-24125)'. Use the ext text only if the EXT return is the largest wait. Recommend concrete levers per wait: move the blocking order behind this one if its slack is > 1 day; Überstunden at the waiting station; Teillieferung. In overview and briefing recommendations, always prefix the order ID ('FA-24119: …') and phrase the action first.",
+   "lens": "ai"
+  },
+  {
+   "severity": "medium",
+   "file": "werkfluss/src/60_ai.js",
+   "title": "What-if always recommends 'X als Eilauftrag kennzeichnen' for flipped orders, ignoring the copilot's own Eil reasoning",
+   "evidence": "ansWhatIf l.1452: 'Bei echtem Ausfall: ${ne} als Eilauftrag kennzeichnen (holt an den Folgearbeitsplätzen Zeit auf)'. 'Was passiert, wenn M07 2 h ausfällt?' (first build) → 'FA-24118 und FA-24122 als Eilauftrag kennzeichnen'. Both orders compete for M07, so flagging both cancels out, and orderAdvice for FA-24122 said Eil would only shift the delay. Current build, M04 4 h → 'FA-24118 als Eilauftrag', even though FA-24118 is already first in the M09 queue. Screenshot: /tmp/rv-ai/18-whatif-m07.png.",
+   "fix": "For each flipped or still-late order, call orderAdvice(c, o) on the post-outage situation (or at least use its eil/no-eil verdict). Offer an Eil action only when orderAdvice returns one. Never propose Eil for two or more orders that share a remaining station; recommend overtime at the failed station first, quantified ('ca. 1 h 45 min Überstunden an M07 heute 14:00–15:45 holen den Ausfall auf').",
+   "lens": "ai"
+  },
+  {
+   "severity": "medium",
+   "file": "werkfluss/src/60_ai.js",
+   "title": "Router coverage gaps: about 14 of 68 natural questions get either the same generic 'Lage' block or 'keine passende Auswertung'",
+   "evidence": "Answered with the identical overview block: 'Welche Maschine hat die schlechteste OEE?', 'Welche Aufträge sind heute fällig?', 'Wieviele Teile haben wir heute gefertigt?', 'Wann kommt die Spätschicht?', 'Gib mir eine Zusammenfassung für den Geschäftsführer', 'Wie viel Umsatz machen wir heute?', 'Kann ich heute noch einen Eilauftrag mit 20 Wellen annehmen?', 'Was ist das wichtigste gerade?', 'Wie hoch ist die OEE heute und warum nicht 75 %?' (no V×L×Q breakdown). Fallback: 'Was muss ich jetzt tun?', 'Wie viele Aufträge sind offen?', 'Wann kommt die Härterei zurück?' (ext.returnText exists), 'Was wäre, wenn die Härterei einen Tag später liefert?', 'Danke'. Machine card that does not answer: 'Wie ist der Cpk an M03?' (Cp/Cpk exists in 48_quality), 'Was kostet eine Stunde Stillstand an der DMU?' ('kostet' does not match /kosten/). 'Was kostet der Strom heute?' gives kWh only, no €. Data: /tmp/rv-ai/answers.json, /tmp/rv-ai/answers2.json.",
+   "fix": "Add intents:\n- todo: /was (muss|soll) ich|wichtigst|prioritaet/ → top 3 'Jetzt tun' items from the briefing recommendations, with action cards.\n- ranking: /schlechtest|best|hoechst|niedrigst/ + oee|stillstand → machines sorted by oeeToday or lossEurToday.\n- dueToday: 'heute fällig|heute fertig|ausliefern' → orders with due or eta today.\n- counts: 'wie viele aufträge|offen'.\n- shiftInfo: 'spätschicht|frühschicht|nächste schicht' → start time plus roster of that shift.\n- ext: 'härterei|fremdbearbeitung|eloxal' → open EXT lots with returnText; a delay-of-X-days what-if.\n- capability: 'cpk|prozessfähig' → reuse the 48_quality computation (export WF.quality.capability(machineId)).\n- capacityCheck: 'annehmen|zusätzlich|neuer auftrag' → point to KI-Auftrag with free capacity per station.\nAlso: match /kost(et|en)/; add €/kWh to the profile and show energy cost; for OEE 'warum' show V×L×Q with the largest loss; small talk 'danke' → 'Gern.'",
+   "lens": "ai"
+  },
+  {
+   "severity": "medium",
+   "file": "werkfluss/src/60_ai.js",
+   "title": "Follow-ups and wording variants fail; 'Wer ist in der Spätschicht?' answers with the Frühschicht crew",
+   "evidence": "'Und wann ist der fertig?' (last entity M05, fromLast) → fallback, because the deictic regex has 'er|ihn|ihm' but not 'der|die|das'. 'Wer ist in der Spätschicht?' → '10 Personen im Dienst (Frühschicht) …' and lists the current crew: a wrong answer. 'Stell FA-24118 wieder auf normal' → order status, no priority action (the regex needs 'normale? prior'). 'm5 status' → overview (lowercase single-digit IDs are excluded). 'Wie läuft die Petrovic?' → overview (ć not folded). Output: /tmp/rv-ai/answers2.json.",
+   "fix": "Deictic: also accept a leading 'und|und wann|und wo|und wie' or a bare pronoun 'der|die|das|den' when no entity is named and conv.lastEntity exists. People: if q mentions spät-/früh-/nächste schicht, answer with WF.profile.people of that shift (names, roles, start time). Priority: add /(auf|wieder) normal|eil (weg|entfernen|zurück)/ → act 'priority' with 'normal'. norm(): NFD-fold diacritics (ć→c, š→s). Allow 'm5'/'m 5' when followed by status words.",
+   "lens": "ai"
+  },
+  {
+   "severity": "medium",
+   "file": "werkfluss/src/60_ai.js",
+   "title": "'Warum …?' order questions get the same status template as 'Wann …?' – no causal explanation",
+   "evidence": "'Wann ist FA-24122 fertig?' and 'Warum ist FA-24122 verspätet und was hilft?' give identical answers apart from one 'Behälter' line: header, the full op list, 'Engpass laut Prognose', then Empfehlung. Neither says why the order is late (e.g. M07 busy with FA-24118 until Di 06:00, then 17 h 50 min of deep-hole drilling). Screenshot: /tmp/rv-ai/14-order.png.",
+   "fix": "In classify, set focus 'why' for /warum|wieso|weshalb|grund|ursache/ with an order. ansOrder(focus 'why') should start with a 2–3 line cause chain built from plan waits and occupancies, using the same computation as the cause-attribution fix: 'Verzug entsteht an M07: belegt bis Di 06:00 durch FA-24118 AG 30, dann 17 h 50 min Bearbeitung → AG 30 fertig Mi 10:52'. Then give the recommendation, and show the op list only as the route chart (slot), not as text again.",
+   "lens": "ai"
+  },
+  {
+   "severity": "medium",
+   "file": "werkfluss/src/60_ai.js",
+   "title": "'Nächster Werkzeugwechsel an M06?' gives no time and doesn't name the tool; the 'Werkzeug:' bullets omit the tool name too",
+   "evidence": "'Wann ist der nächste Werkzeugwechsel an M06?' → 'An M06 Haas VF-4 ist im laufenden Arbeitsgang kein Werkzeugwechsel angekündigt.' Below it, in grey: '~ Regel: Wechsel wird in ca. 7 Teilen geplant …'. Planfräser Ø80 has 10 parts left and 25 are still needed, and the cycle is 10 min, so a change is certain around 10:00. The answer gives neither time nor tool. Same pattern in 'Status INDEX': '**Werkzeug:** Wechsel wird in ca. 9 Teilen geplant …' without saying which of the 3 tools. Screenshot: /tmp/rv-ai/15-tools-m06.png.",
+   "fix": "When no change is announced but some tool has remainingParts < neededParts, compute expected = addWork(now, (remainingParts − changeAtParts) × cycleMin × 60). Lead with: '**Voraussichtlich ca. 10:00: Planfräser Ø80** (nach Teil ~33; wird ab ca. 92 % Verschleiß mit Uhrzeit und Einrichter angekündigt). Danach VHM-Schaftfräser Ø16 ca. 12:20.' Always prefix the explain text with the tool name.",
+   "lens": "ai"
+  },
+  {
+   "severity": "medium",
+   "file": "werkfluss/src/60_ai.js",
+   "title": "KI-Schichtbriefing card (Leitstand) only describes; no 'what to do', number soup, meaningless FPY at night",
+   "evidence": "The briefing() bullets list Termin, Engpass, Material, Qualität and Werkzeugwechsel but contain no recommendation or action. Even the 22 h late FA-24119 bullet ends without a next step. Recommendations exist only after clicking 'Im Copilot vertiefen'. The material bullet reads as a number jumble: 'AlMgSi1 Zuschnitt 160×120×80 14 Stk unter Mindestbestand 20 Stk – …'. At Di 00:28: 'Qualität: keine Störung, FPY 100,0 % bei 0 Ausschuss' with zero parts made. The M05 change at 09:21 has no setter assigned, but the bullet doesn't flag it. The 'REGELBASIERT' badge on the 'KI' card undercuts the pitch. The handover has no 'Für die Spätschicht zu tun' section either. Screenshots: /tmp/rv-ai/21-leitstand-brief-ctx.png, /tmp/rv-ai/52-mobile-brief.png.",
+   "fix": "Add a last bullet group 'Jetzt tun' to briefing(): the top 2 actionable recommendations from orderAdvice and the briefing deep-dive, each with an entity and optional action (e.g. 'Einrichter für M05 09:21 zuteilen', 'FA-24119: Teillieferung mit Donau Verpackungstechnik klären'). Render them in 40_leitstand with inline buttons. Format material as 'AlMgSi1 160×120×80: 14 Stk (Min. 20) – 80 Stk bestellt, Lieferung 11:10'. Suppress FPY when the day has 0 parts ('heute noch keine Teile'). Flag unassigned tool changes. Rename the badge to 'aus Live-Daten'. Add a 'Offen für die nächste Schicht' list to ansHandover.",
+   "lens": "ai"
+  },
+  {
+   "severity": "medium",
+   "file": "werkfluss/src/60_ai.js",
+   "title": "Order answers show 'geplant 06:47–…' for waiting ops right after saying the machine is busy until 12:06",
+   "evidence": "Current build, FA-24119: 'AG 20 Drehen Rohling · M02 INDEX G220: wartet (60 Stk im Eingang) – M02 ist vorher mit FA-24138 AG 10 (läuft) belegt (bis ca. 12:06); geplant 06:47–20:35'. FA-24117: 'AG 20 Reinigen · M11: wartet … geplant 05:00–18:04' (05:00 is even before the shift). Also 'AG 40 Versand · Versand: … geplant 18:32–18:32'. op.plannedStart for a not-yet-started op is a past timestamp, but it is printed as the planned start.",
+   "fix": "For ops with good === 0 and state !== 'active', take the start from WF.sim.forecast().machines[station] (the entry for orderId/seq) or use max(now, op.plannedStart), and phrase it 'Start ca. 12:06 · fertig ca. 20:35'. Collapse VERSAND to 'Versand nach Abschluss ca. …' (no duplicated name, no zero-length range).",
+   "lens": "ai"
+  },
+  {
+   "severity": "medium",
+   "file": "werkfluss/src/60_ai.js",
+   "title": "Engpass answer: 'Danach am stärksten belastet' disagrees with the chart and tiles shown right below",
+   "evidence": "Current build: text says 'Danach am stärksten belastet: M09 35 h 39 min; M13 Montage 23 h 17 min; QS 25 h 04 min'. The chart below lists M09, M06 27 h 59, M04 25 h 07, QS 25 h 04, M13 23 h 17. So the text skips M06 and M04 and is not sorted. Stat tiles show M07/M09/M08 on the first build, skipping M06. Cause: `others = ranked.slice(1,4)` uses the risk-weighted score, while the chart uses raw `loads`. Screenshot: /tmp/rv-ai/13-engpass.png.",
+   "fix": "Use the same list for text, tiles and chart: sort loads by work and take the top 1–4. If the risk weighting should stay, label it explicitly ('Terminkritisch danach: …') and add a 'kritisch für FA-…' tag in the chart rows.",
+   "lens": "ai"
+  },
+  {
+   "severity": "low",
+   "file": "werkfluss/src/60_ai.js",
+   "title": "Claude error handling: small deviations from the sample() contract",
+   "evidence": "Verified against a mocked window.claude. The main contract is met: no calls on load or from timers; turns start and end with user; cache:false without tools and omitted with tools; 16 valid tool schemas; no retry loops. Deviations:\n- 'refused' and 'empty_completion' show an 'Erneut senden' button (/tmp/rv-ai/43-live-err-refused.png), but the contract says resending unchanged gives the same outcome.\n- 'invalid_request' (e.g. a tool inputSchema refused by the API) is in PERMANENT, so the whole Copilot goes offline for the session.\n- 'tools_unavailable' answers from the offline rules instead of making one plain live call.\n- TOOLS.slice(0, maxTools) silently drops the action tools if maxCount < 16, while the instructions still promise actions.",
+   "fix": "For refused and empty_completion show only 'Offline-Antwort anzeigen' plus 'Frage umformulieren'. Move invalid_request out of PERMANENT: set live.tools=false and let the user resend. On tools_unavailable, set live.tools=false and immediately call askLive once without tools (one user-initiated call, not a loop). Order TOOLS by priority (get_overview, get_order, get_machine, get_forecast, set_priority, reorder_material, …) and build the 'Aktionen' line of instructions() only from the tools actually passed.",
+   "lens": "ai"
+  },
+  {
+   "severity": "low",
+   "file": "werkfluss/src/60_ai.js",
+   "title": "'Werkzeuge' used for Claude's function tools in an MES where Werkzeug means cutting tool",
+   "evidence": "Notice: 'Werkzeuge sind in dieser Ansicht nicht verfügbar – Antwort vom Offline-Copilot' (/tmp/rv-ai/43-live-err-not_granted.png area). Source line 'Datenbasis: Claude (schnell) · Lageübersicht 08:47 · Werkzeug-Abfragen'. Status reason '… liest Details über Werkzeuge …'. Instructions: '- Für Details die Werkzeuge nutzen'. A production manager reads these as cutting-tool data.",
+   "fix": "Use 'Datenabfragen' or 'Live-Abfragen' in all user-visible strings: ERR notice, sourcesHTML, live.reason, and the tool-chip prefix 'Gelesen:'. Keep 'Werkzeug' only for cutting tools.",
+   "lens": "ai"
+  },
+  {
+   "severity": "low",
+   "file": "werkfluss/src/60_ai.js",
+   "title": "Durations and quantities break across lines in the Copilot panel ('2 / h 05 min Verzug')",
+   "evidence": "Screenshot /tmp/rv-ai/24-brief-vertiefen.png: 'Hydraulikkolben Ø60×220 (Hydrava Pumpen): 2' at a line end, then 'h 05 min Verzug' on the next line. The same happens with 'Puffer 25 / min' and 'noch ca. 13 / min' at panel width 440 px.",
+   "fix": "In md() (or U.fmtDur/fmtNum consumers), replace the space between number and unit and inside durations with U+00A0, e.g. text.replace(/(\\d) (h|min|s|Stk|m|kW|kWh|€|%)/g, '$1 $2') and '2 h 05 min'.",
+   "lens": "ai"
+  },
+  {
+   "severity": "low",
+   "file": "werkfluss/src/60_ai.js",
+   "title": "Small number and label inconsistencies vs. tiles and other views",
+   "evidence": "- Engpass answer: 'Jetzt: Produktion – FA-24118 AG 30, Teil 1/12', while the M07 tile and cause say 'Teil 2/12 in Bearbeitung' (it prints partsDone/partsTotal as 'Teil').\n- Studer stats tile 'OEE heute 75 %' is coloured warn because the real value is 74,6 %.\n- 'Reicht das AlMgSi1?': '10 € je Stk' and then 'Nachbestellen (40 Stk, ca. 392 €)' (the price is 9,80 €).",
+   "fix": "Write '1/12 fertig, Teil 2 läuft'. Show stat OEE with 1 decimal when within ±0,5 of the target, or colour by the rounded value. Format unit prices with 2 decimals (U.fmtEur(x, 2)).",
+   "lens": "ai"
+  },
+  {
+   "severity": "medium",
+   "file": "src/60_ai.js",
+   "title": "Copilot and detail drawer overlap at 768/1024 px with a 40px drawer sliver peeking out",
+   "evidence": "With a drawer open (480px, inside .main) and the Copilot open (fixed, 440px, right:0), the Copilot sits on top of the drawer but 40px of it stays visible on the left ('Tie…', 'IND…', 'M02'). At 1024×768: /tmp/rv-mobile/ai-land-3-with-drawer.png; at 768×1024 in the tour: /tmp/rv-mobile/mt-tab-b.png. The 'beside' mode only helps on wide screens. On touch tablets the composer also shows keyboard-only hints ('Enter senden · Shift+Enter Zeile').",
+   "fix": "Below about 1400px, when the drawer is open, either give the panel the drawer's width (`.ai-panel{width:min(480px,100%)}` when body has a drawer open) so they align exactly, or add `visibility:hidden` to #drawer while the Copilot is open and restore it on close. Hide the keyboard hint with `@media (hover:none){.ai-kbd{display:none}}`.",
+   "lens": "mobile"
+  },
+  {
+   "severity": "high",
+   "file": "src/60_ai.js",
+   "title": "Toasts jump onto the sidebar and the tour card when the Copilot is open beside a drawer (happens in tour step 7/8)",
+   "evidence": "/tmp/rv-art-desktop/tour-7.png: the toast 'Störung M02 INDEX G220: Kühlmitteldruck zu niedrig' sits at x≈125–505, on top of the navigation and the Demo-Tour card. Measured on the current build: #toasts right edge = 504px at 1440 wide. Cause: line 2417 `body.ai-open.ai-beside #toasts{right:calc(920px + 16px)}`. Toasts are z-index 70 and the tour card is 65, so the toast also covers the tour card.",
+   "fix": "Remove the right:936px rule. When the AI panel is open beside a drawer, show toasts top-centre below the header (top:calc(var(--top-h) + 12px); left:50%; transform:translateX(-50%)), or keep them right:16px with bottom offset above the drawer. While WF.tour.active, suppress non-critical toasts, or merge them into the tour card as a one-line 'Live:' notice, and give .tour-card z-index above #toasts.",
+   "lens": "art-desktop"
+  },
+  {
+   "severity": "medium",
+   "file": "src/60_ai.js",
+   "title": "Copilot opening beside a drawer squeezes the content to about 300 px at 1440",
+   "evidence": "/tmp/rv-art-desktop/copilot-1.png, /tmp/rv-art-desktop/copilot-2.png. With the INDEX G220 drawer open, the Copilot takes the middle 440 px; the Leitstand shows one clipped tile column and KPI cards cut mid-word ('F…', 'A…').",
+   "fix": "Below a 1600 px viewport, have the Copilot overlay the main area (position:absolute; right:480px; with shadow) instead of reflowing it. Or collapse the drawer to a 56 px rail (title vertical + expand button) while the Copilot is open. Keep the 'beside' layout only at ≥1680 px.",
+   "lens": "art-desktop"
+  },
+  {
+   "severity": "low",
+   "file": "src/60_ai.js",
+   "title": "Copilot: keine Antwort auf 'Warum sind so viele Maschinen frei?'; Übergabe listet Frühschicht-Wechsel als Spätschicht",
+   "evidence": "Mo 13:50 offline: 'Warum sind so viele Maschinen frei?' → 'Dazu habe ich im Offline-Modus keine passende Auswertung' – genau die Frage eines Interessenten, wenn 7 Maschinen stehen. 'Schreib mir die Schichtübergabe' um 13:50 führt unter 'Werkzeugwechsel Spätschicht (14:00–22:00)' Wechsel von 13:51 und 13:53 auf.",
+   "fix": "Intent für 'frei|leer|steht|stillstand|nichts zu tun|auslastung' ergänzen: freie Maschinen mit Grund ('kein Auftrag eingeplant seit …', nächste eingeplante Teile) plus Auftragsvorrat in Stunden. In der Übergabe Wechsel nach t ≥ Schichtbeginn filtern; frühere als 'noch in dieser Schicht' ausweisen.",
+   "lens": "prospect"
+  }
+ ],
+ "ki-later": [
+  {
+   "severity": "low",
+   "file": "werkfluss/src/61_ki_auftrag.js",
+   "title": "Example drawings are convincing but have a few details an engineer would spot",
+   "evidence": "Renders: /tmp/rv-ai/31-drawing-0.png, -1.png, -2.png.\n- Flanschwelle: MASSE '2,3 kg', but the geometry (Ø60×16, Ø45×25, Ø42×120, Ø40×24, Ø35×55) is ≈ 334 cm³, about 2,6 kg; the quote uses 2.3. Only one DIN 332 centre hole, although the analysis note says 'Schleifen zwischen Spitzen'. A Ø60 collar without holes is called 'Flanschwelle'.\n- Flanschwelle and Halteplatte: '(√Ra 0,8)' is listed in the general surface symbol but Ra 0,8 is not used on the drawing.\n- Halteplatte section B–B: the blocks float, without the visible plate edges behind the holes.",
+   "fix": "Set MASSE to 2,6 kg (and weightKg). Add the centre hole on the flange end, or change the note. Rename to 'Abtriebswelle' (or add a bolt circle). Remove unused Ra values from the parentheses, or put Ra 0,8 on Ø35 h6 and the Ø30 H7 bore. In B–B, draw the top and bottom contour lines across the hole gaps (thin visible edges).",
+   "lens": "ai"
+  },
+  {
+   "severity": "low",
+   "file": "werkfluss/src/61_ki_auftrag.js",
+   "title": "Offline: own-drawing upload explains only after the fact; intro badges claim 'CLAUDE' while offline",
+   "evidence": "Offline, the drop zone says 'PNG, JPG, WebP oder PDF · auch ein Handyfoto der Zeichnung' (/tmp/rv-ai/37-ka-upload-empty.png). After uploading, the primary 'Analysieren' button stays active. Only clicking it shows 'Eigene Zeichnungen liest Claude …' (/tmp/rv-ai/39-ka-upload-go.png). The intro step list shows 'CLAUDE' badges on Zeichnung lesen, Merkmale and Arbeitsplan while the header pill says 'Ohne Claude · vorberechnete Beispiele'.",
+   "fix": "When ai.state === 'off', add a line in the drop zone ('Eigene Zeichnungen liest Claude – lokal bitte ein Beispiel wählen'), render 'Analysieren' as secondary/disabled for uploads with that tooltip, and switch the intro badges to 'VORBERECHNET' offline. Optional: if the uploaded file matches an example (same name or size as an export), offer to load that example.",
+   "lens": "ai"
+  }
+ ],
+ "engine-ai": [
+  {
+   "severity": "high",
+   "file": "werkfluss/src/10_sim.js",
+   "title": "'Termin gefährdet' notification recommends Eilauftrag, and the Copilot's analysis of the same notification contradicts it",
+   "evidence": "NT-0003 ('Termin gefährdet', shown in Leitstand 'Jetzt wichtig' with an 'Als Eilauftrag' button) suggests: 'Als Eilauftrag kennzeichnen – die Maschinen ziehen ihn beim nächsten Auftragswechsel vor. Alternativ Arbeitsgang auf eine freie Maschine verlagern.' This text is generic: for FA-24122 there is no alternative machine (M07 is the only deep-hole drill). Clicking 'Ursache analysieren' gives a Copilot answer whose Empfehlung contradicts the card. On the first build it said 'Ein Eilauftrag würde den Verzug nur verschieben … FA-24119 würde ~12 h 14 min spät'. On the current build it says 'Termin hängt am Rücklauf aus der Fremdbearbeitung – Expressdurchlauf … anfragen'. Screenshots: /tmp/rv-ai/00-leitstand.png (card with button), /tmp/rv-ai/22-fault-notif-analysis.png.",
+   "fix": "Use one advice source. When the engine emits 'Termin gefährdet', take the suggestion and actions from WF.ai's orderAdvice (export it as WF.ai.orderAdvice(orderId) → {text, action}) if WF.ai is present. Show the 'Als Eilauftrag' button only when orderAdvice returns the eil action. Fall back to a neutral text ('Ursache und Optionen im Copilot prüfen') rather than a generic Eil suggestion. Never offer 'auf freie Maschine verlagern' when altMachines() is empty.",
+   "lens": "ai"
+  }
  ]
 }

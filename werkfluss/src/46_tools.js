@@ -28,6 +28,7 @@
   // Grundbestand der Werkzeugausgabe je Werkzeugart – Spiegel der Engine-Konstante STOCK_DEFAULT (10_sim.js, nicht exportiert)
   const STOCK_BASE = { insert: 8, drill: 4, mill: 4, hob: 2, wheel: 2, saw: 3 };
   const PIPE = ['Angefordert', 'Werkzeugausgabe', 'Unterwegs', 'An der Maschine', 'Wechsel'];
+  const PIPE_IDX = ['Angefordert', 'Unterwegs', 'An der Maschine', 'Wenden'];
 
   // ------------------------------------------------------------------ kleine Helfer
   const S = () => WF.sim && WF.sim.state;
@@ -45,6 +46,17 @@
     'TT-GBM10': 'GB M10', 'TT-VHM16': 'VHM Ø16', 'TT-PF80': 'PF Ø80', 'TT-DR10': 'Bo Ø10', 'TT-BTA40': 'BTA Ø40', 'TT-ELB20': 'ELB Ø20',
     'TT-WF2': 'WF m2', 'TT-WF15': 'WF m1,5', 'TT-SSR': 'Scheibe', 'TT-SSF': 'Scheibe' };
   const codeOf = (typeId, name) => CODE[typeId] || ((String(name || '').match(/\b([A-Z]{4})\s?\d/) || [])[1]) || String(name || typeId).split(/[\s-]+/)[0].slice(0, 9);
+  /** Teilegrenze lesbar: „nach Teil 7“, an der Grenze 0 (vor dem ersten Teil des Arbeitsgangs) „vor Teil 1“ */
+  const afterTxt = (n) => (n > 0 ? 'nach Teil ' + n : 'vor Teil 1');
+  /** Wendeschneidplatten mit mehreren Schneiden: wird an der Maschine gewendet („Schneide 2/4“), erst die letzte Schneide
+      geht in die Werkzeugausgabe. Nur wenn die Engine das liefert (Feldnamen tolerant erkannt), sonst null. */
+  function edgeOf(t) {
+    if (!t) return null;
+    const e = t.edge, of = t.edges != null ? t.edges : t.edgeCount != null ? t.edgeCount : e && typeof e === 'object' ? (e.of != null ? e.of : e.total) : null;
+    const no = typeof e === 'number' ? e : e && typeof e === 'object' ? (e.no != null ? e.no : e.n) : t.edgeNo != null ? t.edgeNo : null;
+    if (!(of > 1) || !(no >= 1)) return null;
+    return { no, of, last: no >= of };
+  }
   const pct = (v, d = 0) => (v == null ? '–' : U.fmtNum(v, d) + ' %');
   const minTxt = (m) => (m == null ? '–' : m < 10 ? U.fmtNum(m, 1) + ' min' : U.fmtDur(m * 60));
   const ago = (sec) => (sec < 90 ? 'gerade eben' : 'vor ' + U.fmtDur(Math.round(sec / 60) * 60));
@@ -128,6 +140,10 @@
 
   // ------------------------------------------------------------------ Werkzeug-Regeln (aus Engine-Konstanten abgeleitet)
   function changeLimit(life, cut) { const f = CFG().changeFrac != null ? CFG().changeFrac : 0.1; return cut > 0 ? Math.max(0, Math.min(PLAN_AT(), Math.floor(f * life / cut + 1e-9))) : 0; }
+  /** Dauer eines Wechsels: Wenden einer Wendeplatte an der Maschine (Engine CFG.indexMin) oder Tausch je Werkzeugart */
+  function changeSecOf(kind, index) { if (index) { const im = CFG().indexMin || [1, 2]; return (im[0] + im[1]) / 2 * 60; } return changeSecKind(kind); }
+  /** Wird der nächste Wechsel dieses Werkzeugs ein Wenden (Engine: nextAction / plannedChange.action)? */
+  const willIndex = (t) => !!t && ((t.plannedChange && t.plannedChange.action) ? t.plannedChange.action === 'index' : t.nextAction ? t.nextAction === 'index' : false);
   function changeSecKind(kind) {
     const tp = policy(), byKind = CFG().changeMinByKind || {};
     const cm = kind === 'insert' && tp.changeMin ? tp.changeMin : (byKind[kind] || [4, 7]);
@@ -238,14 +254,14 @@
     const plan2Tools = plan2.reduce((n, x) => n + x.g.tools.length, 0);
 
     // Kosten heute (ausgebaute Werkzeuge mit Zeitstempel heute)
-    const cost = { total: Math.round(s.toolCostToday || 0), scrap: 0, regrind: 0, setup: 0, change: 0, byType: {}, byCat: {}, byMachine: {} };
+    const cost = { total: Math.round(s.toolCostToday || 0), scrap: 0, regrind: 0, indexed: 0, setup: 0, change: 0, byType: {}, byCat: {}, byMachine: {} };
     const catMap = {};
     for (const e of evToday) for (const x of (e.data && e.data.tools) || []) if (x.oldToolId) catMap[x.oldToolId] = catOf(x).key;
     for (const id in s.tools) {
       const tl = s.tools[id];
       if (tl.state === 'mounted' || tl.dismountT == null || tl.dismountT < ds) continue;
       const c = tl.cost || 0;
-      if (tl.state === 'regrind') cost.regrind += c; else if (tl.state === 'scrap') cost.scrap += c;
+      if (tl.state === 'regrind') cost.regrind += c; else if (tl.state === 'scrap') cost.scrap += c; else if (tl.state === 'indexed') cost.indexed += c;
       if (tl.reason === 'Rüsten') cost.setup += c; else cost.change += c;
       const ck = tl.reason === 'Rüsten' ? 'setup' : catMap[tl.id] || (tl.reason === 'Werkzeugbruch' ? 'break' : 'rule');
       const bc = cost.byCat[ck] || (cost.byCat[ck] = { n: 0, eur: 0 });
@@ -258,8 +274,9 @@
     // Bedarf je Werkzeugtyp in den nächsten 4 h (geplant + voraussichtlich)
     const h4 = now + 4 * 3600, demand = {};
     for (const mx of machines) {
-      for (const g of mx.groups) if (g.t != null && g.t <= h4) for (const tx of g.tools) demand[tx.typeId] = (demand[tx.typeId] || 0) + 1;
-      for (const p of mx.proj) if (p.t != null && p.t <= h4) for (const mb of p.members) demand[mb.s.tx.typeId] = (demand[mb.s.tx.typeId] || 0) + 1;
+      // Wenden an der Maschine braucht nichts aus der Werkzeugausgabe – nur Tausch (letzte Schneide, andere Werkzeuge) zählt
+      for (const g of mx.groups) if (g.t != null && g.t <= h4) for (const tx of g.tools) if (!willIndex(tx)) demand[tx.typeId] = (demand[tx.typeId] || 0) + 1;
+      for (const p of mx.proj) if (p.t != null && p.t <= h4) for (const mb of p.members) if (!mb.index) demand[mb.s.tx.typeId] = (demand[mb.s.tx.typeId] || 0) + 1;
     }
 
     // Aufträge an die Werkzeugausgabe (Werkzeugwechsel-Aufgaben)
@@ -271,13 +288,15 @@
     }
     queue.sort((a, b) => b.stage - a.stage || (a.etaT || 1e12) - (b.etaT || 1e12));
     let issuedToday = 0;
-    for (const id in s.tools) if (s.tools[id].mountedT >= ds && s.tools[id].mountedT > (s.startT || 0) + 1) issuedToday++;
+    // Ausgabe = neue Werkzeuge/Platten aus der Werkzeugausgabe; gewendete Platten (Schneide > 1) bleiben an der Maschine
+    for (const id in s.tools) { const tl = s.tools[id]; if (tl.mountedT >= ds && tl.mountedT > (s.startT || 0) + 1 && !((tl.edge || 1) > 1)) issuedToday++; }
     const presetter = queue.find(q => q.preset) || null;
     let regrindAll = 0, usedAll = 0, readyAll = 0;
     for (const id in s.toolStock) { regrindAll += s.toolStock[id].regrind || 0; usedAll += s.toolStock[id].usedStock || 0; readyAll += s.toolStock[id].ready || 0; }
 
     return { t: now, ds, machines, tools, inUse, evToday, ev24, waitAhead, crib: { issuedToday, presetter, regrindAll, usedAll, readyAll }, waitSec, waitMachines, tcSec, stops, avgDur: durs.length ? durs.reduce((a, b) => a + b, 0) / durs.length : null,
-      plan2, plan2Tools, proj2, cost, demand, queue, changesToday: s.today ? s.today.toolChanges : 0, goodToday: s.today ? s.today.good : 0 };
+      plan2, plan2Tools, proj2, cost, demand, queue, changesToday: s.today ? s.today.toolChanges : 0, goodToday: s.today ? s.today.good : 0,
+      idxToday: s.today && s.today.edgeIndexes != null ? s.today.edgeIndexes : evToday.reduce((n, e) => n + ((e.data && e.data.tools) || []).filter(x => x.action === 'index').length, 0) };
   }
 
   /** Liegt t in der Arbeitszeit (Schicht ohne Pausen)? Nur dann ist eine Einrichter:in für den Wechsel da. */
@@ -308,7 +327,8 @@
   }
   /** Wechselzeit einer Gruppe wie in der Engine: längste Einzeldauer + 35 % der übrigen */
   function groupChangeSec(kinds) {
-    const d = kinds.map(changeSecKind).sort((x, y) => y - x);
+    // kinds: Werkzeugart oder { kind, index } (Wenden ist deutlich kürzer)
+    const d = kinds.map(k => (typeof k === 'object' ? changeSecOf(k.kind, k.index) : changeSecKind(k))).sort((x, y) => y - x);
     return d.length ? d[0] + 0.35 * d.slice(1).reduce((n, x) => n + x, 0) : 0;
   }
   /** Voraussichtliche Wechsel einer Maschine (wo die Engine noch nichts geplant hat), als Ereignisfolge über die
@@ -330,12 +350,17 @@
     const st = mx.tools.filter(tx => tx.cutMinPerPart > 0 && tx.life && !['idle', 'missing', 'keep', 'replace', 'setup'].includes(tx.status)).map(tx => ({
       tx, cut: tx.cutMinPerPart, life: tx.life, perLife: Math.floor(tx.life / tx.cutMinPerPart + 1e-9), atNew: changeLimit(tx.life, tx.cutMinPerPart),
       endK: tx.broken || tx.status === 'due' ? 0 : tx.remainingPartsAfterPart, at: tx.changeAtParts != null ? tx.changeAtParts : changeLimit(tx.life, tx.cutMinPerPart),
-      gen: 0, skip: !!(tx.broken || tx.status === 'due'), cost: (TT(tx.typeId) || {}).cost || 0, stopEur: (mv.rate || 0) * changeSecKind(tx.kind) / 3600, fixedK: null }));
+      gen: 0, skip: !!(tx.broken || tx.status === 'due'), cost: (TT(tx.typeId) || {}).cost || 0, fixedK: null,
+      // Wendeplatte: Schneide e von E – solange eine freie Schneide da ist, wird an der Maschine gewendet
+      ins: tx.kind === 'insert' && (tx.edges || 1) > 1, edge: tx.edge || 1, edges: tx.edges || 1, broken: !!tx.broken }));
+    const canIdx = (o) => o.ins && !o.broken && o.edges > o.edge;
+    const stopEurOf = (o) => (mv.rate || 0) * changeSecOf(o.tx.kind, canIdx(o)) / 3600;
+    const nextEdge = (o, index) => { if (index) o.edge++; else o.edge = 1; o.broken = false; };
     if (!st.length) return out;
     // feste Ereignisse: laufender Wechsel, Plan der Engine
     const fixed = [];
-    if (mx.changing) fixed.push({ k: 0, t: mx.changing.t0, resume: Math.max(now, mx.changing.t1), types: mx.changing.list.map(x => x.type) });
-    for (const g of mx.groups) if (g.t != null) fixed.push({ k: g.afterPart - mx.processed, t: g.t, resume: g.t + groupChangeSec(g.tools.map(x => x.kind)), types: g.tools.map(x => x.typeId) });
+    if (mx.changing) fixed.push({ k: 0, t: mx.changing.t0, resume: Math.max(now, mx.changing.t1), types: mx.changing.list.map(x => x.type), idx: mx.changing.list.filter(x => x.action === 'index').map(x => x.type) });
+    for (const g of mx.groups) if (g.t != null) fixed.push({ k: g.afterPart - mx.processed, t: g.t, resume: g.t + groupChangeSec(g.tools.map(x => ({ kind: x.kind, index: willIndex(x) }))), types: g.tools.map(x => x.typeId), idx: g.tools.filter(willIndex).map(x => x.typeId) });
     fixed.sort((x, y) => x.k - y.k || x.t - y.t);
     const refix = () => { for (const o of st) { const f = fixed.find(ff => ff.types.includes(o.tx.typeId)); o.fixedK = f ? f.k : null; } };
     refix();
@@ -352,7 +377,7 @@
       const nf = fixed[0];
       if (nf && (!cand || nf.k <= cand.kT)) {
         fixed.shift();
-        for (const o of st) if (nf.types.includes(o.tx.typeId)) { o.endK = nf.k + o.perLife; o.at = o.atNew; o.gen++; }
+        for (const o of st) if (nf.types.includes(o.tx.typeId)) { o.endK = nf.k + o.perLife; o.at = o.atNew; o.gen++; nextEdge(o, (nf.idx || []).includes(o.tx.typeId)); }
         refix();
         kB = nf.k; tB = nf.resume;
         if (tB > horizon) break;
@@ -371,22 +396,23 @@
         if (o === lead || o.fixedK != null || o.skip || o.endK >= left) continue;
         const remAt = Math.max(0, o.endK - k);
         if (remAt <= o.at) { members.push({ s: o, bundled: false, gen: o.gen }); continue; }   // eigenes Wechselfenster offen
-        const waste = o.cost * Math.min(1, remAt * o.cut / o.life);
-        if ((remAt - o.at) * cyc <= bundleSec && remAt * o.cut <= bundleFrac * o.life && waste <= o.stopEur) members.push({ s: o, bundled: true, gen: o.gen });
+        const waste = o.cost / (o.ins ? o.edges : 1) * Math.min(1, remAt * o.cut / o.life);   // Wendeplatte: nur der Rest dieser Schneide
+        if ((remAt - o.at) * cyc <= bundleSec && remAt * o.cut <= bundleFrac * o.life && waste <= stopEurOf(o)) members.push({ s: o, bundled: true, gen: o.gen });
       }
+      for (const mb of members) { mb.index = canIdx(mb.s); mb.edge = mb.s.edge; mb.edges = mb.s.edges; }
       const ev = { kind: lead.gen ? 'next' : 'proj', k, afterPart: mx.processed + k, t: r.t, waitFromT: r.waitFrom, staffT: r.staffT || null, members, lead: lead.tx,
-        inParts: Math.max(1, lead.tx.remainingPartsAfterPart - H), key: mx.id + ':p:' + lead.tx.typeId + ':' + (mx.processed + k) };
+        index: members.every(mb => mb.index), inParts: Math.max(1, lead.tx.remainingPartsAfterPart - H), key: mx.id + ':p:' + lead.tx.typeId + ':' + (mx.processed + k) };
       if ((r.waitFrom != null ? r.waitFrom : r.t) > horizon) break;
       out.push(ev);
-      for (const mb of members) { mb.s.endK = k + mb.s.perLife; mb.s.at = mb.s.atNew; mb.s.gen++; }
-      kB = k; tB = r.t + groupChangeSec(members.map(mb => mb.s.tx.kind));
+      for (const mb of members) { mb.s.endK = k + mb.s.perLife; mb.s.at = mb.s.atNew; mb.s.gen++; nextEdge(mb.s, mb.index); }
+      kB = k; tB = r.t + groupChangeSec(members.map(mb => ({ kind: mb.s.tx.kind, index: mb.index })));
       if (tB > horizon) break;
     }
     // je Werkzeug: die Ereignisse, an denen es beteiligt ist
     for (const ev of out) for (const mb of ev.members) {
       const leadCode = codeOf(ev.lead.typeId, ev.lead.name);
       mb.s.tx.proj.push({ kind: mb.gen > 0 ? 'next' : 'proj', k: ev.k, afterPart: ev.afterPart, t: ev.t, waitFromT: ev.waitFromT, staffT: ev.staffT,
-        inParts: ev.inParts, bundled: mb.bundled, withLead: mb.s.tx === ev.lead ? null : leadCode, key: ev.key });
+        inParts: ev.inParts, bundled: mb.bundled, withLead: mb.s.tx === ev.lead ? null : leadCode, key: ev.key, index: !!mb.index, edge: mb.edge, edges: mb.edges });
     }
     // absehbarer Stillstand: frühester Stopp (Engine-Plan oder Projektion)
     let W = null, C = null, wTool = null;
@@ -402,7 +428,12 @@
     const step = tk.steps[tk.si] || {};
     let stage = 0, detail = '';
     const fetched = !!(tk.data && tk.data.fetched);
-    if (tk.status !== 'assigned' || !p) {
+    const index = !!(tk.data && tk.data.index);   // Schneide wenden: kein Gang zur Werkzeugausgabe (Pipeline ohne „Werkzeugausgabe“)
+    if (index) {
+      stage = 0;
+      if (tk.status === 'assigned' && p) { stage = step.k === 'work' && step.act === 'tc' ? 3 : step.k === 'wait' ? 2 : 1; detail = p.activity || step.label || ''; if (step.k === 'work' && p.workRem > 0) detail += ` · noch ca. ${U.fmtDur(p.workRem)}`; }
+      else detail = tk.held && tk.holdWhy ? tk.holdWhy : tk.held && typeof tk.holdUntil === 'number' ? `Wird ca. ${tclock(tk.holdUntil, now)} vergeben – rechtzeitig vor der Teilegrenze` : tk.lateWhy || 'Bediener:in der Maschine wendet die Schneide – kein Gang zur Werkzeugausgabe';
+    } else if (tk.status !== 'assigned' || !p) {
       stage = fetched ? 2 : 0;
       if (tk.held && tk.holdWhy) detail = tk.holdWhy;
       else if (tk.held && typeof tk.holdUntil === 'number') detail = `Wird ca. ${tclock(tk.holdUntil, now)} vergeben – rechtzeitig vor der Wechsel-Teilegrenze`;
@@ -427,7 +458,7 @@
     }
     const nt = (s.notifications || []).find(n => n.key === 'tool:' + tk.machineId && n.status !== 'resolved');
     return { id: tk.id, machineId: tk.machineId, short: stShort(tk.machineId), person: p ? shortName(p.name) : null, personId: p ? p.id : null,
-      stage, detail, preset, urgent: tk.prio >= 90, tools: toolsTxt, etaT, afterPart, orderId: tk.orderId,
+      stage, detail, preset, index, urgent: tk.prio >= 90, tools: toolsTxt, etaT, afterPart, orderId: tk.orderId,
       notif: nt ? { t: nt.t, sev: nt.sev, ack: nt.status === 'ack', ackBy: nt.ackBy || null } : null };
   }
 
@@ -447,8 +478,10 @@
   .tl-next{--c:var(--st-tool);display:flex;align-items:center;gap:11px;min-width:0;max-width:440px;text-align:left;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:8px 14px 8px 11px;color:inherit;cursor:pointer;box-shadow:inset 3px 0 0 var(--c)}
   .tl-next:hover{border-color:var(--line2)}
   .tl-next .tl-nx-t{font:600 22px/1 var(--f-cond);font-variant-numeric:tabular-nums;color:var(--text);flex:none}
+  .tl-next .tl-nx-t small{font:500 12px/1 var(--f-ui);color:var(--muted);margin-right:3px}
+  .tl-next.proj{box-shadow:inset 3px 0 0 color-mix(in srgb,var(--c) 45%,transparent);border-style:dashed;border-color:color-mix(in srgb,var(--c) 30%,var(--line))}
   .tl-next .tl-nx-b{min-width:0;display:flex;flex-direction:column;gap:2px}
-  .tl-next .eyebrow{font-size:9.5px;color:color-mix(in srgb,var(--c) 70%,var(--muted))}
+  .tl-next .eyebrow{font-size:9.5px;color:color-mix(in srgb,var(--c) 70%,var(--muted));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .tl-next b{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .tl-next small{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
@@ -612,11 +645,14 @@
   .tl-filt button.zero{opacity:.45}
   .tl-filt button.on{border-color:color-mix(in srgb,var(--c) 60%,transparent);background:color-mix(in srgb,var(--c) 14%,var(--card))}
   .tl-filt button:hover{border-color:var(--line2)}
+  .tl-tbcard{container:tltb / inline-size}
+  .tl-stkcard{container:tlstk / inline-size}
   .tl-tb{--cols:44px minmax(210px,2.1fr) 156px 118px 150px minmax(190px,1.9fr) 96px 62px;min-width:0}
   .tl-thr,.tl-tr{display:grid;grid-template-columns:var(--cols);gap:0 12px;align-items:center;padding:0 14px}
   .tl-thr{font:600 10.5px/1.2 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-top:9px;padding-bottom:9px;border-bottom:1px solid var(--line)}
   .tl-thr .r,.tl-tr .r{text-align:right;justify-self:end}
   .tl-tr{--c:var(--st-idle);min-height:52px;padding-top:7px;padding-bottom:7px;border-bottom:1px solid var(--line);cursor:pointer;font-size:12.8px;position:relative}
+  .tl-tr > *,.tl-sr > *,.tl-thr > *,.tl-sh > *{min-width:0}
   .tl-tr:hover{background:color-mix(in srgb,var(--raise) 40%,transparent)}
   .tl-tr:focus-visible{outline-offset:-2px}
   .tl-tr.idle{opacity:.62;min-height:42px}
@@ -670,6 +706,7 @@
   .tl-qi-h b{font:600 14.5px/1.2 var(--f-cond);white-space:nowrap}
   .tl-qi-h .mono{font-size:11px;color:var(--muted)}
   .tl-qi-h span.tl-qt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--text2);flex:1}
+  .tl-idx{display:inline-block;font:600 10px/1 var(--f-ui);letter-spacing:.04em;padding:3px 6px;margin-right:7px;border-radius:5px;color:color-mix(in srgb,var(--st-setup) 85%,white);background:color-mix(in srgb,var(--st-setup) 14%,transparent);border:1px solid color-mix(in srgb,var(--st-setup) 32%,transparent);vertical-align:1px}
   .tl-qi-h em{font-style:normal;font-size:11.5px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
   .tl-pipe{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:3px}
   .tl-pipe i{height:5px;border-radius:3px;background:var(--track);border:1px solid var(--line)}
@@ -726,6 +763,23 @@
   .tl-cost-r b{font-variant-numeric:tabular-nums;text-align:right;font-weight:600}
   .tl-cost-r .bar{min-width:0}
 
+  /* Karte mit Reitern: Wechselhistorie | Bestand */
+  .tl-tabh{padding-top:0;padding-bottom:0;min-height:52px}
+  .tl-tabsel{display:flex;align-items:stretch;gap:4px;align-self:stretch;min-width:0}
+  .tl-tabsel button{display:inline-flex;align-items:center;gap:8px;padding:12px 6px 11px;margin-right:12px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted);font:600 14px/1.2 var(--f-ui);cursor:pointer;white-space:nowrap}
+  .tl-tabsel button .ico{color:var(--faint)}
+  .tl-tabsel button:hover{color:var(--text2)}
+  .tl-tabsel button.on{color:var(--text);border-bottom-color:var(--accent)}
+  .tl-tabsel button.on .ico{color:var(--accent)}
+  .tl-tabn{font:600 11px/1 var(--f-ui);font-variant-numeric:tabular-nums;color:var(--text2);background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:3px 7px}
+  .tl-tabn:empty{display:none}
+  .tl-tabn.warn{color:var(--st-wait);border-color:color-mix(in srgb,var(--st-wait) 40%,var(--line))}
+  .tl-tabsel .tl-ts{display:none}
+  @container tlstk (max-width:620px){ .tl-tabsel .tl-tl{display:none} .tl-tabsel .tl-ts{display:inline} .tl-tabsel button{margin-right:6px} }
+  .tl-tabsub{padding:9px 14px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line)}
+  .tl-tabsub:empty{display:none}
+  .tl-tabs .tl-card-h .seg{margin:8px 0;max-width:100%;overflow-x:auto;scrollbar-width:none}
+  .tl-tabs .tl-card-h .seg::-webkit-scrollbar{display:none}
   /* Historie */
   .tl-hist{display:flex;flex-direction:column}
   .tl-he{display:grid;grid-template-columns:62px minmax(0,1fr);gap:0 12px;padding:10px 14px;border-bottom:1px solid var(--line)}
@@ -787,31 +841,46 @@
 
   @media (max-width:1320px){
     .tl-top{grid-template-columns:minmax(0,1fr)}
+  }
+  /* Werkzeugtabelle nach Kartenbreite (nicht Fensterbreite): breit 8 Spalten · mittel 6 · schmal zweizeilig */
+  @container tltb (max-width:1150px){
     .tl-tb{--cols:40px minmax(200px,2fr) 150px 110px 146px minmax(180px,1.8fr)}
     .tl-tb .c-mt,.tl-tb .c-pt{display:none}
     .tl-tn .tl-mid{display:inline}
   }
-  @media (max-width:1100px){
-    .tl-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
-    .tl-low{grid-template-columns:minmax(0,1fr)}
+  @container tltb (max-width:930px){
+    .tl-thr{display:none}
+    .tl-tr{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr) auto;grid-template-areas:"n p st" "w p r";gap:6px 16px;padding:10px 14px}
+    .tl-tr .c-slot{display:none}
+    .tl-tr .c-n{grid-area:n} .tl-tr .c-st{grid-area:st;justify-self:end} .tl-tr .c-w{grid-area:w} .tl-tr .c-r{grid-area:r} .tl-tr .c-p{grid-area:p;align-self:center}
+    .tl-rest b,.tl-rest small{display:inline;margin:0}
+    .tl-rest small::before{content:" · "}
+    .tl-tn .tl-mid{display:none}
+  }
+  @container tltb (max-width:600px){
+    .tl-tr{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"n st" "w r" "p p";gap:7px 12px}
+    .tl-pl b,.tl-pl span{white-space:normal}
+  }
+  @container tlstk (max-width:1090px){
     .tl-stk{--cols:minmax(200px,2fr) 132px 84px minmax(170px,1.6fr) 84px}
     .tl-stk .c-mo,.tl-stk .c-g,.tl-stk .c-ns{display:none}
   }
-  @media (max-width:820px){
-    .tl-thr{display:none}
-    .tl-tr{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"n st" "w r" "p p";gap:7px 12px;padding:10px 14px}
-    .tl-tr .c-slot{display:none}
-    .tl-tr .c-n{grid-area:n} .tl-tr .c-st{grid-area:st;justify-self:end} .tl-tr .c-w{grid-area:w} .tl-tr .c-r{grid-area:r} .tl-tr .c-p{grid-area:p}
-    .tl-rest b,.tl-rest small{display:inline;margin:0}
-    .tl-rest small::before{content:" · "}
-    .tl-pl b,.tl-pl span{white-space:normal}
+  @container tlstk (max-width:740px){
     .tl-sh{display:none}
     .tl-stk{--cols:minmax(0,1fr) 112px 44px}
     .tl-stk .c-g,.tl-stk .c-ns,.tl-stk .c-s,.tl-stk .c-mo,.tl-stk .c-a{display:none}
+  }
+  @container tlstk (max-width:760px){
     .tl-hx{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"n c" "w d"}
     .tl-hx .tl-hn{grid-area:n} .tl-hx .tl-hc{grid-area:c;justify-self:end} .tl-hx .tl-hw{grid-area:w} .tl-hx .tl-hd{grid-area:d;justify-self:end}
   }
+  @media (max-width:1100px){
+    .tl-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .tl-low{grid-template-columns:minmax(0,1fr)}
+  }
   @media (max-width:560px){
+    .tl-head-r{width:100%}
+    .tl-next{width:100%;max-width:none}
     .tl-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
     .tl-kpis .kpi:first-child{grid-column:1/-1}
     .tl-kpis .kpi{min-height:0}
@@ -899,9 +968,11 @@
     if (t.status === 'broken') return { cls: '', main: 'Wechsel vor dem nächsten Teil', sub: 'Werkzeugbruch – nach der Reparatur' };
     if (t.status === 'due') return { cls: '', main: 'Wechsel angefordert', sub: 'Standzeit reicht nicht für das nächste Teil' };
     if (pc) {
-      const who = pc.by ? `${pc.by}${pc.stage && pc.stage !== 'offen' && pc.stage !== 'später' ? ' · ' + pc.stage : ''}` : pc.note && pc.stage !== 'später' ? pc.note : pc.stage === 'später' ? (t.laterAfterT ? `eigener Stopp nach dem Wechsel ${tclock(t.laterAfterT, now)}` : 'eigener Stopp, nach dem nächsten Wechsel') : pc.stage === 'Werkzeug liegt bereit' ? 'Werkzeug liegt bereit' : 'Einrichter:in wird rechtzeitig losgeschickt';
-      const extra = pc.bundled ? 'wird mitgewechselt' : pc.manual ? 'vorbeugend beauftragt' : pc.withTools && pc.withTools.length ? 'mit ' + pc.withTools.map(toolShort).join(', ') : '';
-      return { cls: '', main: (pc.manual ? 'Vorbeugend ' : '') + pc.text, sub: [who, extra].filter(Boolean).join(' · ') + (pc.waitFromT != null ? ` · Stopp ab ${tclock(pc.waitFromT, now)}` : '') };
+      const idx = pc.action === 'index';
+      const who = pc.by ? `${pc.by}${pc.stage && pc.stage !== 'offen' && pc.stage !== 'später' ? ' · ' + pc.stage : ''}` : pc.note && pc.stage !== 'später' ? pc.note : pc.stage === 'später' ? (t.laterAfterT ? `eigener Stopp nach dem Wechsel ${tclock(t.laterAfterT, now)}` : 'eigener Stopp, nach dem nächsten Wechsel') : pc.stage === 'Werkzeug liegt bereit' ? 'Werkzeug liegt bereit' : idx ? 'Bediener:in wendet an der Maschine' : 'Einrichter:in wird rechtzeitig losgeschickt';
+      const extra = pc.bundled ? (idx ? 'wird mitgewendet' : 'wird mitgewechselt') : pc.manual ? 'vorbeugend beauftragt' : pc.withTools && pc.withTools.length ? 'mit ' + pc.withTools.map(toolShort).join(', ') : '';
+      const eg = edgeOf(t);
+      return { cls: '', main: (pc.manual ? 'Vorbeugend ' : '') + (idx ? 'Schneide wenden ' : '') + pc.text, sub: [idx && eg ? `Schneide ${eg.no} → ${eg.no + 1}/${eg.of}` : eg && eg.last ? 'letzte Schneide – neue Platte' : '', who, extra].filter(Boolean).join(' · ') + (pc.waitFromT != null ? ` · Stopp ab ${tclock(pc.waitFromT, now)}` : '') };
     }
     if (t.status === 'keep') return { cls: 'none', main: 'Bleibt beim Rüsten montiert', sub: 'gleicher Typ im neuen Arbeitsgang' };
     if (t.status === 'replace') return { cls: 'none', main: 'Wird beim Rüsten ersetzt', sub: 'neues, vermessenes Werkzeug' };
@@ -910,17 +981,18 @@
     if (t.status === 'missing') return { cls: 'none', main: 'Wird beim Rüsten bestückt', sub: '' };
     if (!t.need) return { cls: 'none', main: 'Kein Wechsel nötig', sub: `reicht bis AG-Ende (${teile(t.neededParts || 0)} offen)` };
     const p = t.proj && t.proj[0];
-    if (t.announcedT) return { cls: 'proj', main: p && p.t != null ? `nach Teil ${p.afterPart} · ca. ${tclock(p.t, now)}` : 'angekündigt', sub: `angekündigt ${tclock(t.announcedT, now)} – Termin wird nach dem laufenden Wechsel neu berechnet` };
+    if (t.announcedT) return { cls: 'proj', main: p && p.t != null ? `${afterTxt(p.afterPart)} · ca. ${tclock(p.t, now)}` : 'angekündigt', sub: `angekündigt ${tclock(t.announcedT, now)} – Termin wird nach dem laufenden Wechsel neu berechnet` };
     if (!p && t.afterStop) return { cls: 'proj warn', main: `Maschine ruht ab ca. ${tclock(t.afterStop.from, now)}`, sub: `wartet auf ${toolShort(t.afterStop.tool ? t.afterStop.tool.name : '')} – Wechsel frühestens ${tclock(t.afterStop.to, now)}` };
-    if (p && p.waitFromT != null) return { cls: 'proj warn', main: `voraussichtlich nach Teil ${p.afterPart} · ca. ${tclock(p.t, now)}`, sub: `Stillstand ab ca. ${tclock(p.waitFromT, now)} – vorher niemand im Dienst` };
-    if (p && p.withLead) return { cls: 'proj', main: `voraussichtlich nach Teil ${p.afterPart}${p.t != null ? ' · ca. ' + tclock(p.t, now) : ''}`, sub: p.bundled ? `mit ${p.withLead} mitgewechselt – ein Stopp statt zwei` : `zusammen mit ${p.withLead}` };
-    if (p) return { cls: 'proj', main: `voraussichtlich nach Teil ${p.afterPart}${p.t != null ? ' · ca. ' + tclock(p.t, now) : ''}`, sub: `Planung in ca. ${teilen(p.inParts)} · bei ≤ ${teilen(t.planHorizonParts || PLAN_AT())} Rest` };
+    if (p && p.waitFromT != null) return { cls: 'proj warn', main: `voraussichtlich ${afterTxt(p.afterPart)} · ca. ${tclock(p.t, now)}`, sub: `Stillstand ab ca. ${tclock(p.waitFromT, now)} – vorher niemand im Dienst` };
+    if (p && p.withLead) return { cls: 'proj', main: `voraussichtlich ${afterTxt(p.afterPart)}${p.t != null ? ' · ca. ' + tclock(p.t, now) : ''}`, sub: p.bundled ? `mit ${p.withLead} mitgewechselt – ein Stopp statt zwei` : `zusammen mit ${p.withLead}` };
+    if (p) return { cls: 'proj', main: `voraussichtlich ${afterTxt(p.afterPart)}${p.t != null ? ' · ca. ' + tclock(p.t, now) : ''}`, sub: `${p.index ? `Schneide wenden ${p.edge} → ${p.edge + 1}/${p.edges} · ` : ''}Planung in ca. ${teilen(p.inParts)} · bei ≤ ${teilen(t.planHorizonParts || PLAN_AT())} Rest` };
     return { cls: 'none', main: '–', sub: '' };
   }
 
   // ------------------------------------------------------------------ Ansicht
   let root = null, R = {};
-  const ui = { sort: 'machine', filter: 'all', exPick: 'auto', stock: 'need', histCat: 'all', histN: 12, planW: 0, tipKey: null, tips: {} };
+  const ui = { sort: 'urgent', showAll: false, filter: 'all', exPick: 'auto', stock: 'need', histCat: 'all', histN: 6, tab: 'hist', planW: 0, tipKey: null, tips: {} };
+  const TOP_N = 8;
 
   function mount(r) {
     root = r;
@@ -951,14 +1023,15 @@
           <div class="tl-ex-f">Gilt für jedes Werkzeug. Getauscht wird nur, was vorher als „geplant“ angekündigt war – oder nach einem Werkzeugbruch.</div>
         </section>
       </div>
-      <section class="card" data-r="tableCard" aria-label="Werkzeuge in den Maschinen">
+      <section class="card tl-tbcard" data-r="tableCard" aria-label="Werkzeuge in den Maschinen">
         <div class="tl-card-h"><h3>${icon('wrench', 16)}Werkzeuge in den Maschinen</h3><span class="tl-sub" data-r="tableSub"></span><span class="spacer"></span>
-          <div class="seg" role="group" aria-label="Sortierung"><button data-sort="machine" class="on">Nach Maschine</button><button data-sort="urgent">Dringlichste zuerst</button></div></div>
+          <div class="seg" role="group" aria-label="Sortierung"><button data-sort="urgent" class="on">Dringlichste zuerst</button><button data-sort="machine">Nach Maschine</button></div></div>
         <div class="tl-card-h" style="border-bottom:1px solid var(--line);padding-top:9px;padding-bottom:9px"><div class="tl-filt" data-r="filt"></div></div>
         <div class="tl-tb">
           <div class="tl-thr"><span class="c-slot">Platz</span><span>Werkzeug</span><span>Verschleiß</span><span class="r">Reststandzeit</span><span>Status</span><span>Nächster Wechsel</span><span class="r c-mt">Eingebaut</span><span class="r c-pt" title="Mit dieser Schneide gefertigte Teile">Gefertigt</span></div>
           <div data-r="rows"></div>
         </div>
+        <div class="tl-more" data-r="rowsMore" hidden><button class="btn sm ghost" data-allrows></button></div>
         <div class="tl-tbl-f" data-r="tableF"></div>
       </section>
       <div class="tl-low">
@@ -972,17 +1045,22 @@
           <div class="tl-cost" data-r="cost"></div>
         </section>
       </div>
-      <section class="card" aria-label="Bestand Werkzeugausgabe">
-        <div class="tl-card-h"><h3>${icon('layers', 16)}Bestand Werkzeugausgabe</h3><span class="tl-sub" data-r="stockSub">vermessen und einsatzbereit · Grundbestand wird zu Schichtbeginn aufgefüllt</span><span class="spacer"></span>
-          <div class="seg" role="group" aria-label="Werkzeugtypen"><button data-stock="need" class="on">Bedarf 4 h</button><button data-stock="use">Im Einsatz</button><button data-stock="all">Alle Typen</button></div></div>
-        <div class="tl-stk"><div class="tl-sh"><span>Werkzeugtyp</span><span>Bereit</span><span class="r">Bedarf 4 h</span><span class="c-a">Einschätzung</span><span class="r c-mo">Montiert</span><span class="r c-g">Gebraucht</span><span class="r c-ns">Nachschliff</span><span class="r c-s">Schrott heute</span></div>
-          <div data-r="stock"></div></div>
-      </section>
-      <section class="card" data-r="histCard" aria-label="Wechselhistorie">
-        <div class="tl-card-h"><h3>${icon('list', 16)}Wechselhistorie · letzte 24 h</h3><span class="tl-sub" data-r="histSub"></span><span class="spacer"></span>
-          <div class="seg" role="group" aria-label="Grund" data-r="histSeg"></div></div>
-        <div class="tl-hist" data-r="hist"></div>
-        <div class="tl-more" data-r="histMore" hidden><button class="btn sm ghost" data-more>Ältere Wechsel anzeigen</button></div>
+      <section class="card tl-stkcard tl-tabs" data-r="histCard" aria-label="Wechselhistorie und Bestand der Werkzeugausgabe">
+        <div class="tl-card-h tl-tabh"><div class="tl-tabsel" role="tablist" data-r="tabSel">
+            <button role="tab" data-tab="hist" class="on" aria-selected="true">${icon('list', 15)}<span class="tl-tl">Wechselhistorie</span><span class="tl-ts">Historie</span><span class="tl-tabn" data-r="tabNH"></span></button>
+            <button role="tab" data-tab="stock" aria-selected="false">${icon('layers', 15)}<span class="tl-tl">Bestand Werkzeugausgabe</span><span class="tl-ts">Bestand</span><span class="tl-tabn" data-r="tabNS"></span></button></div>
+          <span class="spacer"></span>
+          <div class="seg" role="group" aria-label="Grund" data-r="histSeg"></div>
+          <div class="seg" role="group" aria-label="Werkzeugtypen" data-r="stockSeg" hidden><button data-stock="need" class="on">Bedarf 4 h</button><button data-stock="use">Im Einsatz</button><button data-stock="all">Alle Typen</button></div></div>
+        <div class="tl-tabsub" data-r="tabSub"></div>
+        <div data-r="paneHist">
+          <div class="tl-hist" data-r="hist"></div>
+          <div class="tl-more" data-r="histMore" hidden><button class="btn sm ghost" data-more>Ältere Wechsel anzeigen</button></div>
+        </div>
+        <div data-r="paneStock" hidden>
+          <div class="tl-stk"><div class="tl-sh"><span>Werkzeugtyp</span><span>Bereit</span><span class="r">Bedarf 4 h</span><span class="c-a">Einschätzung</span><span class="r c-mo">Montiert</span><span class="r c-g">Gebraucht</span><span class="r c-ns">Nachschliff</span><span class="r c-s">Schrott heute</span></div>
+            <div data-r="stock"></div></div>
+        </div>
       </section>
     </div>`;
     R = refs(r);
@@ -996,13 +1074,13 @@
     r.addEventListener('keydown', (e) => {
       if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-sel]')) { e.preventDefault(); selectFrom(e.target); }
     });
-    r.querySelectorAll('[data-sort]').forEach(b => b.onclick = () => { ui.sort = b.dataset.sort; r.querySelectorAll('[data-sort]').forEach(x => x.classList.toggle('on', x === b)); R.rows._map && R.rows._map.clear(); R.rows.innerHTML = ''; renderTable(getModel(), true); });
+    r.querySelectorAll('[data-sort]').forEach(b => b.onclick = () => { ui.sort = b.dataset.sort; ui.showAll = false; r.querySelectorAll('[data-sort]').forEach(x => x.classList.toggle('on', x === b)); R.rows._map && R.rows._map.clear(); R.rows.innerHTML = ''; renderTable(getModel(), true); });
     r.querySelectorAll('[data-stock]').forEach(b => b.onclick = () => { ui.stock = b.dataset.stock; r.querySelectorAll('[data-stock]').forEach(x => x.classList.toggle('on', x === b)); renderStock(getModel(), true); });
     R.exPick.addEventListener('change', () => { ui.exPick = R.exPick.value || 'auto'; const t = (getModel() || { tools: [] }).tools.find(x => x.id === ui.exPick); ui.exSlot = t ? t.machineId + '|' + t.typeId : null; renderExplainer(getModel(), true); });
     R.plan.addEventListener('mousemove', onPlanMove);
     R.plan.addEventListener('mouseleave', () => hideTip());
     if (typeof ResizeObserver !== 'undefined') {
-      const ro = new ResizeObserver(() => { const w = R.plan.clientWidth; if (Math.abs(w - ui.planW) > 2) { ui.planW = w; renderPlan(getModel(), true); } });
+      const ro = new ResizeObserver((ents) => { const e = ents[0]; const w = Math.round(e && e.contentRect ? e.contentRect.width : R.planSvg.clientWidth); if (w > 0 && Math.abs(w - ui.planW) > 2) { ui.planW = w; renderPlan(getModel(), true); } });
       ro.observe(R.plan);
     }
   }
@@ -1013,14 +1091,25 @@
   }
   function onClick(e) {
     const go = e.target.closest('[data-go]');
-    if (go) { const tgt = { table: R.tableCard, hist: R.histCard, plan: R.planCard, crib: R.cribCard }[go.dataset.go]; if (tgt) tgt.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    if (go) { if (go.dataset.go === 'hist') setTab('hist'); const tgt = { table: R.tableCard, hist: R.histCard, plan: R.planCard, crib: R.cribCard }[go.dataset.go]; if (tgt) tgt.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    const tb = e.target.closest('[data-tab]');
+    if (tb) { setTab(tb.dataset.tab); return; }
+    if (e.target.closest('[data-allrows]')) { ui.showAll = !ui.showAll; renderTable(getModel(), true); if (!ui.showAll) R.tableCard.scrollIntoView({ block: 'nearest' }); return; }
     const f = e.target.closest('[data-f]');
     if (f) { ui.filter = ui.filter === f.dataset.f ? 'all' : f.dataset.f; renderTable(getModel(), true); return; }
     const hc = e.target.closest('[data-hc]');
-    if (hc) { ui.histCat = hc.dataset.hc; ui.histN = 12; renderHistory(getModel(), true); return; }
-    if (e.target.closest('[data-more]')) { ui.histN += 20; renderHistory(getModel(), true); return; }
+    if (hc) { ui.histCat = hc.dataset.hc; ui.histN = 6; renderHistory(getModel(), true); return; }
+    if (e.target.closest('[data-more]')) { ui.histN += 12; renderHistory(getModel(), true); return; }
     const sel = e.target.closest('[data-sel]');
     if (sel) { selectFrom(sel); return; }
+  }
+
+  function setTab(t) {
+    ui.tab = t;
+    R.tabSel.querySelectorAll('[data-tab]').forEach(b => { const on = b.dataset.tab === t; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
+    R.paneHist.hidden = t !== 'hist'; R.paneStock.hidden = t !== 'stock';
+    R.histSeg.hidden = t !== 'hist'; R.stockSeg.hidden = t !== 'stock';
+    setText(R.tabSub, t === 'hist' ? ui.subHist : ui.subStock);
   }
 
   // ------------------------------------------------------------------ Update
@@ -1042,29 +1131,41 @@
     renderHistory(m);
   }
 
+  /** Kopfkarte „Nächster Wechsel“: frühester Wechsel überhaupt – angekündigt (Engine-Plan) oder voraussichtlich (hochgerechnet,
+      als solcher gekennzeichnet). Liegt ein voraussichtlicher Wechsel vor dem nächsten angekündigten, wird er gezeigt
+      und der angekündigte darunter genannt (keine scheinbar widersprüchlichen Uhrzeiten zwischen Kopf und Wechselplan). */
   function renderNext(m) {
     const now = m.t;
-    let best = null;
+    let chg = null, plan = null, proj = null;
     for (const mx of m.machines) {
-      if (mx.changing) { best = { kind: 'now', mx, t: now, tools: mx.changing.list.map(x => (TT(x.type) || {}).name || x.type), by: pName(mx.changing.by), sel: 'machine|' + mx.id }; break; }
-      for (const g of mx.groups) if (g.t != null && (!best || g.t < best.t)) best = { kind: g.waitFromT != null ? 'wait' : 'plan', mx, t: g.t, g, tools: g.tools.map(x => x.name), by: g.by, stage: g.stage, sel: g.tools[0].id ? 'tool|' + g.tools[0].id : 'machine|' + mx.id };
+      if (mx.changing && !chg) chg = { mx, tools: mx.changing.list.map(x => (TT(x.type) || {}).name || x.type), by: pName(mx.changing.by), sel: 'machine|' + mx.id };
+      for (const g of mx.groups) if (g.t != null && (!plan || g.t < plan.t)) plan = { mx, t: g.t, g, tools: g.tools.map(x => x.name), by: g.by, stage: g.stage, sel: g.tools[0].id ? 'tool|' + g.tools[0].id : 'machine|' + mx.id };
+      for (const x of mx.proj) if (x.t != null && x.t >= now - 60 && (!proj || x.t < proj.t)) proj = { mx, x, t: x.t };
     }
-    let html, c = 'var(--st-tool)';
-    if (!best) {
-      const p = m.machines.flatMap(mx => mx.proj.map(x => ({ mx, x }))).filter(o => o.x.t != null).sort((a, b) => a.x.t - b.x.t)[0];
-      if (p) { html = `<span class="tl-nx-t">${esc(tclock(p.x.t, now))}</span><span class="tl-nx-b"><span class="eyebrow">Nächster Wechsel · voraussichtlich</span><b>${esc(p.mx.short)} (${esc(p.mx.id)}) · ${esc(p.x.members.map(mb => toolShort(mb.s.tx.name)).join(', '))}</b><small>noch nicht geplant – Ankündigung bei ≤ ${esc(teilen(PLAN_AT()))} Rest</small></span>`; R.next.dataset.sel = p.x.lead.id ? 'tool|' + p.x.lead.id : 'machine|' + p.mx.id; }
-      else { html = `<span class="tl-nx-b"><span class="eyebrow">Nächster Wechsel</span><b>Kein Wechsel absehbar</b><small>alle Schneiden reichen bis zum Ende ihrer Arbeitsgänge</small></span>`; delete R.next.dataset.sel; }
-    } else if (best.kind === 'now') {
-      html = `<span class="tl-nx-t">Jetzt</span><span class="tl-nx-b"><span class="eyebrow">Werkzeugwechsel läuft</span><b>${esc(best.mx.short)} (${esc(best.mx.id)}) · ${esc(best.tools.map(toolShort).join(', '))}</b><small>${esc(best.by)} wechselt · fertig ca. ${esc(tclock(best.mx.changing.t1, now))}</small></span>`;
-      R.next.dataset.sel = best.sel;
+    let html, c = 'var(--st-tool)', cls = '';
+    if (chg) {
+      html = `<span class="tl-nx-t">Jetzt</span><span class="tl-nx-b"><span class="eyebrow">Werkzeugwechsel läuft</span><b>${esc(chg.mx.short)} (${esc(chg.mx.id)}) · ${esc(chg.tools.map(toolShort).join(', '))}</b><small>${esc(chg.by)} wechselt · fertig ca. ${esc(tclock(chg.mx.changing.t1, now))}</small></span>`;
+      R.next.dataset.sel = chg.sel;
+    } else if (plan && (!proj || plan.t <= proj.t + 60)) {
+      if (plan.g.waitFromT != null) c = 'var(--st-wait)';
+      const pIdx = plan.g.tools.length > 0 && plan.g.tools.every(willIndex);
+      const who = (pIdx ? 'Schneide wenden an der Maschine · ' : '') + (plan.by ? `${plan.by} · ${plan.stage}` : plan.stage === 'Werkzeug liegt bereit' ? 'Werkzeug liegt bereit' : plan.g.note ? plan.g.note : pIdx ? 'Bediener:in wird rechtzeitig gerufen' : 'Einrichter:in wird rechtzeitig losgeschickt');
+      const waitTxt = plan.g.waitFromT != null ? (plan.mx.mv.state === 'waitTool' ? 'Maschine wartet' : 'Maschine steht ab ' + tclock(plan.g.waitFromT, now)) : null;
+      html = `<span class="tl-nx-t">${esc(tclock(plan.t, now))}</span><span class="tl-nx-b"><span class="eyebrow">Nächster Wechsel · angekündigt · ${afterTxt(plan.g.afterPart)}</span><b>${esc(plan.mx.short)} (${esc(plan.mx.id)}) · ${esc(plan.tools.map(toolShort).join(', '))}</b><small>${esc(waitTxt ? waitTxt + ' · ' + who : who)}</small></span>`;
+      R.next.dataset.sel = plan.sel;
+    } else if (proj) {
+      const p = proj.x;
+      cls = 'proj';
+      if (p.waitFromT != null) c = 'var(--st-wait)';
+      const after = (p.index ? 'Schneide wenden · ' : '') + (plan ? `angekündigt: ${tclock(plan.t, now)} an ${plan.mx.id}` : `Ankündigung bei ≤ ${teilen(p.lead.planHorizonParts || PLAN_AT())} Rest`);
+      html = `<span class="tl-nx-t"><small>ca.</small>${esc(tclock(p.t, now))}</span><span class="tl-nx-b"><span class="eyebrow">Nächster Wechsel · voraussichtlich · ${afterTxt(p.afterPart)}</span><b>${esc(proj.mx.short)} (${esc(proj.mx.id)}) · ${esc(p.members.map(mb => toolShort(mb.s.tx.name)).join(', '))}</b><small>${esc(p.waitFromT != null ? `Stillstand ab ca. ${tclock(p.waitFromT, now)} · ` : 'noch nicht angekündigt · ')}${esc(after)}</small></span>`;
+      R.next.dataset.sel = p.lead.id ? 'tool|' + p.lead.id : 'machine|' + proj.mx.id;
     } else {
-      if (best.kind === 'wait') c = 'var(--st-wait)';
-      const who = best.by ? `${best.by} · ${best.stage}` : best.stage === 'Werkzeug liegt bereit' ? 'Werkzeug liegt bereit' : best.g.note ? best.g.note : 'Einrichter:in wird rechtzeitig losgeschickt';
-      const waitTxt = best.g.waitFromT != null ? (best.mx.mv.state === 'waitTool' ? 'Maschine wartet' : 'Maschine steht ab ' + tclock(best.g.waitFromT, now)) : null;
-      html = `<span class="tl-nx-t">${esc(tclock(best.t, now))}</span><span class="tl-nx-b"><span class="eyebrow">Nächster Wechsel · nach Teil ${best.g.afterPart}</span><b>${esc(best.mx.short)} (${esc(best.mx.id)}) · ${esc(best.tools.map(toolShort).join(', '))}</b><small>${esc(waitTxt ? waitTxt + ' · ' + who : who)}</small></span>`;
-      R.next.dataset.sel = best.sel;
+      html = `<span class="tl-nx-b"><span class="eyebrow">Nächster Wechsel</span><b>Kein Wechsel absehbar</b><small>alle Schneiden reichen bis zum Ende ihrer Arbeitsgänge</small></span>`;
+      delete R.next.dataset.sel;
     }
     R.next.style.setProperty('--c', c);
+    R.next.classList.toggle('proj', cls === 'proj');
     setHTML(R.next, html);
   }
   function renderKpis(m) {
@@ -1073,7 +1174,7 @@
     setHTML(R.k1, `${esc(U.fmtNum(inUse))}<small>Werkzeuge</small>`);
     setHTML(R.k1s, `in <b>${nM}</b> Maschinen${mounted > inUse ? ` · ${mounted - inUse} weitere montiert` : ''}`);
     setHTML(R.k2, `${esc(U.fmtNum(m.changesToday))}<small>Werkzeuge</small>`);
-    setHTML(R.k2s, m.stops ? `in <b>${m.stops}</b> ${m.stops === 1 ? 'Stopp' : 'Stopps'}${m.avgDur ? ` · Ø ${esc(U.fmtDur(m.avgDur))} je Wechsel` : ''}` : 'heute noch kein Wechsel');
+    setHTML(R.k2s, m.stops ? `in <b>${m.stops}</b> ${m.stops === 1 ? 'Stopp' : 'Stopps'}${m.idxToday ? ` · <b>${m.idxToday}</b>× Schneide gewendet` : ''}${m.avgDur ? ` · Ø ${esc(U.fmtDur(m.avgDur))} je Wechsel` : ''}` : 'heute noch kein Wechsel');
     setHTML(R.k3, `${esc(U.fmtNum(m.plan2Tools))}<small>${m.plan2Tools === 1 ? 'Werkzeug' : 'Werkzeuge'}</small>`);
     const nx = m.plan2[0];
     const pj = m.proj2.length;
@@ -1123,19 +1224,49 @@
     const tA = snap - back;
     return { tA, tB: tA + back + 4 * 3600 + 900 };
   }
+  /** Jetzt-abhängige Elemente des Wechselplans nachführen (ohne Neuaufbau) */
+  function planLive(now) {
+    const lv = R.plan._lv; if (!lv || lv.now === now) return;
+    lv.now = now;
+    const X = lv.X, xn = X(now);
+    const f = (v) => v.toFixed(1);
+    if (lv.past) lv.past.setAttribute('width', f(Math.max(0, xn - lv.x0)));
+    if (lv.line) { lv.line.setAttribute('x1', f(xn)); lv.line.setAttribute('x2', f(xn)); }
+    if (lv.tag) lv.tag.setAttribute('transform', `translate(${f(xn)},0)`);
+    const ck = U.fmtClock(now);
+    if (lv.tagTxt && ck !== lv.clock) { lv.clock = ck; lv.tagTxt.textContent = 'Jetzt ' + ck; }
+    for (const e of lv.L) { const xa = X(Math.max(now, e.a)), xb = X(e.b); e.n.setAttribute('x', f(xa)); e.n.setAttribute('width', f(Math.max(e.m, xb - xa))); }
+    for (const e of lv.Rr) { const xa = X(e.a); e.n.setAttribute('width', f(Math.max(e.m, xn - xa))); }
+  }
+  /** Maschinenname für schmale Beschriftung: ganz, sonst erstes Wort, sonst gekürzt */
+  function fitWord(n, px) {
+    n = String(n || ''); const max = Math.max(3, Math.floor(px / 5.9));
+    if (n.length <= max) return n;
+    const w = n.split(/\s+/)[0];
+    return w.length <= max ? w : w.slice(0, max - 1) + '…';
+  }
+  /** Wechselplan: der statische Teil (Zeilen, Plan, Marker) wird nur bei geänderter Struktur und höchstens ~1×/s neu gebaut;
+      alles, was an „jetzt“ hängt (Jetzt-Linie, Rückblick-Schatten, offene Ist-Segmente, ab jetzt beginnende Balken), wird bei
+      jedem Takt per setAttribute nachgeführt – so bleibt die Ansicht auch bei 600× flüssig. */
   function renderPlan(m, force) {
     if (!m || !R.plan) return;
-    const W = R.planSvg.clientWidth || R.plan.clientWidth || ui.planW || 900;
+    // Breite aus dem ResizeObserver (kein erzwungenes Layout je Takt); nur beim allerersten Mal messen
+    const W = Math.round(ui.planW || R.planSvg.clientWidth || (R.plan.clientWidth - 16) || 900);
     ui.planW = W;
     const narrow = W < 640;
     const now = m.t;
     const { tA, tB } = planWindow(now, narrow);
-    const sig = [W, tA, Math.floor(now / 30), m.machines.map(mx => [mx.id, mx.mv.state, mx.groups.map(g => g.key + g.by + g.stage + Math.round((g.t || 0) / 60) + (g.waitFromT || '')).join(), mx.proj.map(p => p.key + Math.round((p.t || 0) / 60)).join(), mx.past.length, mx.changing ? mx.changing.t1 : ''].join('~')).join('|')].join('#');
-    if (!force && sig === R.plan._sig) return;
-    R.plan._sig = sig;
-    const LW = narrow ? 66 : 168, PR = 12, AX = 34, RH = narrow ? 44 : 48;
+    const sig = [W, tA, m.machines.map(mx => [mx.id, mx.mv.state, mx.mv.order ? mx.mv.order.id + mx.mv.order.seq : '', mx.groups.map(g => g.key + g.by + g.stage + Math.round((g.t || 0) / 60) + (g.waitFromT || '')).join(), mx.proj.map(p => p.key + Math.round((p.t || 0) / 60)).join(), mx.past.length, mx.changing ? mx.changing.t1 : '', mx.fc.map(fe => fe.orderId + fe.seq + Math.round(fe.end / 60)).join()].join('~')).join('|')].join('#');
+    const lv = R.plan._lv, realNow = performance.now();
+    const fresh = lv && lv.tA === tA && lv.W === W && now >= lv.t0 && now - lv.t0 < 900;
+    if (!force && fresh && (sig === R.plan._sig || realNow - (R.plan._at || 0) < 1000)) { planLive(now); return; }
+    R.plan._sig = sig; R.plan._at = realNow;
+    const LW = narrow ? 92 : 168, PR = 12, AX = 34, RH = narrow ? 44 : 48;
     const x0 = LW, x1 = W - PR, span = tB - tA;
     const X = (t) => x0 + (U.clamp(t, tA, tB) - tA) / span * (x1 - x0);
+    // Live-Attribute: Rechteck von max(jetzt, a) bis b bzw. von a bis jetzt
+    const LA = (a, b, mw) => ` data-la="${a}" data-lb="${b}" data-lm="${mw}"`;
+    const RA = (a, mw) => ` data-ra="${a}" data-lm="${mw}"`;
     const rows = m.machines;
     const H = AX + rows.length * RH + 4;
     const tips = {};
@@ -1149,7 +1280,7 @@
     }
     // Vergangenheit abdunkeln
     const xn = X(now);
-    g += `<rect x="${x0}" y="${yTop}" width="${Math.max(0, xn - x0).toFixed(1)}" height="${H - yTop}" style="fill:var(--bg2);opacity:.5"/>`;
+    g += `<rect data-lvp x="${x0}" y="${yTop}" width="${Math.max(0, xn - x0).toFixed(1)}" height="${H - yTop}" style="fill:var(--bg2);opacity:.5"/>`;
     // Stundenraster + Achse (Beschriftung nicht unter der Jetzt-Marke)
     const pxH = (x1 - x0) / (span / 3600);
     const stepH = pxH >= 64 ? 3600 : 7200;
@@ -1168,7 +1299,7 @@
       g += `<line x1="0" x2="${W}" y1="${top}" y2="${top}" style="stroke:var(--line)" stroke-width="1"/>`;
       // Label
       const stc = WF.STATE[mv.state] ? WF.STATE[mv.state].color : 'var(--st-idle)';
-      const sub = narrow ? (mv.short.length > 9 ? mv.short.slice(0, 8) + '…' : mv.short) : `${mx.id} · ${mv.stateLabel}`;
+      const sub = narrow ? fitWord(mv.short, LW - 22) : `${mx.id} · ${mv.stateLabel}`;
       g += `<g class="tl-rl" data-sel="machine|${esc(mx.id)}" data-k="m:${esc(mx.id)}"><rect x="0" y="${top}" width="${LW - 6}" height="${RH}" fill="transparent"/>
         <circle cx="6" cy="${top + 18}" r="3.5" style="fill:${stc}"/>
         <text class="tl-rn" x="16" y="${top + 22}">${esc(narrow ? mx.id : mx.short)}</text>
@@ -1181,7 +1312,7 @@
         const a = Math.max(tA, sgm.t0), b = Math.min(now, sgm.t1 == null ? now : sgm.t1);
         if (b <= a) continue;
         const col = WF.STATE[sgm.state] ? WF.STATE[sgm.state].color : 'var(--st-idle)';
-        g += `<rect x="${X(a).toFixed(1)}" y="${yb}" width="${Math.max(0.8, X(b) - X(a)).toFixed(1)}" height="6" style="fill:${col};opacity:${sgm.state === 'idle' ? 0.45 : 0.92}"/>`;
+        g += `<rect${sgm.t1 == null ? RA(a, 0.8) : ''} x="${X(a).toFixed(1)}" y="${yb}" width="${Math.max(0.8, X(b) - X(a)).toFixed(1)}" height="6" style="fill:${col};opacity:${sgm.state === 'idle' ? 0.45 : 0.92}"/>`;
         if (sgm.state === 'waitTool' || sgm.state === 'toolchange' || sgm.state === 'fault') {
           const key = 'sg:' + mx.id + ':' + sgm.t0;
           g += `<rect data-k="${key}" x="${(X(a) - 2).toFixed(1)}" y="${yb - 5}" width="${Math.max(6, X(b) - X(a) + 4).toFixed(1)}" height="16" fill="transparent"/>`;
@@ -1195,14 +1326,14 @@
         if (e0 <= now || fe.start >= tB) continue;
         if (sE > s0 + 30) {
           const key = 'fs:' + mx.id + ':' + fe.orderId + fe.seq;
-          g += `<rect data-k="${key}" x="${X(s0).toFixed(1)}" y="${yb}" width="${Math.max(1, X(sE) - X(s0)).toFixed(1)}" height="6" style="fill:var(--st-setup);opacity:.55"/>`;
+          g += `<rect data-k="${key}"${fe.active ? LA(fe.start, sE, 1) : ''} x="${X(s0).toFixed(1)}" y="${yb}" width="${Math.max(1, X(sE) - X(s0)).toFixed(1)}" height="6" style="fill:var(--st-setup);opacity:.55"/>`;
           tips[key] = { c: 'var(--st-setup)', k: 'Plan · Rüsten', h: `${fe.orderId} · AG ${fe.seq}`, rows: [['Rüsten', fe.active ? `läuft · fertig ca. ${tclock(fe.setupEnd, now)}` : `ca. ${tclock(fe.start, now)} – ${tclock(fe.setupEnd, now)}`], ['Arbeitsgang', fe.op || '–']], note: 'Beim Rüsten werden alle Werkzeuge des Arbeitsgangs durch neue, vermessene ersetzt (Sägeband, Schleifscheibe und Wälzfräser gleichen Typs bleiben montiert).' };
           if (X(sE) - X(s0) > 34 && !narrow) setupLbl.push({ x: X(s0) + 3, w: 40, fe });
         }
         const r0 = fe.active ? Math.max(now, sE) : sE;
         if (e0 > r0) {
           const key = 'fr:' + mx.id + ':' + fe.orderId + fe.seq;
-          g += `<rect data-k="${key}" x="${X(r0).toFixed(1)}" y="${yb}" width="${Math.max(1, X(e0) - X(r0)).toFixed(1)}" height="6" style="fill:var(--st-run);opacity:${fe.active ? 0.34 : 0.24}"/>`;
+          g += `<rect data-k="${key}"${fe.active ? LA(sE, e0, 1) : ''} x="${X(r0).toFixed(1)}" y="${yb}" width="${Math.max(1, X(e0) - X(r0)).toFixed(1)}" height="6" style="fill:var(--st-run);opacity:${fe.active ? 0.34 : 0.24}"/>`;
           tips[key] = { c: 'var(--st-run)', k: 'Plan · Fertigung', h: `${fe.orderId} · AG ${fe.seq}`, rows: [['Arbeitsgang', fe.op || '–'], ['Maschine belegt bis', 'ca. ' + tclock(e0, now)]] };
           if (fe.active && e0 < tB - 600 && X(e0) - xn > 30) g += `<line x1="${X(e0).toFixed(1)}" x2="${X(e0).toFixed(1)}" y1="${yb - 3}" y2="${yb + 9}" style="stroke:var(--st-run)" stroke-width="2"/>`;
         }
@@ -1211,7 +1342,7 @@
       const marks = [];
       if (mx.changing) {
         const b = Math.max(now, mx.changing.t1);
-        g += `<rect x="${xn.toFixed(1)}" y="${yb}" width="${Math.max(2, X(b) - xn).toFixed(1)}" height="6" class="tl-pulse" style="fill:var(--st-tool)"/>`;
+        g += `<rect${LA(now, b, 2)} x="${xn.toFixed(1)}" y="${yb}" width="${Math.max(2, X(b) - xn).toFixed(1)}" height="6" class="tl-pulse" style="fill:var(--st-tool)"/>`;
         marks.push({ key: 'cg:' + mx.id, t: now, kind: 'changing', codes: mx.changing.list.map(x => codeOf(x.type, (TT(x.type) || {}).name)), sel: 'machine|' + mx.id });
         tips['cg:' + mx.id] = { c: 'var(--st-tool)', k: 'Jetzt · Werkzeugwechsel', h: mx.changing.list.map(x => (TT(x.type) || {}).name || x.type).join(', '), rows: [['Durch', pName(mx.changing.by)], ['Seit', tclock(mx.changing.t0, now)], ['Fertig ca.', tclock(mx.changing.t1, now)]], note: mx.changing.list.map(x => x.reason).filter(Boolean).join(' · ') };
       }
@@ -1225,8 +1356,8 @@
         const key = 'ev:' + e.id;
         const first = e.data && e.data.tools && e.data.tools[0];
         g += `<g class="tl-mk" data-k="${key}" ${first && first.oldToolId ? `data-sel="tool|${esc(first.oldToolId)}"` : ''}><rect x="${(xb - 1.5).toFixed(1)}" y="${ym - 9}" width="3" height="18" rx="1.5" style="fill:${col}"/><rect x="${(Math.min(xa, xb - 6)).toFixed(1)}" y="${ym - 10}" width="${Math.max(12, xb - xa + 6).toFixed(1)}" height="20" fill="transparent"/></g>`;
-        tips[key] = { c: col, k: 'Gewechselt', h: (e.data.tools || []).map(x => toolShort(x.name)).join(', '),
-          rows: [['Uhrzeit', `${tclock(e.t - d, now)} – ${tclock(e.t, now)}`], ['Durch', pName(e.data.by)], ['Dauer', U.fmtDur(d)]].concat((e.data.tools || []).map(x => [toolShort(x.name), `${pct(x.wearPct, 0)} · ${catOf(x).label}`])),
+        tips[key] = { c: col, k: e.data.index ? 'Schneide gewendet' : 'Gewechselt', h: (e.data.tools || []).map(x => toolShort(x.name)).join(', '),
+          rows: [['Uhrzeit', `${tclock(e.t - d, now)} – ${tclock(e.t, now)}`], ['Durch', pName(e.data.by)], ['Dauer', U.fmtDur(d)]].concat((e.data.tools || []).map(x => [toolShort(x.name), `${pct(x.wearPct, 0)} · ${x.action === 'index' ? `gewendet ${x.edgeFrom} → ${x.edgeTo}/${x.edges}` : catOf(x).label}`])),
           note: e.data.cause || '' };
       }
       // Engine-Plan (geplant) und eigene Projektion (voraussichtlich)
@@ -1237,15 +1368,16 @@
           g += `<rect data-k="${key}" x="${X(gp.waitFromT).toFixed(1)}" y="${yb - 1}" width="${Math.max(2, X(gp.t) - X(gp.waitFromT)).toFixed(1)}" height="8" rx="2" style="fill:var(--st-wait);opacity:.85"/>`;
           tips[key] = { c: 'var(--st-wait)', k: 'Plan · Stillstand', h: 'Wartet auf Werkzeug', rows: [['Von – bis', `ca. ${tclock(gp.waitFromT, now)} – ${tclock(gp.t, now)}`], ['Dauer', U.fmtDur(gp.t - gp.waitFromT)]], note: gp.note || 'Standzeit reicht nicht bis zur Ankunft der Einrichter:in.' };
         }
-        const dur = Math.max(...gp.tools.map(t => changeSecKind(t.kind)));
-        if (gp.t + dur > now) g += `<rect x="${X(Math.max(now, gp.t)).toFixed(1)}" y="${yb}" width="${Math.max(2, X(gp.t + dur) - X(Math.max(now, gp.t))).toFixed(1)}" height="6" style="fill:var(--st-tool);opacity:${gp.later ? 0.6 : 0.9}"/>`;
+        const gIdx = gp.tools.length > 0 && gp.tools.every(willIndex);
+        const dur = Math.max(...gp.tools.map(t => changeSecOf(t.kind, willIndex(t))));
+        if (gp.t + dur > now) g += `<rect${LA(gp.t, gp.t + dur, 2)} x="${X(Math.max(now, gp.t)).toFixed(1)}" y="${yb}" width="${Math.max(2, X(gp.t + dur) - X(Math.max(now, gp.t))).toFixed(1)}" height="6" style="fill:var(--st-tool);opacity:${gp.later ? 0.6 : 0.9}"/>`;
         const wait = gp.waitFromT != null;
         const stage = gp.by ? `${gp.by} · ${gp.stage}` : gp.stage === 'später' ? 'eigener Stopp, nach dem nächsten Wechsel' : gp.stage === 'offen' ? 'wird rechtzeitig losgeschickt' : gp.stage;
         const beyond = gp.t > tB && wait && gp.waitFromT < tB;
         if (gp.t <= tB || beyond) marks.push({ key: gp.key, t: beyond ? Math.max(now, gp.waitFromT) : gp.t, kind: wait ? 'wait' : gp.later ? 'later' : 'plan', codes: gp.tools.map(t => codeOf(t.typeId, t.name)), sel: gp.tools[0].id ? 'tool|' + gp.tools[0].id : 'machine|' + mx.id,
-          label: beyond ? `Stopp ca. ${U.fmtClock(gp.waitFromT)} · Wechsel ${tclock(gp.t, now)}` : gp.by ? [`nach Teil ${gp.afterPart} · ${U.fmtClock(gp.t)} · ${gp.by}`, `nach Teil ${gp.afterPart} · ${U.fmtClock(gp.t)}`] : `nach Teil ${gp.afterPart} · ${U.fmtClock(gp.t)}` });
-        tips[gp.key] = { c: wait ? 'var(--st-wait)' : 'var(--st-tool)', k: gp.later ? 'Geplant · eigener Stopp' : wait ? 'Geplant · Maschine wartet vorher' : 'Geplant', h: gp.tools.map(t => toolShort(t.name) + (t.plannedChange && t.plannedChange.bundled ? ' (mitgewechselt)' : '')).join(', '),
-          rows: [['Teilegrenze', `nach Teil ${gp.afterPart}`], ['Uhrzeit', 'ca. ' + tclock(gp.t, now)], ['Einrichter:in', stage || '–']].concat(gp.tools.map(t => [toolShort(t.name), `${pct(t.wearPct, 0)} · noch ${teile(t.remainingParts)}`])).concat(wait ? [['Stopp ab', 'ca. ' + tclock(gp.waitFromT, now)]] : []),
+          label: beyond ? `Stopp ca. ${U.fmtClock(gp.waitFromT)} · Wechsel ${tclock(gp.t, now)}` : gp.by ? [`${afterTxt(gp.afterPart)} · ${U.fmtClock(gp.t)} · ${gp.by}`, `${afterTxt(gp.afterPart)} · ${U.fmtClock(gp.t)}`] : `${afterTxt(gp.afterPart)} · ${U.fmtClock(gp.t)}` });
+        tips[gp.key] = { c: wait ? 'var(--st-wait)' : 'var(--st-tool)', k: (gp.later ? 'Geplant · eigener Stopp' : wait ? 'Geplant · Maschine wartet vorher' : 'Geplant') + (gIdx ? ' · Schneide wenden' : ''), h: gp.tools.map(t => toolShort(t.name) + (willIndex(t) && edgeOf(t) ? ` (Schneide ${edgeOf(t).no} → ${edgeOf(t).no + 1}/${edgeOf(t).of})` : '') + (t.plannedChange && t.plannedChange.bundled ? ' (mitgewechselt)' : '')).join(', '),
+          rows: [['Teilegrenze', `${afterTxt(gp.afterPart)}`], ['Uhrzeit', 'ca. ' + tclock(gp.t, now)], ['Einrichter:in', stage || '–']].concat(gp.tools.map(t => [toolShort(t.name), `${pct(t.wearPct, 0)} · noch ${teile(t.remainingParts)}`])).concat(wait ? [['Stopp ab', 'ca. ' + tclock(gp.waitFromT, now)]] : []),
           note: gp.note || (gp.tools[0] && gp.tools[0].explain) || '' };
       }
       for (const p of mx.proj) {
@@ -1254,7 +1386,7 @@
         const names = p.members.map(mb => toolShort(mb.s.tx.name) + (mb.bundled ? ' (mitgewechselt)' : ''));
         if (p.waitFromT != null && p.waitFromT < tB && p.t > now) {
           const key = 'pw:' + p.key, xa = X(Math.max(now, p.waitFromT)), xb = X(p.t);
-          g += `<rect data-k="${key}" x="${xa.toFixed(1)}" y="${yb - 1}" width="${Math.max(2, xb - xa).toFixed(1)}" height="8" rx="2" fill="url(#tl-hatchw)" style="stroke:var(--st-wait);stroke-width:1;stroke-opacity:.7"/>`;
+          g += `<rect data-k="${key}"${LA(p.waitFromT, p.t, 2)} x="${xa.toFixed(1)}" y="${yb - 1}" width="${Math.max(2, xb - xa).toFixed(1)}" height="8" rx="2" fill="url(#tl-hatchw)" style="stroke:var(--st-wait);stroke-width:1;stroke-opacity:.7"/>`;
           tips[key] = { c: 'var(--st-wait)', k: 'Voraussichtlich · Stillstand', h: `Wartet auf Werkzeug (${toolShort(t0.name)})`, rows: [['Ab', 'ca. ' + tclock(p.waitFromT, now)], ['Bis', 'ca. ' + tclock(p.t, now)], ['Dauer', U.fmtDur(p.t - p.waitFromT)]],
             note: `Die Standzeit reicht bis ca. ${tclock(p.waitFromT, now)}; vorher ist niemand mit Werkzeugwechsel-Qualifikation im Dienst (nächster Arbeitsbeginn ${tclock(p.staffT || p.t, now)}). Abhilfe: vorbeugender Wechsel vor Schichtende in der Maschinenansicht.` };
         }
@@ -1264,8 +1396,8 @@
         const annc = !nxt && t0.announcedT != null && !wait;
         marks.push({ key: p.key, t: beyond ? Math.max(now, p.waitFromT) : p.t, kind: wait ? 'projwait' : annc ? 'later' : 'proj', codes: p.members.map(mb => codeOf(mb.s.tx.typeId, mb.s.tx.name)), sel: t0.id ? 'tool|' + t0.id : 'machine|' + mx.id,
           label: beyond ? `Stopp ca. ${U.fmtClock(p.waitFromT)} · Wechsel erst ${tclock(p.t, now)}` : wait ? `Wechsel ca. ${tclock(p.t, now)}` : `ca. ${U.fmtClock(p.t)}` });
-        tips[p.key] = { c: wait ? 'var(--st-wait)' : 'var(--st-tool)', k: nxt ? 'Voraussichtlich · neue Schneide' : annc ? `Angekündigt ${tclock(t0.announcedT, now)} · Termin nach dem laufenden Wechsel` : 'Voraussichtlich · noch nicht geplant', h: names.join(', '),
-          rows: [['Teilegrenze', `nach Teil ${p.afterPart}`], ['Uhrzeit', 'ca. ' + tclock(p.t, now)]].concat(wait ? [['Stillstand ab', 'ca. ' + tclock(p.waitFromT, now)]] : []).concat(nxt ? [['Grund', 'die neue Schneide erreicht ihre Wechselgrenze']] : [['Planung', `in ca. ${teilen(p.inParts)}`], ['Reststandzeit', `${teile(t0.remainingPartsAfterPart)} nach dem laufenden Teil`]]),
+        tips[p.key] = { c: wait ? 'var(--st-wait)' : 'var(--st-tool)', k: (nxt ? 'Voraussichtlich · neue Schneide' : annc ? `Angekündigt ${tclock(t0.announcedT, now)} · Termin nach dem laufenden Wechsel` : 'Voraussichtlich · noch nicht geplant') + (p.index ? ' · wenden' : ''), h: names.join(', '),
+          rows: [['Teilegrenze', `${afterTxt(p.afterPart)}`], ['Uhrzeit', 'ca. ' + tclock(p.t, now)]].concat(wait ? [['Stillstand ab', 'ca. ' + tclock(p.waitFromT, now)]] : []).concat(nxt ? [['Grund', 'die neue Schneide erreicht ihre Wechselgrenze']] : [['Planung', `in ca. ${teilen(p.inParts)}`], ['Reststandzeit', `${teile(t0.remainingPartsAfterPart)} nach dem laufenden Teil`]]),
           note: wait ? 'Keine Einrichter:in im Dienst, wenn die Standzeit endet – gewechselt wird zu Arbeitsbeginn.' : (p.members.some(mb => mb.bundled) ? 'Fast fällige Werkzeuge kommen beim selben Stopp mit (ein Stopp statt zwei). ' : '') + (nxt ? 'Hochgerechnet aus Standzeit und Taktzeit; geplant wird erst, wenn die Reststandzeit den Vorlauf erreicht.' : `Geplant wird, sobald nur noch ${teile(t0.planHorizonParts || PLAN_AT())} Reststandzeit übrig sind – dann wird die Einrichter:in benachrichtigt.`) };
       }
       marks.sort((a, b) => a.t - b.t);
@@ -1308,27 +1440,35 @@
         }
       });
       if (!mv.order) {
+        // Text passend zur verfügbaren Breite wählen (Telefon: Kurzform) – nie über den Kartenrand hinaus
         const nxt = mx.fc.find(fe => !fe.active && fe.start > now);
-        const txt = nxt && nxt.start < tB ? `kein Arbeitsgang · Rüsten für ${nxt.orderId} AG ${nxt.seq} ab ca. ${tclock(nxt.start, now)}` : 'kein Arbeitsgang · Werkzeuge bleiben bis zum nächsten Rüsten montiert';
-        const tx0 = Math.max(xn, x0) + 12;
-        g += `<text class="tl-rs" x="${tx0.toFixed(1)}" y="${ym + 4}">${esc(txt)}</text>`;
-        occ.push([tx0, tx0 + txt.length * 5.4]);
+        const tx0 = Math.max(xn, x0) + 10, avail = x1 - tx0 - 2;
+        const opts = nxt && nxt.start < tB ? [`kein Arbeitsgang · Rüsten für ${nxt.orderId} AG ${nxt.seq} ab ca. ${tclock(nxt.start, now)}`, `Rüsten ${nxt.orderId} ab ca. ${tclock(nxt.start, now)}`, `Rüsten ab ${tclock(nxt.start, now)}`]
+          : ['kein Arbeitsgang · Werkzeuge bleiben bis zum nächsten Rüsten montiert', 'kein AG · Werkzeuge bleiben montiert', 'kein Arbeitsgang', 'kein AG'];
+        const txt = opts.find(o => o.length * 5.7 <= avail) || '';
+        if (txt) { g += `<text class="tl-rs" x="${tx0.toFixed(1)}" y="${ym + 4}">${esc(txt)}</text>`; occ.push([tx0, tx0 + txt.length * 5.7]); }
       }
       // „Rüsten“-Beschriftung nur, wo sie nichts verdeckt
       for (const sl of setupLbl) if (!occ.some(r => sl.x < r[1] && sl.x + sl.w > r[0])) g += `<text class="tl-ml p" x="${sl.x.toFixed(1)}" y="${yb - 4}" pointer-events="none">Rüsten</text>`;
     });
     g += `<line x1="0" x2="${W}" y1="${H - 1}" y2="${H - 1}" style="stroke:var(--line)" stroke-width="1"/>`;
     // Jetzt-Linie
-    g += `<line x1="${xn.toFixed(1)}" x2="${xn.toFixed(1)}" y1="${AX - 10}" y2="${H}" style="stroke:var(--accent)" stroke-width="1.5"/>`;
+    g += `<line data-lvn x1="${xn.toFixed(1)}" x2="${xn.toFixed(1)}" y1="${AX - 10}" y2="${H}" style="stroke:var(--accent)" stroke-width="1.5"/>`;
     const nl = 'Jetzt ' + U.fmtClock(now), nw = nl.length * 6 + 14;
-    g += `<rect x="${(xn - nw / 2).toFixed(1)}" y="${AX - 28}" width="${nw}" height="18" rx="9" style="fill:var(--accent)"/><text class="tl-now-l" x="${xn.toFixed(1)}" y="${AX - 15.5}" text-anchor="middle">${nl}</text>`;
+    g += `<g data-lvt transform="translate(${xn.toFixed(1)},0)"><rect x="${(-nw / 2).toFixed(1)}" y="${AX - 28}" width="${nw}" height="18" rx="9" style="fill:var(--accent)"/><text class="tl-now-l" x="0" y="${AX - 15.5}" text-anchor="middle">${nl}</text></g>`;
     const defs = `<defs><pattern id="tl-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" style="stroke:var(--line2)" stroke-width="2"/></pattern><pattern id="tl-hatchw" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" style="fill:var(--card)"/><line x1="0" y1="0" x2="0" y2="5" style="stroke:var(--st-wait)" stroke-width="2.2"/></pattern></defs>`;
     R.planSvg.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Wechselplan je Maschine">${defs}${g}</svg>`;
+    const sv = R.planSvg.firstChild;
+    R.plan._lv = { tA, W, t0: now, X, x0, now, past: sv.querySelector('[data-lvp]'), line: sv.querySelector('[data-lvn]'), tag: sv.querySelector('[data-lvt]'), tagTxt: sv.querySelector('[data-lvt] text'), clock: U.fmtClock(now),
+      L: [...sv.querySelectorAll('[data-la]')].map(n => ({ n, a: +n.dataset.la, b: +n.dataset.lb, m: +n.dataset.lm })),
+      Rr: [...sv.querySelectorAll('[data-ra]')].map(n => ({ n, a: +n.dataset.ra, m: +n.dataset.lm })) };
     ui.tips = tips;
     if (ui.tipKey && tips[ui.tipKey]) showTip(ui.tipKey, ui.tipX, ui.tipY); else if (ui.tipKey) hideTip();
     // Fußzeile
-    const nPlan = m.machines.reduce((n, mx) => n + mx.groups.filter(g2 => g2.t != null && g2.t <= tB).length, 0);
-    const nProj = m.machines.reduce((n, mx) => n + mx.proj.filter(p => p.t != null && p.t <= tB).length, 0);
+    // gezählt wird, was im Fenster sichtbar ist – auch Stillstände, deren Wechsel erst danach liegt
+    const inWin = (t, w) => (t != null && t <= tB) || (w != null && w < tB);
+    const nPlan = m.machines.reduce((n, mx) => n + mx.groups.filter(g2 => inWin(g2.t, g2.waitFromT)).length, 0);
+    const nProj = m.machines.reduce((n, mx) => n + mx.proj.filter(p => p.t != null && inWin(p.t, p.waitFromT)).length, 0);
     const nPast = m.evToday.length;
     setHTML(R.planF, `<span><b>${nPlan}</b> geplant</span><span><b>${nProj}</b> voraussichtlich</span><span><b>${nPast}</b> heute erledigt</span><span class="tl-plan-fx">Geplant = angekündigt, Einrichter:in informiert · voraussichtlich = aus Reststandzeit und Taktzeit hochgerechnet</span>`);
   }
@@ -1401,6 +1541,8 @@
     const bundledToday = m.evToday.reduce((n, e) => n + ((e.data && e.data.tools) || []).filter(x => x.bundled).length, 0);
     const cf = CFG();
     const q = m.queue.find(x => x.machineId === t.machineId);
+    const eg = edgeOf(t);
+    const idxNext = !!eg && !eg.last && t.kind === 'insert' && !t.broken && (t.nextAction ? t.nextAction === 'index' : true);
     // Zustand je Schritt: done · now · skip · '' (kommt noch)
     const S6 = ['done', 'done', '', '', '', ''];
     const tag = {};
@@ -1429,7 +1571,7 @@
     if (S6[2] === 'skip') d3 = `Kein Wechsel nötig: die Schneide reicht für alle <b>${teile(t.neededParts || 0)}</b> dieses Arbeitsgangs.`;
     else if (t.announcedT) d3 = `Angekündigt <b>${tclock(t.announcedT, now)}</b> bei ≤ ${teilen(H)} Rest – Meldung an die Einrichter:innen.`;
     else if (pc) d3 = `Angekündigt bei ≤ <b>${teilen(H)}</b> Rest – Meldung an die Einrichter:innen.`;
-    else { const p = t.proj[0]; d3 = `Bei ≤ <b>${teilen(H)}</b> Rest (Vorlauf für Holen und Weg)${p ? ` – also in ca. <b>${teilen(p.inParts)}</b>` : ''}.`; }
+    else { const p = t.proj[0]; d3 = `Bei ≤ <b>${teilen(H)}</b> Rest (Vorlauf ${idxNext ? 'bis die Bediener:in an der Maschine ist' : 'für Holen und Weg'})${p ? ` – also in ca. <b>${teilen(p.inParts)}</b>` : ''}.`; }
     steps.push(['Rechtzeitig angekündigt', d3]);
     // 4 Vermessenes Werkzeug aus der Werkzeugausgabe
     const stockTxt = `Ausgabe: <b>${ready != null ? ready : '–'} Stk</b> bereit${ready === 0 ? ` (sonst Voreinstellen +${tt.presetMin || 3} min)` : ''}`;
@@ -1440,14 +1582,19 @@
     else if (pc && pc.stage === 'Werkzeug liegt bereit') d4 = 'Vermessenes Werkzeug liegt schon an der Maschine.';
     else if (q && q.stage === 0 && q.detail) d4 = `${esc(q.detail)}. ${stockTxt}.`;
     else d4 = `Einrichter:in holt ein vermessenes Werkzeug (${policy().fetchMin || 3} min). ${stockTxt}.`;
-    steps.push(['Vermessenes Werkzeug kommt', S6[3] === 'skip' ? 'Entfällt.' : d4]);
+    if (idxNext && S6[3] !== 'skip' && t.status !== 'broken') {
+      // Wenden statt Holen: nächste Schneide derselben Platte, an der Maschine – kein Weg zur Werkzeugausgabe
+      const im = CFG().indexMin || [1, 2];
+      d4 = `${t.status === 'changing' ? 'Wird gerade <b>an der Maschine gewendet</b>' : `Die Bediener:in wendet <b>an der Maschine</b>${pc && pc.by ? ` (<b>${esc(pc.by)}</b> · ${esc(pc.stage)})` : ''}`}: Schneide ${eg.no} → ${eg.no + 1} von ${eg.of}, ca. ${im[0]}–${im[1]} min, kein Gang zur Werkzeugausgabe. Erst nach der letzten Schneide kommt eine neue, vermessene Platte (${stockTxt.replace('Ausgabe: ', '')}).`;
+      steps.push(['Schneide wenden statt Werkzeug holen', d4]);
+    } else steps.push(['Vermessenes Werkzeug kommt', S6[3] === 'skip' ? 'Entfällt.' : d4 + (eg && eg.last && t.kind === 'insert' ? ` Letzte Schneide (${eg.no}/${eg.of}) – danach neue Platte.` : '')]);
     // 5 Wechsel an der Teilegrenze
     let d5;
     if (t.status === 'changing') d5 = esc(planText(t, now).sub || 'Wird gerade gewechselt.');
     else if (t.status === 'due') d5 = 'Standzeit erschöpft – gewechselt wird, sobald das Werkzeug da ist.';
     else if (pc && t.status === 'broken') d5 = `Nach der Reparatur an der nächsten Teilegrenze: <b>${esc(pc.text.replace(/ – Maschine steht.*$/, ''))}</b>${pc.waitFromT != null ? `. <b style="color:var(--st-wait)">Maschine wartet ab ca. ${tclock(pc.waitFromT, now)}</b>` : ''}.`;
     else if (pc) d5 = `<b>${esc(pc.text.replace(/ – Maschine steht.*$/, ''))}</b> · ${at === 0 ? 'Wechselgrenze 0 Teile: lange Schnitte werden erst getauscht, wenn kein ganzes Teil mehr geht' : `Wechselgrenze ≤ ${teilen(at)} Rest`}${pc.waitFromT != null ? `. <b style="color:var(--st-wait)">Stopp ab ca. ${tclock(pc.waitFromT, now)}</b>` : ''}.`;
-    else if (t.need) { const p = t.proj[0]; d5 = p && p.t != null ? (p.waitFromT != null ? `Voraussichtlich <b>nach Teil ${p.afterPart} · ca. ${tclock(p.t, now)}</b> – <b style="color:var(--st-wait)">Stillstand ab ca. ${tclock(p.waitFromT, now)}</b>, weil vorher niemand im Dienst ist.` : `Voraussichtlich <b>nach Teil ${p.afterPart} · ca. ${tclock(p.t, now)}</b> – letzte Teilegrenze vor dem Stopp.`) : 'An der letzten Teilegrenze vor dem Stopp.'; }
+    else if (t.need) { const p = t.proj[0]; d5 = p && p.t != null ? (p.waitFromT != null ? `Voraussichtlich <b>${afterTxt(p.afterPart)} · ca. ${tclock(p.t, now)}</b> – <b style="color:var(--st-wait)">Stillstand ab ca. ${tclock(p.waitFromT, now)}</b>, weil vorher niemand im Dienst ist.` : `Voraussichtlich <b>${afterTxt(p.afterPart)} · ca. ${tclock(p.t, now)}</b> – letzte Teilegrenze vor dem Stopp.`) : 'An der letzten Teilegrenze vor dem Stopp.'; }
     else d5 = `Entfällt – Arbeitsgang endet ${mv && mv.etaOpEnd ? 'ca. ' + tclock(mv.etaOpEnd, now) : 'vorher'}, danach wird neu gerüstet.`;
     steps.push(['Wechsel nur zwischen zwei Teilen', d5]);
     // 6 Mitwechseln
@@ -1462,7 +1609,7 @@
       return `<li class="tl-step ${cls}" style="--c:${sc}"><span class="tl-sn">${cls === 'done' ? icon('check', 12) : i + 1}</span><div><div class="tl-st-t">${esc(title)}${tg}</div><div class="tl-st-d">${d}</div></div></li>`;
     }).join('');
     const head = `<div class="tl-ex-tool" data-sel="tool|${esc(t.id)}" tabindex="0" role="button" title="Werkzeugdetails öffnen">
-        <div class="tl-ex-tn">${chip(stLabel(t.status), c, 'dot' + (t.status === 'changing' ? ' pulse' : ''))}<b>${esc(t.name)}</b><span class="mono">${esc(t.machineId)}</span></div>
+        <div class="tl-ex-tn">${chip(stLabel(t.status), c, 'dot' + (t.status === 'changing' ? ' pulse' : ''))}<b>${esc(t.name)}</b>${eg ? `<span class="tl-idx" title="Wendeplatte: Schneide ${eg.no} von ${eg.of}">Schneide ${eg.no}/${eg.of}</span>` : ''}<span class="mono">${esc(t.machineId)}</span></div>
         ${ladder(t, { running })}
       </div>`;
     return `<div class="tl-ex-l">${head}</div><ol class="tl-steps">${lis}</ol>`;
@@ -1485,6 +1632,7 @@
     }
     const fl = [['all', 'Alle', 'var(--muted)'], ['planned', 'Wechsel geplant', 'var(--st-tool)'], ['changing', 'Wird gewechselt', 'var(--st-tool)'], ['due', 'Standzeit erschöpft', 'var(--st-wait)'], ['broken', 'Gebrochen', 'var(--st-fault)'], ['ok', 'In Ordnung', 'var(--st-run)'], ['other', 'Rüsten / nicht im Einsatz', 'var(--st-idle)']];
     setHTML(R.filt, fl.map(([k, l, c]) => `<button data-f="${k}" class="${ui.filter === k ? 'on' : ''}${counts[k] ? '' : ' zero'}" style="--c:${c}"><i></i>${esc(l)} <b>${counts[k]}</b></button>`).join(''));
+    let moreN = 0, moreCut = false;
     const pass = (t) => ui.filter === 'all' || (ui.filter === 'other' ? !['planned', 'due', 'changing', 'broken', 'ok'].includes(t.status) : t.status === ui.filter);
     const items = [];
     const row = (t, showM) => {
@@ -1493,7 +1641,8 @@
       const hot = ['planned', 'due', 'changing', 'broken'].includes(t.status);
       const rest = t.remainingParts != null ? `noch ${teile(t.remainingParts)}` : '–';
       const restSub = t.remainingMin != null ? `${minTxt(t.remainingMin)} Schnittzeit` : t.status === 'idle' ? 'nicht im Arbeitsgang' : '';
-      const sub = `${kindLabel(t.kind)}${t.cutMinPerPart != null ? ' · ' + U.fmtNum(t.cutMinPerPart, 1) + ' min/Teil' : ''} · Standzeit ${U.fmtNum(t.life)} min${t.dressEvery ? ` · Abrichten alle ${t.dressEvery} Teile` : ''}`;
+      const eg = edgeOf(t);
+      const sub = `${kindLabel(t.kind)}${eg ? ` · Schneide ${eg.no}/${eg.of}` : ''}${t.cutMinPerPart != null ? ' · ' + U.fmtNum(t.cutMinPerPart, 1) + ' min/Teil' : ''} · Standzeit ${U.fmtNum(t.life)} min${t.dressEvery ? ` · Abrichten alle ${t.dressEvery} Teile` : ''}`;
       const mountedSec = t.mountedT != null ? now - t.mountedT : null;
       const html = `<span class="tl-slot c-slot">${t.slot ? 'T' + t.slot : '–'}</span>
         <div class="tl-tn c-n"><b title="${esc(t.name)}">${showM ? `<span class="mono" style="color:var(--muted);font-weight:500;margin-right:6px">${esc(t.machineId)}</span>` : ''}${esc(t.name)}</b><small>${esc(sub)}<span class="tl-mid">${t.mountedT != null ? ' · eingebaut ' + esc(tclock(t.mountedT, now)) : ''}${t.parts != null ? ' · ' + esc(teile(t.parts)) + ' mit Schneide' : ''}</span></small></div>
@@ -1512,7 +1661,7 @@
         const mv = mx.mv;
         const nx = mx.groups.find(g => g.t != null);
         const np = mx.proj.find(p => p.t != null);
-        const nextTxt = nx ? `nächster Wechsel <b>${esc(tclock(nx.t, now))}</b> · nach Teil ${nx.afterPart}` : mx.changing ? '<b>Werkzeugwechsel läuft</b>' : np ? `voraussichtlich ca. ${esc(tclock(np.t, now))}` : mv.order ? 'kein Wechsel bis AG-Ende' : '';
+        const nextTxt = nx ? `nächster Wechsel <b>${esc(tclock(nx.t, now))}</b> · ${afterTxt(nx.afterPart)}` : mx.changing ? '<b>Werkzeugwechsel läuft</b>' : np ? `voraussichtlich ca. ${esc(tclock(np.t, now))}` : mv.order ? 'kein Wechsel bis AG-Ende' : '';
         const html = `<span class="tl-gh-n">${esc(mv.short)}</span><span class="mono">${esc(mx.id)}</span>${WF.ui.pill(mv.state)}
           <span class="tl-gh-o">${mv.order ? `${esc(mv.order.id)} · AG ${mv.order.seq} ${esc(mv.order.op)} <em>· ${mv.partNo != null ? 'Teil ' + mv.partNo + ' von ' + mv.partsTotal : mv.partsDone + ' von ' + mv.partsTotal + ' fertig'}</em>` : '<em>kein Arbeitsgang</em>'}</span>
           <span class="tl-gh-x">${nextTxt}</span>`;
@@ -1520,8 +1669,11 @@
         for (const t of ts) items.push(row(t, false));
       }
     } else {
+      // Dringlichste zuerst: die ersten acht, der Rest auf Wunsch (Präsentation: das Wichtige passt auf einen Blick)
       const ts = m.tools.filter(pass).slice().sort((a, b) => cmp(a.urg, b.urg));
-      for (const t of ts) items.push(row(t, true));
+      const cut = !ui.showAll && ts.length > TOP_N + 2;
+      for (const t of (cut ? ts.slice(0, TOP_N) : ts)) items.push(row(t, true));
+      moreN = ts.length; moreCut = cut;
     }
     if (!items.length) {
       setHTML(R.rows, `<div class="tl-empty"><b>Keine Werkzeuge in dieser Auswahl</b>Filter oben zurücksetzen, um alle montierten Werkzeuge zu sehen.</div>`);
@@ -1532,7 +1684,9 @@
       // data-sel kann sich ändern (Werkzeug-ID nach Wechsel)
       for (const it of items) { const n = R.rows._map.get(it.key); if (n && n.dataset.sel !== it.sel) n.dataset.sel = it.sel; }
     }
-    setText(R.tableSub, `${m.inUse.length} im Arbeitsgang · ${m.tools.length - m.inUse.length} weitere montiert`);
+    R.rowsMore.hidden = !(ui.sort === 'urgent' && moreN > TOP_N + 2);
+    setText(R.rowsMore.firstChild, moreCut ? `Alle ${moreN} Werkzeuge anzeigen` : `Nur die ${TOP_N} dringlichsten zeigen`);
+    setText(R.tableSub, `${m.inUse.length} im Arbeitsgang · ${m.tools.length - m.inUse.length} weitere montiert${ui.sort === 'urgent' && moreCut ? ` · die ${TOP_N} dringlichsten` : ''}`);
     setHTML(R.tableF, `<span>Verschleißbalken: <b style="color:var(--text2)">voll</b> = Ist, schraffiert = nach dem laufenden Teil, Strich = Wechselgrenze.</span><span>Klick auf ein Werkzeug: Begründung, Standzeit-Leiter und Lebenslauf.</span>`);
   }
 
@@ -1545,7 +1699,7 @@
       <div><div class="l">Nachschliff</div><div class="v">${cb.regrindAll}<small>Stk</small></div></div>
       <div><div class="l">Voreinstellgerät</div><div class="ps" style="--c:${ps ? 'var(--st-tool)' : 'var(--st-run)'}"><i></i><span>${ps ? `<b style="font-weight:600">${esc(ps.person || '–')}</b> stellt ${esc(ps.tools.map(toolShort).join(', ') || 'Werkzeug')} ein` : 'frei'}</span></div></div>`);
     const q = m.queue;
-    const inCrib = q.filter(x => x.stage === 1).length;
+    const inCrib = q.filter(x => x.stage === 1 && !x.index).length;
     setText(R.qSub, q.length ? `${q.length} ${q.length === 1 ? 'Auftrag' : 'Aufträge'}${inCrib ? ' · ' + inCrib + ' gerade in der Ausgabe' : ''}` : 'keine offenen Aufträge');
     if (!q.length) {
       if (R.queue._map) { R.queue._map.clear(); R.queue.innerHTML = ''; }
@@ -1554,10 +1708,11 @@
     }
     if (R.queue._h) { R.queue.innerHTML = ''; R.queue._h = null; }
     patchList(R.queue, q.map(it => {
-      const pipe = PIPE.map((_, i) => `<i class="${i < it.stage ? 'd' : i === it.stage ? 'n' : ''}"></i>`).join('');
-      const lbls = PIPE.map((l, i) => `<span class="${i === it.stage ? 'n' : ''}">${esc(i === 1 && it.preset ? 'Voreinstellen' : l)}</span>`).join('');
-      const html = `<div class="tl-qi-h"><b>${esc(it.short)}</b><span class="mono">${esc(it.machineId)}</span><span class="tl-qt" title="${esc(it.tools.join(', '))}">${esc(it.tools.map(toolShort).join(', ') || 'Werkzeugwechsel')}</span><em>${it.etaT != null ? (it.afterPart != null ? 'nach Teil ' + it.afterPart + ' · ' : '') + 'ca. ' + esc(tclock(it.etaT, now)) : it.stage === 4 ? 'läuft' : ''}</em></div>
-        <div class="tl-pipe">${pipe}</div><div class="tl-pipe-l">${lbls}</div>
+      const PP = it.index ? PIPE_IDX : PIPE;
+      const pipe = PP.map((_, i) => `<i class="${i < it.stage ? 'd' : i === it.stage ? 'n' : ''}"></i>`).join('');
+      const lbls = PP.map((l, i) => `<span class="${i === it.stage ? 'n' : ''}">${esc(i === 1 && it.preset && !it.index ? 'Voreinstellen' : l)}</span>`).join('');
+      const html = `<div class="tl-qi-h"><b>${esc(it.short)}</b><span class="mono">${esc(it.machineId)}</span><span class="tl-qt" title="${esc(it.tools.join(', '))}">${it.index ? '<span class="tl-idx">Schneide wenden</span>' : ''}${esc(it.tools.map(toolShort).join(', ') || 'Werkzeugwechsel')}</span><em>${it.etaT != null ? (it.afterPart != null ? 'nach Teil ' + it.afterPart + ' · ' : '') + 'ca. ' + esc(tclock(it.etaT, now)) : it.stage === 4 ? 'läuft' : ''}</em></div>
+        <div class="tl-pipe" style="grid-template-columns:repeat(${PP.length},minmax(0,1fr))">${pipe}</div><div class="tl-pipe-l" style="grid-template-columns:repeat(${PP.length},minmax(0,1fr))">${lbls}</div>
         ${it.notif ? `<div class="tl-qi-n" style="--c:${it.notif.sev === 'warn' ? 'var(--st-wait)' : 'var(--info)'}">${icon('bell', 12)}<span>Meldung an Einrichter:innen ${esc(tclock(it.notif.t, now))}${it.notif.ack ? ' · quittiert' + (it.notif.ackBy ? ' von ' + esc(it.notif.ackBy) : '') : ''}</span></div>` : ''}
         <div class="tl-qi-d">${it.person ? `<span class="avatar">${esc(WF.ui.initials(it.person.replace('.', '')))}</span><span><b style="font-weight:600">${esc(it.person)}</b></span><span class="m">${esc(it.detail)}</span>` : `<span class="m">${esc(it.detail)}</span>`}</div>`;
       return { key: it.id, cls: 'tl-qi' + (it.urgent ? ' urgent' : ''), attrs: { tabindex: '0', role: 'button', 'data-sel': 'machine|' + it.machineId }, html, sig: html };
@@ -1579,7 +1734,7 @@
     const html = `<div class="tl-cost-v"><b>${esc(U.fmtEur(c.total))}</b><span>${perPart != null ? `≈ ${esc(U.fmtNum(perPart, 2))} € je Gutteil · ${esc(U.fmtNum(m.goodToday))} Gutteile heute` : 'noch keine Gutteile heute'}</span></div>
       ${c.total > 0 ? `<div class="tl-cost-bar">${order.filter(k => c.byCat[k] && c.byCat[k].eur > 0).map(k => `<i style="--c:${CATS[k].c};width:${(c.byCat[k].eur / totBar * 100).toFixed(1)}%" title="${esc(CATS[k].label)}: ${esc(U.fmtEur(c.byCat[k].eur))}"></i>`).join('')}</div>
       <div class="tl-cost-l">${order.filter(k => c.byCat[k] && c.byCat[k].n > 0).map(k => `<span><i style="--c:${CATS[k].c}"></i>${esc(CATS[k].label)} <b>${esc(U.fmtEur(c.byCat[k].eur))}</b></span>`).join('')}${Math.abs(other) > 1 ? `<span>ohne Einzelnachweis <b>${esc(U.fmtEur(other))}</b></span>` : ''}</div>
-      <div class="tl-cost-s">davon verschrottet <b>${esc(U.fmtEur(c.scrap))}</b> · Nachschliff <b>${esc(U.fmtEur(c.regrind))}</b> (25 % des Neupreises)</div>
+      <div class="tl-cost-s">davon verschrottet <b>${esc(U.fmtEur(c.scrap))}</b> · Nachschliff <b>${esc(U.fmtEur(c.regrind))}</b> (25 % des Neupreises)${c.indexed > 0 ? ` · Schneiden gewendet <b>${esc(U.fmtEur(c.indexed))}</b> (Plattenpreis ÷ Schneiden)` : ''}</div>
       <div class="tl-cost-t"><div class="tl-cost-th"><span>Teuerste Werkzeugtypen</span></div>${types.map(([id, v]) => `<div class="tl-cost-r" data-sel="tool|${esc(id)}" role="button" tabindex="0"><span>${esc((TT(id) || {}).name || id)}<small>${v.n}×</small></span>${WF.ui.bar(v.eur / maxE, { color: 'var(--mat)' })}<b>${esc(U.fmtEur(v.eur))}</b></div>`).join('')}</div>
       <div class="tl-cost-t"><div class="tl-cost-th"><span>Je Maschine</span></div>${mach.map(([id, v]) => `<div class="tl-cost-r" data-sel="machine|${esc(id)}" role="button" tabindex="0"><span>${esc(stShort(id))} <small style="margin-left:2px">${esc(id)} · ${v.n} ${v.n === 1 ? 'Werkzeug' : 'Werkzeuge'}</small></span>${WF.ui.bar(v.eur / maxM, { color: 'var(--mat)' })}<b>${esc(U.fmtEur(v.eur))}</b></div>`).join('')}</div>`
       : '<div class="tl-empty" style="padding:6px 0 0;text-align:left">Heute wurde noch kein Werkzeug ausgebaut.</div>'}`;
@@ -1601,7 +1756,10 @@
     const rank = (x) => (x.st.ready <= 0 && x.demand ? 0 : x.demand > x.st.ready ? 1 : x.demand ? 2 : x.mounted ? 3 : 4);
     list.sort((a, b) => rank(a) - rank(b) || b.demand - a.demand || b.mounted - a.mounted || a.tt.name.localeCompare(b.tt.name, 'de'));
     const short = list.filter(x => x.demand > x.st.ready).length;
-    setText(R.stockSub, `${withNeed.length} von ${total} Typen werden in den nächsten 4 h gebraucht${short ? ` · ${short} knapp` : ' · Bestand reicht'}`);
+    ui.subStock = `Vermessen und einsatzbereit · Grundbestand wird zu Schichtbeginn aufgefüllt · ${withNeed.length} von ${total} Typen in den nächsten 4 h gebraucht${short ? ` · ${short} knapp` : ' · Bestand reicht'}`;
+    if (ui.tab === 'stock') setText(R.tabSub, ui.subStock);
+    setText(R.tabNS, short ? short + ' knapp' : '');
+    R.tabNS.classList.toggle('warn', short > 0);
     if (!list.length) { if (R.stock._map) { R.stock._map.clear(); R.stock.innerHTML = ''; } setHTML(R.stock, '<div class="tl-empty"><b>Kein Bedarf in den nächsten 4 Stunden</b>Keine geplanten oder voraussichtlichen Werkzeugwechsel – „Im Einsatz“ zeigt den Bestand aller montierten Typen.</div>'); return; }
     if (R.stock._h) { R.stock.innerHTML = ''; R.stock._h = null; }
     patchList(R.stock, list.map(x => {
@@ -1641,7 +1799,9 @@
       .map(([k, l]) => `<button data-hc="${k}" class="${ui.histCat === k ? 'on' : ''}">${esc(l)} ${cnt[k] || 0}</button>`).join('');
     setHTML(R.histSeg, segHtml);
     const nT = m.evToday.reduce((n, e) => n + ((e.data && e.data.tools) || []).length, 0);
-    setText(R.histSub, (nT ? `heute ${nT} ${nT === 1 ? 'Werkzeug' : 'Werkzeuge'} in ${m.evToday.length} ${m.evToday.length === 1 ? 'Stopp' : 'Stopps'}` : 'heute noch kein Wechsel') + (evs.length > m.evToday.length ? ` · gestern ${evs.length - m.evToday.length} ${evs.length - m.evToday.length === 1 ? 'Stopp' : 'Stopps'}` : ''));
+    ui.subHist = 'Letzte 24 h · ' + (nT ? `heute ${nT} ${nT === 1 ? 'Werkzeug' : 'Werkzeuge'} in ${m.evToday.length} ${m.evToday.length === 1 ? 'Stopp' : 'Stopps'}` : 'heute noch kein Wechsel') + (evs.length > m.evToday.length ? ` · gestern ${evs.length - m.evToday.length} ${evs.length - m.evToday.length === 1 ? 'Stopp' : 'Stopps'}` : '') + ' · Grund, Verschleiß beim Ausbau, Verbleib und Kosten je Werkzeug';
+    if (ui.tab === 'hist') setText(R.tabSub, ui.subHist);
+    setText(R.tabNH, cnt.all ? String(cnt.all) : '');
     const filt = evs.filter(e => ui.histCat === 'all' || ((e.data && e.data.tools) || []).some(x => catOf(x).key === ui.histCat));
     if (!filt.length) {
       if (R.hist._map) { R.hist._map.clear(); R.hist.innerHTML = ''; }
@@ -1672,13 +1832,15 @@
     const segs = mx ? mx.mv.segments : (s.machines[mid] ? s.machines[mid].segments : []);
     for (const sg of segs || []) if (sg.state === 'waitTool' && sg.t1 != null && Math.abs(sg.t1 - t0) < 15) waited += sg.t1 - sg.t0;
     const html = `<div class="tl-he-t">${esc(U.fmtClock(t0))}<small>${esc(U.fmtDur(d.durSec || 0))}</small></div>
-      <div style="min-width:0"><div class="tl-he-h"><button class="link" data-sel="machine|${esc(mid)}">${esc(stShort(mid))} <span class="mono">${esc(mid)}</span></button><span>durch ${esc(pName(d.by))}</span>${waited > 30 ? `<span class="tl-wait">Maschine wartete ${esc(U.fmtDur(waited))}</span>` : ''}${d.firstPieceAfter ? '<span>danach Kontrolle des ersten Teils an der Maschine</span>' : ''}</div>
+      <div style="min-width:0"><div class="tl-he-h"><button class="link" data-sel="machine|${esc(mid)}">${esc(stShort(mid))} <span class="mono">${esc(mid)}</span></button><span>${d.index ? 'Schneide gewendet an der Maschine · ' : ''}durch ${esc(pName(d.by))}</span>${waited > 30 ? `<span class="tl-wait">Maschine wartete ${esc(U.fmtDur(waited))}</span>` : ''}${d.firstPieceAfter ? '<span>danach Kontrolle des ersten Teils an der Maschine</span>' : ''}</div>
       ${(d.tools || []).map(x => {
         const ct = catOf(x);
         const old = x.oldToolId ? s.tools[x.oldToolId] : null;
         const cost = old && old.cost != null ? old.cost : null;
         const rest = x.reason === 'Werkzeugbruch' ? 'gebrochen' : x.rem != null ? (x.rem > 0 ? `Rest ${teile(x.rem)}` : 'Rest 0 Teile') : '';
-        return `<div class="tl-hx" data-sel="tool|${esc(x.oldToolId || x.typeId)}" title="${esc(x.reason)}"><span class="tl-hn">${esc(x.name)}</span><span class="tl-hc">${chip(ct.label, ct.c, 'dot')}</span><span class="tl-hw">${wearBar({ wearPct: x.wearPct, status: 'planned' }, ct.c)}</span><span class="tl-hd">${esc(rest)}${rest ? ' · ' : ''}${esc(x.disposal || '')}${cost != null ? ` · <b>${esc(U.fmtEur(cost))}</b>` : ''}</span></div>`;
+        // Wenden: Platte bleibt in der Maschine, nur die Schneide ist verbraucht (Kosten je Schneide)
+        const disp = x.action === 'index' ? `gewendet · Schneide ${x.edgeFrom} → ${x.edgeTo}/${x.edges}` : (x.disposal || '');
+        return `<div class="tl-hx" data-sel="tool|${esc(x.oldToolId || x.typeId)}" title="${esc(x.reason + (x.disposal ? ' · ' + x.disposal : ''))}"><span class="tl-hn">${esc(x.name)}</span><span class="tl-hc">${chip(ct.label, ct.c, 'dot')}</span><span class="tl-hw">${wearBar({ wearPct: x.wearPct, status: 'planned' }, ct.c)}</span><span class="tl-hd">${esc(rest)}${rest ? ' · ' : ''}${esc(disp)}${cost != null ? ` · <b>${esc(U.fmtEur(cost, cost < 10 ? 1 : 0))}</b>` : ''}</span></div>`;
       }).join('')}</div>`;
     return { key: e.id, cls: 'tl-he', html, sig: html };
   }
@@ -1687,7 +1849,7 @@
   WF.registerView({
     id: 'werkzeuge', title: 'Werkzeuge', icon: 'wrench', group: 'ressourcen', order: 5,
     mount,
-    show() { lastT = -1; if (R.plan) { R.plan._sig = null; } },
+    show() { lastT = -1; if (R.plan) { R.plan._sig = null; R.plan._lv = null; } },
     hide() { hideTip(); },
     update,
     badge() {
@@ -1722,8 +1884,8 @@
       if (e.type === 'toolPlanned' && d.toolId === id) out.push({ t: e.t, c: 'var(--st-tool)', txt: e.msg.replace(/^M\d+:\s*/, '') });
       else if (e.type === 'toolChanged' && d.tools) {
         for (const x of d.tools) {
-          if (x.newToolId === id) out.push({ t: e.t, c: 'var(--st-run)', txt: `<b>Eingebaut</b> an ${esc(e.entity.id)} durch ${esc(pName(d.by))} – ersetzt ${esc(x.name)} (${esc(catOf(x).label)}, ${pct(x.wearPct, 0)} Verschleiß)`, html: true });
-          if (x.oldToolId === id) out.push({ t: e.t, c: x.reason === 'Werkzeugbruch' ? 'var(--st-fault)' : 'var(--st-tool)', txt: `<b>Ausgebaut</b> durch ${esc(pName(d.by))} – ${esc(x.reason)}; Verschleiß ${pct(x.wearPct, 0)} → ${esc(x.disposal)}`, html: true });
+          if (x.newToolId === id) out.push({ t: e.t, c: 'var(--st-run)', txt: x.action === 'index' ? `<b>Gewendet</b> an ${esc(e.entity.id)} durch ${esc(pName(d.by))} – Schneide ${x.edgeFrom} → <b>${x.edgeTo}/${x.edges}</b> (${esc(catOf(x).label)}, vorherige Schneide ${pct(x.wearPct, 0)})` : `<b>Eingebaut</b> an ${esc(e.entity.id)} durch ${esc(pName(d.by))} – ersetzt ${esc(x.name)} (${esc(catOf(x).label)}, ${pct(x.wearPct, 0)} Verschleiß)`, html: true });
+          if (x.oldToolId === id) out.push({ t: e.t, c: x.reason === 'Werkzeugbruch' ? 'var(--st-fault)' : 'var(--st-tool)', txt: x.action === 'index' ? `<b>Schneide ${x.edgeFrom}/${x.edges} verbraucht</b> – ${esc(pName(d.by))} wendet auf Schneide ${x.edgeTo}; ${esc(x.reason)}; Verschleiß ${pct(x.wearPct, 0)}` : `<b>Ausgebaut</b> durch ${esc(pName(d.by))} – ${esc(x.reason)}; Verschleiß ${pct(x.wearPct, 0)} → ${esc(x.disposal)}`, html: true });
         }
       }
     }
@@ -1761,9 +1923,11 @@
     const running = mv.partNo != null;
     const pl = planText(tv, now);
     const perLife = tv.cutMinPerPart ? Math.floor(tv.life / tv.cutMinPerPart + 1e-9) : null;
-    const costPart = perLife ? tt.cost / perLife : null;
+    const eg = edgeOf(tv);
+    const idxNext = !!eg && !eg.last && tl.kind === 'insert' && !tl.broken;
+    const costPart = perLife ? tt.cost / (eg ? eg.of : 1) / perLife : null;
     const st = S().toolStock[tl.typeId] || {};
-    const disp = tl.broken ? `verschrottet – Bruch (${U.fmtEur(tt.cost)})` : tl.kind === 'insert' || tl.kind === 'saw' || tl.kind === 'wheel' ? `verschrottet (${U.fmtEur(tt.cost)})` : `zum Nachschliff (ca. ${U.fmtEur(Math.round(tt.cost * 0.25))})`;
+    const disp = tl.broken ? `verschrottet – Bruch (${U.fmtEur(tt.cost)})` : idxNext ? `wird an der Maschine gewendet → Schneide ${eg.no + 1}/${eg.of} (Schneide ca. ${U.fmtEur(tt.cost / eg.of, 1)})` : tl.kind === 'insert' || tl.kind === 'saw' || tl.kind === 'wheel' ? `verschrottet (${U.fmtEur(tt.cost)})${eg ? ' – letzte Schneide' : ''}` : `zum Nachschliff (ca. ${U.fmtEur(Math.round(tt.cost * 0.25))})`;
     const life = lifeEvents(tl.id);
     const mountedEv = life.some(x => /Eingebaut/.test(x.txt));
     const rows = [
@@ -1772,6 +1936,7 @@
       ['Arbeitsgang', mv.order ? `<button class="link" data-sel="order|${esc(mv.order.id)}">${esc(mv.order.id)}</button> · AG ${mv.order.seq} ${esc(mv.order.op)}` : '–'],
       ['Eingebaut', `${esc(tclock(tl.mountedT, now))} (${esc(ago(now - tl.mountedT))})`],
       ['Teile mit dieser Schneide', esc(U.fmtNum(tl.parts))],
+      ...(eg ? [['Wendeplatte', `Schneide <b>${eg.no}</b> von ${eg.of}${idxNext ? ' – nächster Wechsel: wenden an der Maschine, kein Gang zur Werkzeugausgabe' : ' – letzte Schneide, danach neue Platte'}`]] : []),
       ['Wechselgrenze', tv.changeAtParts != null ? `≤ ${esc(teile(tv.changeAtParts))} Rest${tv.planWearPct != null ? ' (ab ca. ' + pct(tv.planWearPct, 0) + ' Verschleiß)' : ''}` : '–'],
       ['Planungsvorlauf', tv.planHorizonParts != null ? esc(teile(tv.planHorizonParts)) + ' (Holen + Weg)' : '–'],
       ['Bedarf im Arbeitsgang', tv.neededParts != null ? esc(teile(tv.neededParts)) + (tv.need ? ' – Schneide reicht nicht' : ' – Schneide reicht') : '–'],
@@ -1787,7 +1952,7 @@
       </section>
       <section><h4>Standzeit je Teil</h4><div class="tl-d-card">${ladder(tv, { running })}</div></section>
       <section><h4>Nächster Wechsel</h4><div class="tl-d-card"><div class="tl-pl ${pl.cls}" style="--c:${c};font-size:13px"><b style="white-space:normal">${esc(pl.main)}</b>${pl.sub ? `<span style="white-space:normal;margin-top:2px">${esc(pl.sub)}</span>` : ''}</div>
-        ${(tv.proj || []).filter(p => p.kind === 'next').slice(0, 3).map(p => `<div class="tl-lad-k">Folgewechsel voraussichtlich nach Teil ${p.afterPart}${p.t != null ? ' · ca. ' + esc(tclock(p.t, now)) : ''}</div>`).join('')}</div></section>
+        ${(tv.proj || []).filter(p => p.kind === 'next').slice(0, 3).map(p => `<div class="tl-lad-k">Folgewechsel voraussichtlich ${afterTxt(p.afterPart)}${p.t != null ? ' · ca. ' + esc(tclock(p.t, now)) : ''}</div>`).join('')}</div></section>
       <section class="tl-d-grid">
         <div><div class="l">Standzeit</div><div class="v">${esc(U.fmtNum(tv.life))}<small>min</small></div></div>
         <div><div class="l">Je Teil</div><div class="v">${tv.cutMinPerPart != null ? esc(U.fmtNum(tv.cutMinPerPart, 1)) : '–'}<small>min</small></div></div>
@@ -1804,7 +1969,7 @@
     const tt = TT(tl.typeId) || {};
     const wear = tl.used / tl.life * 100;
     const stl = WF.sim.label('toolState', tl.state);
-    const c = tl.state === 'scrap' ? 'var(--st-fault)' : tl.state === 'regrind' ? 'var(--st-setup)' : 'var(--st-idle)';
+    const c = tl.state === 'scrap' ? 'var(--st-fault)' : tl.state === 'regrind' || tl.state === 'indexed' ? 'var(--st-setup)' : 'var(--st-idle)';
     const life = lifeEvents(tl.id);
     return `<section class="tl-d-hero">
         <div class="tl-d-top"><div class="tl-d-big">${esc(U.fmtNum(wear, 0))}<small>% beim Ausbau</small></div>

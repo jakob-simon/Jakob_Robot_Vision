@@ -189,7 +189,7 @@
     { id: 'ki', view: 'ki-auftrag', compact: true,
       run: () => {
         const stepAt = idx;
-        timers.push(setTimeout(() => { if (idx === stepAt && WF.kiAuftrag && WF.kiAuftrag.analyze) { try { WF.kiAuftrag.analyze(); } catch (e) { /* ignorieren */ } } }, 1200));
+        timers.push(setTimeout(() => { if (idx === stepAt && WF.kiAuftrag && WF.kiAuftrag.analyze) { try { WF.kiAuftrag.analyze({ demo: true }); } catch (e) { /* ignorieren */ } } }, 1200));
       },
       title: 'Von der Zeichnung zum eingelasteten Auftrag',
       body: () => `Lohnfertiger kalkulieren den ganzen Tag. werkfluss liest die Zeichnung, schlägt Arbeitsplan, Maschinen, Zeiten, Preis und den realistischen Liefertermin aus der aktuellen Auslastung vor – ein Klick, und der Auftrag läuft durch die Fabrik.` },

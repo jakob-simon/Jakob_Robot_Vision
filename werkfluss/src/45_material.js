@@ -474,23 +474,31 @@
   @keyframes mtPing{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--mat) 55%,transparent)}100%{box-shadow:0 0 0 7px color-mix(in srgb,var(--mat) 0%,transparent)}}
 
   /* ---------- Fluss-Diagramm */
-  .mt-flow{overflow:hidden}
-  .mt-fscroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
-  .mt-fin{position:relative;min-width:880px;padding:6px 8px 4px}
+  .mt-flow{overflow:hidden;container:mtflow / inline-size}
+  .mt-fwrap{position:relative}
+  .mt-fscroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+  .mt-fscroll.fr{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 56px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 56px),transparent)}
+  .mt-fscroll.fl{-webkit-mask-image:linear-gradient(90deg,transparent,#000 56px);mask-image:linear-gradient(90deg,transparent,#000 56px)}
+  .mt-fscroll.fl.fr{-webkit-mask-image:linear-gradient(90deg,transparent,#000 56px,#000 calc(100% - 56px),transparent);mask-image:linear-gradient(90deg,transparent,#000 56px,#000 calc(100% - 56px),transparent)}
+  .mt-fin{position:relative;padding:6px 8px 4px}
+  .mt-swipe{position:absolute;right:12px;top:12px;z-index:3;display:none;align-items:center;gap:7px;height:30px;padding:0 12px 0 10px;border-radius:999px;border:1px solid var(--line2);background:color-mix(in srgb,var(--panel) 90%,transparent);box-shadow:0 6px 18px rgba(0,0,0,.35);font-size:12px;font-weight:600;color:var(--text2);pointer-events:none;transition:opacity .25s ease}
+  .mt-swipe .ico{color:var(--mat)}
+  .mt-flow.scrolls .mt-swipe{display:inline-flex}
+  .mt-flow.swiped .mt-swipe{opacity:0}
   .mt-svg{display:block;width:100%;height:auto;user-select:none;-webkit-user-select:none}
   .mt-svg text{font-family:var(--f-ui)}
   .mt-floor{fill:var(--bg2);stroke:var(--line2);stroke-width:1.2}
   .mt-wall{fill:none;stroke:var(--muted);stroke-width:2.2;stroke-linecap:round;opacity:.55}
-  .mt-door{font:600 8.5px var(--f-ui);letter-spacing:.08em;fill:var(--faint);text-transform:uppercase}
+  .mt-door{font:600 10px var(--f-ui);letter-spacing:.08em;fill:var(--faint);text-transform:uppercase}
   .mt-doorm{stroke:var(--faint);stroke-width:1;stroke-dasharray:2 3}
   .mt-aisle{fill:none;stroke:color-mix(in srgb,var(--line) 70%,var(--bg2));stroke-width:10;stroke-linecap:round;stroke-linejoin:round}
   .mt-aisle-c{fill:none;stroke:color-mix(in srgb,var(--line2) 65%,transparent);stroke-width:.8;stroke-dasharray:5 7}
   .mt-room{fill:color-mix(in srgb,var(--card) 50%,transparent);stroke:var(--line);stroke-width:1;stroke-dasharray:3 3}
-  .mt-room-t{font:600 8.5px var(--f-ui);letter-spacing:.1em;fill:var(--faint);text-transform:uppercase}
+  .mt-room-t{font:600 10px var(--f-ui);letter-spacing:.08em;fill:var(--faint);text-transform:uppercase}
   .mt-fp{fill:color-mix(in srgb,var(--line) 32%,transparent);stroke:color-mix(in srgb,var(--line) 80%,transparent);stroke-width:.8}
-  .mt-area{font:600 8.5px var(--f-ui);letter-spacing:.14em;fill:color-mix(in srgb,var(--faint) 80%,transparent);text-transform:uppercase}
+  .mt-area{font:600 10px var(--f-ui);letter-spacing:.12em;fill:color-mix(in srgb,var(--faint) 85%,transparent);text-transform:uppercase}
   .mt-ext-band{fill:none;stroke:var(--line);stroke-width:1;stroke-dasharray:2 4}
-  .mt-ext-t{font:600 8.5px var(--f-ui);letter-spacing:.12em;fill:var(--faint);text-transform:uppercase}
+  .mt-ext-t{font:600 10px var(--f-ui);letter-spacing:.12em;fill:var(--faint);text-transform:uppercase}
 
   .mt-e{cursor:pointer;transition:opacity .2s ease}
   .mt-e .g{fill:none;stroke:var(--mat);opacity:0;stroke-linecap:round}
@@ -515,7 +523,7 @@
   @keyframes mtFlow{to{stroke-dashoffset:-14.2}}
   .mt-el{pointer-events:none}
   .mt-el rect{fill:var(--card);stroke:color-mix(in srgb,var(--mat) 45%,var(--line2));stroke-width:1}
-  .mt-el text{font:700 11px var(--f-cond);fill:var(--text);letter-spacing:.02em}
+  .mt-el text{font:700 12px var(--f-cond);fill:var(--text);letter-spacing:.02em}
   .mt-el.pend rect{stroke:color-mix(in srgb,var(--st-wait) 50%,var(--line2))}
   .mt-el.pend text{fill:color-mix(in srgb,var(--st-wait) 80%,var(--text))}
   .mt-el.ext rect{stroke-dasharray:3 2}
@@ -529,9 +537,9 @@
   .mt-node.partner .bg{fill:color-mix(in srgb,var(--st-tool) 7%,var(--card));stroke:color-mix(in srgb,var(--st-tool) 45%,var(--line2));stroke-dasharray:4 3}
   .mt-node.charge .bg{fill:transparent;stroke:color-mix(in srgb,var(--st-setup) 40%,var(--line2));stroke-dasharray:3 3}
   .mt-node.sel .bg{stroke:var(--accent);stroke-width:1.8}
-  .mt-node .t{font:600 12.5px var(--f-cond);fill:var(--text);letter-spacing:.01em}
-  .mt-node .id{font:500 9.5px var(--f-mono);fill:var(--muted)}
-  .mt-node .sub{font:500 9.5px var(--f-ui);fill:var(--muted)}
+  .mt-node .t{font:600 13px var(--f-cond);fill:var(--text);letter-spacing:.01em}
+  .mt-node .id{font:500 10px var(--f-mono);fill:var(--muted)}
+  .mt-node .sub{font:500 10.5px var(--f-ui);fill:var(--muted)}
   .mt-node .sub.warn{fill:color-mix(in srgb,var(--st-wait) 85%,var(--text))}
   .mt-node .sub.crit{fill:color-mix(in srgb,var(--st-fault) 85%,var(--text))}
   .mt-node .sub.ok{fill:color-mix(in srgb,var(--st-run) 70%,var(--text2))}
@@ -546,11 +554,11 @@
   .mt-node .pip.on{fill:color-mix(in srgb,var(--text2) 70%,transparent);stroke:none}
   .mt-node .pip.rd{fill:var(--mat);stroke:none}
   .mt-node .pip.full{fill:var(--st-wait);stroke:none}
-  .mt-node .pipt{font:600 8.5px var(--f-ui);fill:var(--faint);letter-spacing:.06em}
-  .mt-node .pipn{font:600 9px var(--f-ui);fill:var(--text2)}
+  .mt-node .pipt{font:600 10px var(--f-ui);fill:var(--faint);letter-spacing:.06em}
+  .mt-node .pipn{font:600 10px var(--f-ui);fill:var(--text2)}
   .mt-node .bdg{display:none}
   .mt-node .bdg circle{fill:var(--st-wait);stroke:var(--card);stroke-width:2}
-  .mt-node .bdg text{font:700 9.5px var(--f-ui);fill:color-mix(in srgb,var(--st-wait) 14%,black)}
+  .mt-node .bdg text{font:700 10px var(--f-ui);fill:color-mix(in srgb,var(--st-wait) 14%,black)}
   .mt-node.haswait .bdg{display:block}
   .mt-node .pk{fill:none;stroke:var(--info);stroke-width:1.5;opacity:0}
   .mt-node.pick .pk{animation:mtPick 1.4s ease-out infinite}
@@ -568,7 +576,7 @@
   .mt-veh .vf{fill:var(--c)}
   .mt-veh .vk{stroke:var(--c);stroke-width:1.6;stroke-linecap:round}
   .mt-veh .vl{fill:var(--mat);stroke:color-mix(in srgb,var(--mat) 50%,black);stroke-width:.6}
-  .mt-veh .vt{font:700 8.5px var(--f-ui);fill:var(--text2);letter-spacing:.04em;paint-order:stroke;stroke:var(--bg2);stroke-width:3px;stroke-linejoin:round}
+  .mt-veh .vt{font:700 10px var(--f-ui);fill:var(--text2);letter-spacing:.04em;paint-order:stroke;stroke:var(--bg2);stroke-width:3px;stroke-linejoin:round}
   .mt-veh .vh{fill:transparent}
   .mt-veh{cursor:pointer}
   .mt-veh .vg{fill:var(--c);opacity:0}
@@ -580,9 +588,7 @@
   .mt-pulse .pl{fill:none;stroke:var(--info);stroke-width:1.4;stroke-dasharray:3 4;opacity:.85}
   .mt-pulse .pc{fill:var(--info);filter:drop-shadow(0 0 4px var(--info))}
   .mt-pulse .pt rect{fill:color-mix(in srgb,var(--info) 16%,var(--panel));stroke:color-mix(in srgb,var(--info) 55%,transparent)}
-  .mt-pulse .pt text{font:600 8.5px var(--f-ui);fill:color-mix(in srgb,var(--info) 70%,white)}
-  .mt-lg-t{font:600 9px var(--f-ui);fill:var(--muted);letter-spacing:.02em}
-  .mt-lg-h{font:600 8.5px var(--f-ui);letter-spacing:.12em;fill:var(--faint);text-transform:uppercase}
+  .mt-pulse .pt text{font:600 10px var(--f-ui);fill:color-mix(in srgb,var(--info) 70%,white)}
 
   .mt-tip{position:absolute;z-index:5;pointer-events:none;min-width:220px;max-width:320px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:var(--shadow);padding:10px 12px;font-size:12px;color:var(--text2);line-height:1.45}
   .mt-tip .tt{display:flex;align-items:center;gap:6px;font-weight:600;color:var(--text);font-size:13px;margin-bottom:4px}
@@ -631,13 +637,25 @@
   .mt-topr .rel .ico{color:var(--faint);flex:none}
   .mt-topr .bar{height:5px;--c:var(--mat)}
   .mt-topr b{font-weight:600;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-  .mt-hint{display:none;font-size:11px;color:var(--faint);padding:0 14px 8px}
+  .mt-legbar{display:none;align-items:center;gap:8px;padding:2px 14px 10px}
+  .mt-legbar button{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:999px;border:1px solid var(--line2);background:transparent;color:var(--text2);font-size:12px;font-weight:600;cursor:pointer}
+  .mt-legbar button .ico{color:var(--muted);transition:transform .2s ease}
+  .mt-flow.legopen .mt-legbar button .ico{transform:rotate(90deg)}
   .mt-legend{display:flex;flex-wrap:wrap;gap:6px 16px;padding:4px 14px 11px;font-size:11.5px;color:var(--muted)}
   .mt-legend span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
   .mt-legend svg{flex:none;overflow:visible}
+  @container mtflow (max-width:1060px){ .mt-fin{min-width:1216px} }
+  @container mtflow (max-width:640px){
+    .mt-legend{display:none;flex-direction:column;gap:7px;padding:2px 14px 12px}
+    .mt-flow.legopen .mt-legend{display:flex}
+    .mt-legbar{display:flex}
+  }
 
   /* ---------- Flotte */
+  .mt-fleetsec{container:mtfleet / inline-size}
   .mt-fleet{display:grid;gap:10px;grid-template-columns:repeat(3,minmax(0,1fr))}
+  @container mtfleet (max-width:820px){ .mt-fleet{grid-template-columns:repeat(2,minmax(0,1fr))} .mt-fleet > .mt-vc:nth-child(3):last-child{grid-column:1/-1} }
+  @container mtfleet (max-width:540px){ .mt-fleet{grid-template-columns:minmax(0,1fr)} }
   .mt-vc{--c:var(--st-idle);position:relative;display:flex;flex-direction:column;gap:10px;padding:12px 14px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);cursor:pointer;min-width:0;box-shadow:inset 3px 0 0 var(--c);transition:border-color .15s ease,background-color .15s ease;text-align:left;color:inherit;font:inherit}
   .mt-vc:hover{border-color:var(--line2);background:color-mix(in srgb,var(--card2) 50%,var(--card))}
   .mt-vc.sel{border-color:color-mix(in srgb,var(--accent) 70%,transparent)}
@@ -735,11 +753,14 @@
   .mt-rw b.crit{color:color-mix(in srgb,var(--st-fault) 90%,var(--text))}
   .mt-rw b.muted{color:var(--muted);font-weight:500}
   .mt-tbl .bsp{color:var(--faint);font-size:11px;white-space:nowrap}
-  .mt-tbl .mt-s.mt-wrap{white-space:normal;max-width:230px;line-height:1.35}
+  .mt-tbl .mt-s.mt-wrap{white-space:normal;max-width:230px;line-height:1.35;text-wrap:pretty}
   .mt-mcell{min-width:200px}
   .mt-mcell .mt-form{font-size:11.5px;color:var(--muted)}
   .mt-mcell .mt-s{display:flex;align-items:center;gap:4px;white-space:nowrap}
   .mt-sup{min-width:150px}
+  .mt-reo-h{opacity:0;visibility:hidden;transition:opacity .15s ease,visibility .15s}
+  .mt-tbl tr:hover .mt-reo-h,.mt-tbl tr:focus-within .mt-reo-h{opacity:1;visibility:visible}
+  @media (hover:none){ .mt-reo-h{display:none} }
   .mt-loccol{display:none}
   @media (min-width:1560px){ .mt-loccol{display:table-cell} .mt-locinl{display:none} }
 
@@ -837,17 +858,14 @@
     .mt-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
   }
   @media (max-width:1100px){
-    .mt-fleet{grid-template-columns:repeat(2,minmax(0,1fr))}
     .mt-ffoot{grid-template-columns:minmax(0,1fr)}
     .mt-ffoot > div + div{border-left:0;border-top:1px solid var(--line)}
   }
   @media (max-width:900px){
-    .mt-hint{display:block}
     .mt-lage{width:100%}
   }
   @media (max-width:700px){
     .mt-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
-    .mt-fleet{grid-template-columns:minmax(0,1fr)}
     .mt-bil{grid-template-columns:repeat(2,minmax(0,1fr))}
     .mt-lg{flex:1 1 50%}
     .mt-lg + .mt-lg{border-left:0}
@@ -857,27 +875,56 @@
     .mt-lg small{max-width:none}
     .mt-topr{grid-template-columns:minmax(0,1fr) 70px 48px}
     .mt-kpis .kpi .s{-webkit-line-clamp:3}
-    /* Tabellen als Karten */
-    .mt-trt thead,.mt-mtt thead{display:none}
-    .mt-trt,.mt-trt tbody,.mt-mtt,.mt-mtt tbody{display:block;width:100%}
-    .mt-trt tr,.mt-mtt tr{position:relative;display:grid;column-gap:12px;row-gap:5px;padding:10px 14px 11px 16px;border-bottom:1px solid var(--line)}
-    .mt-trt td,.mt-mtt td{display:block;padding:0;border:0;min-width:0}
-    .mt-trt td.st,.mt-mtt td.st{position:absolute;left:0;top:0;bottom:0;width:3px;box-shadow:none;background:var(--c)}
+  }
+  /* Tabellen → Karten, abhängig von der Kartenbreite (nicht vom Fenster): Tablet zweizeilig, Telefon gestapelt */
+  .mt-trcard{container:mttr / inline-size}
+  .mt-matcard{container:mtmat / inline-size}
+  @container mttr (max-width:1160px){
+    .mt-trt thead{display:none}
+    .mt-trt,.mt-trt tbody{display:block;width:100%}
+    .mt-trt tr{position:relative;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,.95fr) auto;grid-template-areas:"c r t s" "o m y w";column-gap:18px;row-gap:9px;align-items:start;padding:11px 16px 12px 18px;border-bottom:1px solid var(--line)}
+    .mt-trt tr:last-child{border-bottom:0}
+    .mt-trt td{display:block;padding:0;border:0;min-width:0}
+    .mt-trt td.st{position:absolute;left:0;top:0;bottom:0;width:3px;box-shadow:none;background:var(--c)}
     .mt-trt tr.sep,.mt-trt tr.sep td{display:block}
     .mt-trt tr:has(> td[colspan]){display:block}
-    .mt-trt tr{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"c s" "r r" "o t" "m w" "y y"}
     .mt-trt td:nth-child(2){grid-area:o}.mt-trt td:nth-child(3){grid-area:c}.mt-trt td:nth-child(4){grid-area:r}.mt-trt td:nth-child(5){grid-area:w;text-align:right;align-self:center}
-    .mt-trt td:nth-child(6){grid-area:m}.mt-trt td:nth-child(7){grid-area:s;justify-self:end}.mt-trt td:nth-child(8){grid-area:t;text-align:right}.mt-trt td:nth-child(9){grid-area:y}
-    .mt-trt td:nth-child(6) .mt-s{display:inline;margin-left:6px}
-    .mt-trt .mt-why{max-width:none}
-    .mt-mtt tr{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"m a" "b b" "r r" "w o" "l l"}
+    .mt-trt td:nth-child(6){grid-area:m}.mt-trt td:nth-child(7){grid-area:s;justify-self:end}.mt-trt td:nth-child(8){grid-area:t}.mt-trt td:nth-child(9){grid-area:y}
+    .mt-trt td:nth-child(2) .mt-s,.mt-trt td:nth-child(6) .mt-s{display:inline;margin-left:6px}
+    .mt-trt td:nth-child(2){align-self:center}
+    .mt-trt td:nth-child(6){display:flex;align-items:center;gap:0;min-width:0;white-space:nowrap}
+    .mt-trt td:nth-child(6) .mt-s{overflow:hidden;text-overflow:ellipsis}
+    .mt-trt .mt-why{max-width:none;-webkit-line-clamp:1}
+    .mt-trt .mt-rel{max-width:100%;overflow:hidden;text-overflow:ellipsis}
+  }
+  @container mttr (max-width:640px){
+    .mt-trt tr{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"c s" "r r" "o t" "m w" "y y";column-gap:12px;row-gap:6px;padding:10px 14px 11px 16px}
+    .mt-trt td:nth-child(8){text-align:right}
+    .mt-trt .mt-why{-webkit-line-clamp:2}
+  }
+  @container mtmat (max-width:1160px){
+    .mt-mtt thead{display:none}
+    .mt-mtt,.mt-mtt tbody{display:block;width:100%}
+    .mt-mtt tr{position:relative;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) minmax(0,1.15fr) 118px;grid-template-areas:"m b r a" "l w o a";column-gap:20px;row-gap:8px;align-items:start;padding:11px 16px 12px 18px;border-bottom:1px solid var(--line)}
+    .mt-mtt tr:last-child{border-bottom:0}
+    .mt-mtt td{display:block;padding:0;border:0;min-width:0}
+    .mt-mtt td.st{position:absolute;left:0;top:0;bottom:0;width:3px;box-shadow:none;background:var(--c)}
     .mt-mtt td:nth-child(2){grid-area:m}.mt-mtt td:nth-child(3){grid-area:b}.mt-mtt td:nth-child(4){grid-area:r}.mt-mtt td:nth-child(5){grid-area:w;text-align:left}
-    .mt-mtt td:nth-child(6){grid-area:o;text-align:right}.mt-mtt td:nth-child(7){grid-area:l}.mt-mtt td:nth-child(8){display:none}.mt-mtt td:nth-child(9){grid-area:a;align-self:start}
+    .mt-mtt td:nth-child(6){grid-area:o}.mt-mtt td:nth-child(7){grid-area:l}.mt-mtt td:nth-child(8){display:none}.mt-mtt td:nth-child(9){grid-area:a;align-self:center;justify-self:end}
     .mt-mtt .mt-mcell,.mt-mtt .mt-sup{min-width:0}
     .mt-mtt td[data-l]::before{content:attr(data-l);display:block;font:600 9.5px/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-bottom:3px}
+    .mt-mtt td:nth-child(5) .mt-s,.mt-mtt td:nth-child(6) .mt-s{display:inline;margin-left:6px}
+    .mt-mtt td:nth-child(5),.mt-mtt td:nth-child(6){white-space:normal}
     .mt-mtt .mt-mcell b{white-space:normal}
     .mt-mtt .mt-stock{min-width:0}
+    .mt-mtt .mt-s{max-width:none}
     .mt-mtt .mt-s.mt-wrap{max-width:none}
+    .mt-mtt .mt-reo-h{display:none}
+  }
+  @container mtmat (max-width:640px){
+    .mt-mtt tr{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"m a" "b b" "r r" "w o" "l l";column-gap:12px;row-gap:8px;padding:11px 14px 12px 16px}
+    .mt-mtt td:nth-child(6){text-align:right}
+    .mt-mtt td:nth-child(9){align-self:start}
   }
   `, 'mt-css');
 
@@ -888,17 +935,17 @@
   const VH = Math.round(PY(45) + 32);
   // Knoten: Position im Hallenkoordinatensystem (m), leicht auf Reihen ausgerichtet; Breite in SVG-Einheiten
   const NODE_DEF = [
-    { id: 'RAW', x: 5.0, z: 4.4, kind: 'store', icon: 'rack', w: 126 },
+    { id: 'RAW', x: 5.0, z: 4.4, kind: 'store', icon: 'rack', w: 160 },
     { id: 'CHG', x: 45, z: 3.6, kind: 'charge', icon: 'plug', w: 104 },
     { id: 'M01', x: 5.25, z: 16.2 }, { id: 'M02', x: 15.25, z: 16.2 }, { id: 'M03', x: 24.3, z: 16.2 }, { id: 'M04', x: 33.5, z: 16.2 },
-    { id: 'M07', x: 44.2, z: 16.2 }, { id: 'M08', x: 52.1, z: 16.2, w: 112 }, { id: 'M13', x: 60.2, z: 16.2 },
+    { id: 'M07', x: 44.2, z: 16.2 }, { id: 'M08', x: 52.1, z: 16.2 }, { id: 'M13', x: 60.2, z: 16.2 },
     { id: 'M05', x: 14, z: 28.2 }, { id: 'M06', x: 20.6, z: 28.2 }, { id: 'M09', x: 27.2, z: 28.2 }, { id: 'M10', x: 33.8, z: 28.2 },
     { id: 'M11', x: 40.4, z: 28.2 }, { id: 'QS', x: 48.8, z: 28.2 },
-    { id: 'VERSAND', x: 60.2, z: 31.6, kind: 'store', icon: 'ship', w: 104 },
-    { id: 'WE', x: 5.2, z: 37.2, kind: 'store', icon: 'inbox', w: 126 },
-    { id: 'SPERR', x: 39.2, z: 37.2, kind: 'store', icon: 'lock', w: 112 },
-    { id: 'EXT', x: 49.6, z: 37.2, kind: 'store', icon: 'truck', w: 126 },
-    { id: 'HAERT', x: 27, z: 45, kind: 'partner', icon: 'flame', w: 176 },
+    { id: 'VERSAND', x: 60.2, z: 31.6, kind: 'store', icon: 'ship', w: 112 },
+    { id: 'WE', x: 5.2, z: 37.2, kind: 'store', icon: 'inbox', w: 150 },
+    { id: 'SPERR', x: 39.2, z: 37.2, kind: 'store', icon: 'lock', w: 124 },
+    { id: 'EXT', x: 49.6, z: 37.2, kind: 'store', icon: 'truck', w: 164 },
+    { id: 'HAERT', x: 27, z: 45, kind: 'partner', icon: 'flame', w: 236 },
   ];
   const MAIN_Y = PY(22);
 
@@ -1047,15 +1094,15 @@
             </div>
           </div>
         </div>
-        <div class="mt-fscroll"><div class="mt-fin" data-r="fin">
+        <div class="mt-fwrap"><div class="mt-fscroll" data-r="fscroll"><div class="mt-fin" data-r="fin">
           <svg class="mt-svg" data-r="svg" viewBox="0 0 ${VW} ${VH}" role="img" aria-label="Materialfluss-Diagramm der Halle">
             <g data-r="gBase"></g><g data-r="gEdges"></g><g data-r="gLabels"></g><g data-r="gNodes"></g><g data-r="gVeh"></g><g data-r="gDots"></g>
           </svg>
           <div class="mt-tip" data-r="tip" hidden></div>
           <div class="mt-empty" data-r="empty" hidden><b>Heute noch keine Transporte</b>Sobald die ersten Behälter bewegt werden, baut sich hier der Materialfluss des Tages auf.</div>
-        </div></div>
+        </div></div><span class="mt-swipe" aria-hidden="true">${ICO('arrowRight', 14)}Halle seitlich wischen</span></div>
+        <div class="mt-legbar"><button type="button" data-r="legBtn" aria-expanded="false">${ICO('chevron', 13)}Legende</button></div>
         <div class="mt-legend" data-r="legend"></div>
-        <div class="mt-hint">Diagramm zur Seite wischen, um die ganze Halle zu sehen.</div>
         <div class="mt-ffoot">
           <div><div class="eyebrow"><span>Tagesbilanz Logistik</span><span class="spacer"></span><span data-r="bilSince">seit 00:00</span></div>
             <div class="mt-bil" data-r="bil"></div>
@@ -1066,12 +1113,12 @@
         </div>
       </section>
 
-      <section data-r="fleetSec">
+      <section class="mt-fleetsec" data-r="fleetSec">
         <div class="mt-card-h" style="padding:0 2px 10px;border:0"><div><h3>Flotte</h3><div class="mt-hs" data-r="fleetSub">–</div></div></div>
         <div class="mt-fleet" data-r="fleet"></div>
       </section>
 
-      <section class="card" data-r="trCard">
+      <section class="card mt-trcard" data-r="trCard">
         <div class="mt-card-h">
           <div><h3>Transportaufträge</h3><div class="mt-hs" data-r="trSub">–</div></div>
           <div class="row">
@@ -1087,7 +1134,7 @@
         <div class="mt-more" data-r="trMore" hidden><button class="btn sm ghost" data-r="trMoreBtn">Alle erledigten anzeigen</button></div>
       </section>
 
-      <section class="card" data-r="matCard">
+      <section class="card mt-matcard" data-r="matCard">
         <div class="mt-card-h">
           <div><h3>Rohmaterial</h3><div class="mt-hs" data-r="matSub">–</div></div>
           <div class="row mt-legend-mini" style="font-size:11.5px;color:var(--muted);gap:12px">
@@ -1097,7 +1144,7 @@
           </div>
         </div>
         <div class="tbl-wrap"><table class="tbl mt-tbl mt-mtt"><thead><tr>
-          <th style="width:4px;padding:0"></th><th>Material · Form</th><th>Bestand / Mindestbestand</th><th>Reichweite (offener Bedarf)</th><th class="r">Entnahme heute</th><th>Bestellt</th><th>Lieferant</th><th class="mt-loccol">Lagerort</th><th></th>
+          <th style="width:4px;padding:0"></th><th>Material · Form</th><th>Bestand / Mindestbestand</th><th>Reichweite (offener Bedarf)</th><th class="r" title="Verbrauch an den Maschinen seit 00:00 (Säge, Stangenlader, Rohteile) · darunter: aus dem Lager entnommen">Verbrauch heute</th><th>Bestellt</th><th>Lieferant</th><th class="mt-loccol">Lagerort</th><th></th>
         </tr></thead><tbody data-r="matBody"></tbody></table></div>
       </section>
 
@@ -1110,6 +1157,17 @@
     V.r = refs(root);
     buildPlan();
     bindFlow();
+    // Schmale Container: Diagramm 1:1 im Wisch-Bereich – Ränder ausblenden, solange dort noch Halle liegt
+    const sc = V.r.fscroll;
+    V.scrollCue = () => {
+      const max = sc.scrollWidth - sc.clientWidth;
+      setCls(sc, 'fl', max > 4 && sc.scrollLeft > 4);
+      setCls(sc, 'fr', max > 4 && sc.scrollLeft < max - 4);
+      setCls(V.r.flowCard, 'scrolls', max > 4);
+    };
+    sc.addEventListener('scroll', () => { V.scrollCue(); if (sc.scrollLeft > 24) setCls(V.r.flowCard, 'swiped', true); }, { passive: true });
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => V.scrollCue()).observe(sc);
+    V.r.legBtn.onclick = () => { const on = !V.r.flowCard.classList.contains('legopen'); setCls(V.r.flowCard, 'legopen', on); V.r.legBtn.setAttribute('aria-expanded', String(on)); };
     // Kennzahl-Beschriftungen (statisch)
     const KL = { kOpen: 'Offene Transporte', kWait: 'Ø Wartezeit Transport', kAgv: 'AGV-Auslastung', kWip: 'Behälter im Umlauf', kMin: 'Unter Mindestbestand', kPur: 'Offene Bestellungen' };
     for (const k in KL) setText(V.r[k + 'L'], KL[k]);
@@ -1182,7 +1240,7 @@
       const st = STN(d.id);
       const kind = d.kind || 'machine';
       const name = d.id === 'HAERT' ? haertName() : (st ? (st.short || st.name) : d.id);
-      const w = d.w || Math.max(96, Math.round(name.length * 6.2 + 34));
+      const w = d.w || Math.max(96, Math.round(name.length * 6.4 + 36));
       return { id: d.id, kind, icon: d.icon, name, cx: PX(d.x), cy: PY(d.z), w, h: d.kind === 'charge' ? 30 : NH, st };
     });
     V.nodes = nodes; V.nodeById = Object.fromEntries(nodes.map(n => [n.id, n]));
@@ -1211,7 +1269,7 @@
     V.areas = [];
     for (const a in AREA_POS) {
       const ax = PX(AREA_POS[a][0]), ay = PY(AREA_POS[a][1]);
-      V.areas.push({ name: a, x: ax, y: ay - 3, w: a.length * 7.2 + 6, h: 12 });
+      V.areas.push({ name: a, x: ax, y: ay - 3, w: a.length * 7.8 + 6, h: 13 });
       h += `<text class="mt-area" data-area="${esc(a)}" x="${f1(ax)}" y="${f1(ay)}" text-anchor="middle">${esc(a)}</text>`;
     }
     // Wände (vorne mit Toren)
@@ -1500,7 +1558,7 @@
   }
 
   // ------------------------------------------------------------------ Aktualisierung
-  function show() { V.visible = true; V.sig = {}; V.edgeSig = ''; V.dotSig = ''; for (const k in V.veh) { V.veh[k].x = null; } }
+  function show() { V.visible = true; V.sig = {}; V.edgeSig = ''; V.dotSig = ''; for (const k in V.veh) { V.veh[k].x = null; } if (V.scrollCue) requestAnimationFrame(() => V.scrollCue()); }
   function hide() { V.visible = false; hideTip(); V._pulseT = null; if (V.pulses) { V.pulses.forEach(p => p.g.remove()); V.pulses = []; } }
   function update() {
     if (!V.mounted) return;
@@ -1594,7 +1652,7 @@
     }
     const avg = n ? sum / n : null;
     kpiSet('kWait', { v: avg == null ? '–' : avg < 60 ? '< 1' : U.fmtNum(Math.round(avg / 60)), unit: avg == null ? '' : 'min',
-      sub: n ? `bis Abholung · <b>${n}</b> Fahrten heute<br>max. ${dur(max)}${maxR && maxR.why ? ' (' + esc(whyTiny(maxR.why)) + ')' : ''}` : 'heute noch keine Abholung',
+      sub: n ? `aus <b>${n}</b> Abholungen heute<br>max. ${dur(max)}${maxR && maxR.why ? ' (' + esc(whyTiny(maxR.why)) + ')' : ''}` : 'heute noch keine Abholung',
       sev: avg != null && avg > WAIT_CRIT ? 'crit' : avg != null && avg > WAIT_WARN ? 'warn' : null });
     // 3 AGV-Auslastung
     const ids = Object.keys(s.agvs);
@@ -1693,10 +1751,7 @@
             }
           }
         }
-      } else if (n.k.sub) {
-        const t = nodeSub(n.id, s, now);
-        setText(n.k.sub, t.text); setAttr(n.k.sub, 'class', 'sub' + (t.cls ? ' ' + t.cls : ''));
-      }
+      } else if (n.k.sub) fitSub(n, nodeSub(n.id, s, now));
       const wc = waitCount[n.id] || 0;
       setCls(el, 'haswait', wc > 0);
       if (n.k.bdg) setText(n.k.bdg, wc);
@@ -1731,17 +1786,38 @@
     // Bilanz + stärkste Verbindungen
     updateFlowFoot(s, flows);
   }
+  /** Unterzeile eines Lager-/Partner-Knotens setzen; zu lang → Kurzform bzw. gekürzt (nur bei Textänderung gemessen) */
+  // Textbreite ohne Layout messen (Canvas) – kein erzwungenes Reflow im 4×/s-Takt
+  let MCTX = null;
+  function textW(txt) {
+    try {
+      if (!MCTX) { MCTX = document.createElement('canvas').getContext('2d'); MCTX.font = `500 10.5px ${getComputedStyle(document.body).getPropertyValue('--f-ui') || 'sans-serif'}`; }
+      return MCTX.measureText(txt).width;
+    } catch (e) { return txt.length * 5.6; }
+  }
+  function fitSub(n, t) {
+    const el = n.k.sub, key = t.text + '|' + (t.cls || '');
+    if (el._fit === key) return;
+    el._fit = key;
+    setAttr(el, 'class', 'sub' + (t.cls ? ' ' + t.cls : ''));
+    const max = n.w - 36;
+    let txt = t.text;
+    if (t.short && textW(txt) > max) txt = t.short;
+    let g = 0;
+    while (txt.length > 6 && textW(txt) > max && g++ < 40) txt = txt.slice(0, -2).replace(/[\s·,…]+$/, '') + '…';
+    el.textContent = txt;
+  }
   function nodeSub(id, s, now) {
     switch (id) {
       case 'RAW': {
         const low = Object.values(s.materials).filter(m => m.onHand < m.min);
         const miss = (s.notifications || []).some(x => x.status === 'open' && String(x.key || '').indexOf('missing:') === 0);
-        return miss ? { text: 'Material fehlt an Maschine', cls: 'crit' } : low.length ? { text: low.length + ' unter Mindestbestand', cls: 'warn' } : { text: Object.keys(s.materials).length + ' Materialien ok', cls: 'ok' };
+        return miss ? { text: 'Material fehlt an Maschine', short: 'Material fehlt', cls: 'crit' } : low.length ? { text: low.length + ' unter Mindestbestand', short: low.length + ' unter Minimum', cls: 'warn' } : { text: Object.keys(s.materials).length + ' Materialien ok', cls: 'ok' };
       }
-      case 'WE': { const st = s.stations.WE; const n = st ? st.out.length + st.inp.length : 0; return { text: n ? n + ' Behälter abholbereit' : 'frei' }; }
+      case 'WE': { const st = s.stations.WE; const n = st ? st.out.length + st.inp.length : 0; return { text: n ? n + ' Behälter abholbereit' : 'frei', short: n + ' abholbereit' }; }
       case 'EXT': {
         const st = s.stations.EXT; const n = st ? st.inp.length : 0;
-        return { text: n ? `${n} Behälter · ${stk(inQty(st.inp))} bereit` : 'leer' };
+        return { text: n ? `${n} Behälter · ${stk(inQty(st.inp))} bereit` : 'leer', short: n ? `${n} Beh. · ${stk(inQty(st.inp))}` : 'leer' };
       }
       case 'SPERR': { const st = s.stations.SPERR; const q = st ? inQty(st.inp) : 0; return q ? { text: stk(q) + ' Ausschuss', cls: 'crit' } : { text: 'leer' }; }
       case 'VERSAND': return { text: `${stk(s.today.shipped || 0)} heute`, cls: (s.today.shipped || 0) > 0 ? 'ok' : '' };
@@ -1749,7 +1825,7 @@
         const ext = extContainers(); const q = ext.reduce((a, c) => a + c.qty, 0);
         if (!ext.length) return { text: 'derzeit nichts extern' };
         const next = ext.map(c => c.location.returnT).sort((a, b) => a - b)[0];
-        return { text: `${ext.length} Behälter · ${stk(q)} · zurück ab ${tclock(next, now)}` };
+        return { text: `${ext.length} Behälter · ${stk(q)} · zurück ab ${tclock(next, now)}`, short: `${stk(q)} · zurück ab ${tclock(next, now)}` };
       }
     }
     return { text: '' };
@@ -1803,7 +1879,7 @@
     for (const it of list) {
       const e = it.e, g = it.g;
       const txt = e.n === 0 ? (e.open.length ? `${e.open.length} wartet` : U.fmtNum(e.dm, 1) + ' m') : metricLabel(e);
-      const tw = Math.max(18, txt.length * 6.2 + 11), th = 17;
+      const tw = Math.max(20, txt.length * 6.7 + 12), th = 18;
       let pos = null;
       for (const t of [0.5, 0.42, 0.58, 0.34, 0.66, 0.27, 0.73]) {
         const p = quad(g.r0, g.r1, g.r2, t);
@@ -1811,7 +1887,7 @@
       }
       if (!pos) pos = quad(g.r0, g.r1, g.r2, 0.5);
       labels.push({ x: pos.x, y: pos.y, w: tw, h: th });
-      lh += `<g class="mt-el${e.n === 0 ? (e.direct && !e.open.length ? ' direct' : ' pend') : ''}${e.ext ? ' ext' : ''}" data-lab="${esc(e.key)}" transform="translate(${f1(pos.x)},${f1(pos.y)})"><rect x="${f1(-tw / 2)}" y="${-th / 2}" width="${f1(tw)}" height="${th}" rx="${th / 2}"/><text y="3.9" text-anchor="middle">${esc(txt)}</text></g>`;
+      lh += `<g class="mt-el${e.n === 0 ? (e.direct && !e.open.length ? ' direct' : ' pend') : ''}${e.ext ? ' ext' : ''}" data-lab="${esc(e.key)}" transform="translate(${f1(pos.x)},${f1(pos.y)})"><rect x="${f1(-tw / 2)}" y="${-th / 2}" width="${f1(tw)}" height="${th}" rx="${th / 2}"/><text y="4.2" text-anchor="middle">${esc(txt)}</text></g>`;
     }
     plap('be_html');
     r.gEdges.innerHTML = eh;
@@ -1880,10 +1956,10 @@
     const n = V.nodeById[fromId];
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     g.setAttribute('class', 'mt-pulse');
-    g.innerHTML = `<path class="pl" d=""/><circle class="pc" r="3.2"/><g class="pt"><rect rx="7" height="14" y="-7"/><text y="3.5" text-anchor="middle"></text></g>`;
+    g.innerHTML = `<path class="pl" d=""/><circle class="pc" r="3.2"/><g class="pt"><rect rx="8" height="16" y="-8"/><text y="3.6" text-anchor="middle"></text></g>`;
     const label = 'Auftrag an ' + name;
     g.querySelector('text').textContent = label;
-    const tw = label.length * 5.3 + 12;
+    const tw = label.length * 5.9 + 14;
     const rc = g.querySelector('rect'); rc.setAttribute('width', tw.toFixed(0)); rc.setAttribute('x', (-tw / 2).toFixed(0));
     V.r.gDots.append(g);
     V.pulses.push({ g, path: g.querySelector('.pl'), dot: g.querySelector('.pc'), tag: g.querySelector('.pt'), n, vehId, age: 0 });
@@ -2203,6 +2279,15 @@
     if (mt.onHand < mt.min) return { c: 'var(--info)', k: 'info' };
     return { c: 'transparent', k: '' };
   }
+  /** Verbrauch heute = Engine-Wert (Säge, Stangenlader, Rohteile; eine Wahrheit mit Copilot/Snapshot);
+      Lagerentnahme (Mitschreiber) nur zusätzlich, wenn sie abweicht – Stangen gehen z. B. erst ins Magazin des Stangenladers */
+  function usedToday(mt) { return mt && mt.usedToday != null ? mt.usedToday : withdrawnToday(mt.id); }
+  function useCell(mt, used, wd) {
+    if (!(used > 1e-6) && !(wd > 1e-6)) return '<span class="muted">–</span>';
+    const differs = Math.abs(used - wd) > (mt.unit === 'm' ? 0.05 : 0.5);
+    const sub = differs ? (wd > 1e-6 ? `aus Lager ${amt(wd, mt.unit)}` : 'aus Magazin') : U.fmtEur(used * mt.pricePerUnit);
+    return `<b>${esc(used > 1e-6 ? amt(used, mt.unit) : '–')}</b><span class="mt-s" title="${esc(differs ? `Verbrauch an den Maschinen ${amt(used, mt.unit)} · aus dem Lager entnommen ${amt(wd, mt.unit)} (Stangen werden zuerst ins Magazin des Stangenladers gebracht)` : 'Materialwert des Verbrauchs')}">${esc(sub)}</span>`;
+  }
   function updateMaterials(s) {
     const r = V.r, now = s.t;
     const D = demandAll();
@@ -2212,27 +2297,30 @@
       const ri = reachInfo(mt, d, now);
       const sev = matSev(mt, s);
       const np = nextPurchase(mt.id);
-      return { mt, ri, sev, np, wd: withdrawnToday(mt.id) };
+      return { mt, ri, sev, np, wd: withdrawnToday(mt.id), used: usedToday(mt) };
     });
-    const sig = Math.floor(now / 60) + '|' + rows.map(x => [x.mt.id, x.mt.onHand.toFixed(2), x.mt.onOrder, x.ri.main, x.ri.sub, x.sev.k, x.wd.toFixed(2), x.np ? x.np.etaT : ''].join(':')).join(',');
+    const sig = Math.floor(now / 60) + '|' + rows.map(x => [x.mt.id, x.mt.onHand.toFixed(2), x.mt.onOrder, x.ri.main, x.ri.sub, x.sev.k, x.wd.toFixed(2), x.used.toFixed(2), x.np ? x.np.etaT : ''].join(':')).join(',');
     if (sig !== V.sig.mat) {
       V.sig.mat = sig;
-      const h = rows.map(({ mt, ri, sev, np, wd }) => {
+      const h = rows.map(({ mt, ri, sev, np, wd, used }) => {
         const [sup, bsp] = splitBsp(mt.supplier);
         const loc = STN(mt.location);
         const locName = loc ? String(loc.name).replace(/\s*\(.*\)$/, '') : mt.location;
         const locSub = loc && /\((.*)\)/.test(loc.name) ? loc.name.match(/\((.*)\)/)[1] : '';
         const below = mt.onHand < mt.min, uncovered = mt.onHand + mt.onOrder < mt.min;
         const urgent = sev.k === 'crit' || (ri.cls === 'crit' && !mt.onOrder);
+        // Nachbestellen nur dort als Knopf, wo es etwas zu tun gibt (unter Minimum, Bedarf nicht gedeckt) – sonst dezent beim Überfahren
+        const actionable = urgent || below || ri.cls === 'crit' || ri.cls === 'warn';
+        const reoBtn = `<button class="btn sm${urgent || (below && uncovered) ? ' primary' : actionable ? '' : ' ghost mt-reo-h'}" data-reorder="${esc(mt.id)}" title="Bestellung vorbereiten (Bestellmenge ${esc(amt(mt.reorderQty, mt.unit))})">Nachbestellen</button>`;
         return `<tr class="click" data-row="material|${esc(mt.id)}"><td class="st" style="--c:${sev.c}"></td>
           <td class="mt-mcell"><b class="nw">${esc(mt.name)}</b><span class="mt-s"><span class="mt-form">${ICO(mt.form === 'Stange' ? 'layers' : 'box', 12)}${esc(FORM[mt.form] || mt.form)}</span> · <span class="mono">${esc(mt.id)}</span><span class="mt-locinl"> · ${esc(locSub || locName)}</span></span></td>
           <td><div class="mt-stock"><div class="mt-stock-n"><b>${esc(U.fmtNum(mt.onHand, mt.unit === 'm' ? 1 : 0))}</b><span>${esc(mt.unit)} · Min ${esc(U.fmtNum(mt.min, mt.unit === 'm' ? 1 : 0))}${below ? (uncovered ? ' · <span style="color:var(--st-wait)">unter Minimum</span>' : ' · unter Min., bestellt') : ''}</span></div>${stockBar(mt)}</div></td>
           <td><div class="mt-rw"><b class="${ri.cls}">${esc(ri.main)}</b><span class="mt-s mt-wrap">${esc(ri.sub)}</span></div></td>
-          <td class="r nw" data-l="Entnahme heute">${wd > 1e-6 ? `<b>${esc(amt(wd, mt.unit))}</b><span class="mt-s">${esc(U.fmtEur(wd * mt.pricePerUnit))}</span>` : '<span class="muted">–</span>'}</td>
+          <td class="r nw" data-l="Verbrauch heute">${useCell(mt, used, wd)}</td>
           <td class="nw" data-l="Bestellt">${mt.onOrder > 0 ? `<b>${esc(amt(mt.onOrder, mt.unit))}</b><span class="mt-s">Lieferung ca. ${esc(tclock(np ? np.etaT : null, now))}</span>` : '<span class="muted">–</span>'}</td>
-          <td class="mt-sup"><span class="nw" title="${esc(mt.supplier)}">${esc(sup)}</span>${bsp ? ` <span class="bsp">${esc(bsp)}</span>` : ''}<span class="mt-s">Lieferzeit ca. ${esc(U.fmtDur(mt.leadMin * 60))} · ${esc(U.fmtEur(mt.pricePerUnit, mt.pricePerUnit < 20 ? 2 : 0))}/${esc(mt.unit)}</span></td>
+          <td class="mt-sup" data-l="Lieferant"><span class="nw" title="${esc(mt.supplier)}">${esc(sup)}</span><span class="mt-s">Lieferzeit ca. ${esc(U.fmtDur(mt.leadMin * 60))} · ${esc(U.fmtEur(mt.pricePerUnit, mt.pricePerUnit < 20 ? 2 : 0))}/${esc(mt.unit)}</span></td>
           <td class="nw mt-loccol">${esc(locSub || locName)}${locSub ? `<span class="mt-s">${esc(locName)}</span>` : ''}</td>
-          <td class="r nw"><button class="btn sm${urgent || (below && uncovered) ? ' primary' : ' ghost'}" data-reorder="${esc(mt.id)}" title="Bestellung vorbereiten (Bestellmenge ${esc(amt(mt.reorderQty, mt.unit))})">Nachbestellen</button></td></tr>`;
+          <td class="r nw">${reoBtn}</td></tr>`;
       }).join('');
       setHTML(r.matBody, h);
       markSel();
@@ -2609,8 +2697,11 @@
         // Entnahmen / Ereignisse heute
         const d0 = dayStart(now);
         const evs = (s2.events || []).filter(e => e.t >= d0 && ((e.entity && e.entity.kind === 'material' && e.entity.id === id) || (e.type === 'bars' && e.msg && e.msg.indexOf(mt.name) >= 0) || (e.type === 'barsOrder' && e.msg && e.msg.indexOf(mt.name) >= 0))).slice(-14).reverse();
-        const wd = withdrawnToday(id);
-        setHTML(X.use, `<h4>Lagerbewegungen heute</h4><div class="mt-d-stats" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:8px"><div><b>${wd > 1e-6 ? esc(U.fmtNum(wd, mt.unit === 'm' ? 1 : 0)) + '<small>' + esc(mt.unit) + '</small>' : '–'}</b><span>Entnahme aus dem Lager</span></div><div><b>${esc(U.fmtEur(wd * mt.pricePerUnit))}</b><span>Materialwert entnommen</span></div></div>
+        const wd = withdrawnToday(id), used = usedToday(mt), dq = mt.unit === 'm' ? 1 : 0;
+        const qv = (v) => (v > 1e-6 ? esc(U.fmtNum(v, dq)) + '<small>' + esc(mt.unit) + '</small>' : '–');
+        const diff = Math.abs(used - wd) > (mt.unit === 'm' ? 0.05 : 0.5);
+        setHTML(X.use, `<h4>Verbrauch &amp; Lagerbewegungen heute</h4><div class="mt-d-stats" style="margin-bottom:8px"><div title="An den Maschinen verbraucht (Säge, Stangenlader, Rohteile) – derselbe Wert wie im Copilot"><b>${qv(used)}</b><span>Verbrauch Maschinen</span></div><div><b>${qv(wd)}</b><span>aus Lager entnommen</span></div><div><b>${esc(U.fmtEur(used * mt.pricePerUnit))}</b><span>Wert verbraucht</span></div></div>
+          ${diff ? `<div class="muted" style="font-size:12px;margin:-2px 0 8px">${wd > used ? 'Mehr entnommen als verbraucht: der Rest liegt im Magazin des Stangenladers bzw. als Rohteile bereit.' : 'Mehr verbraucht als heute entnommen: der Rest kam aus dem Stangenmagazin (vor 00:00 bzw. vor Schichtbeginn befüllt).'}</div>` : ''}
           ${evs.length ? `<div class="mt-d-list">${evs.map(e => `<div class="mt-d-li"><span class="tm">${U.fmtClock(e.t)}</span><span class="mn"><span class="ev">${esc(e.msg)}</span></span><span></span></div>`).join('')}</div>` : '<div class="muted" style="font-size:12.5px">Heute keine Ereignisse zu diesem Material.</div>'}`);
         const loc = STN(mt.location);
         setHTML(X.master, `<h4>Stammdaten</h4><dl class="dl"><dt>Lieferant</dt><dd>${esc(mt.supplier)}</dd><dt>Lieferzeit</dt><dd>ca. ${esc(U.fmtDur(mt.leadMin * 60))}</dd><dt>Preis</dt><dd>${esc(U.fmtEur(mt.pricePerUnit, 2))} je ${esc(mt.unit)}</dd><dt>Bestellmenge</dt><dd>${esc(amt(mt.reorderQty, mt.unit))}</dd><dt>Mindestbestand</dt><dd>${esc(amt(mt.min, mt.unit))}</dd><dt>Lagerort</dt><dd>${esc(loc ? loc.name : mt.location)}</dd><dt>Lagerwert</dt><dd>${esc(U.fmtEur(mt.onHand * mt.pricePerUnit))}</dd></dl>`);
@@ -2643,8 +2734,10 @@
           const cv = WF.sim.containerView(id) || {};
           const col = CT_C[c.state] || 'var(--muted)';
           const o = s2.orders[c.orderId];
-          const ln = ctLine(c, s2, now);
-          setHTML(X.hero, `<div class="mt-d-hero"><div class="mt-d-st">${pill(col, lbl('container', c.state))}<span class="mt-d-since">${esc(cv.where || '')}</span></div><div class="mt-d-cause" style="font-size:13px;color:var(--text2)">${ln.html.replace(/<span class="fb">.*?<\/span><\/span>/, '')}</div></div>`);
+          // Kopf: Zustand + genau eine Ortszeile; Detailzeile nur, wenn sie etwas Neues sagt (kein „Im Versand / Versand / Im Versand“)
+          const whereTxt = c.state === 'shipped' ? (STN('VERSAND') ? STN('VERSAND').name : 'Versand') : c.state === 'scrap' ? (STN('SPERR') ? STN('SPERR').name : 'Sperrlager') : (cv.where || '');
+          const detail = c.state === 'shipped' ? '' : c.state === 'external' ? esc((c.location && c.location.process) || '') : ctLine(c, s2, now).html.replace(/<span class="fb">.*?<\/span><\/span>/, '');
+          setHTML(X.hero, `<div class="mt-d-hero"><div class="mt-d-st">${pill(col, lbl('container', c.state))}<span class="mt-d-since">${esc(whereTxt)}</span></div>${detail ? `<div class="mt-d-cause" style="font-size:13px;color:var(--text2)">${detail}</div>` : ''}</div>`);
           const tr = c.transportId ? s2.transports[c.transportId] : null;
           setHTML(X.content, `<h4>Inhalt</h4><dl class="dl"><dt>Teile</dt><dd><b>${esc(stk(c.qty))}</b> ${esc(c.partName)}${o ? ' <span class="muted">(' + esc(o.part.no) + ')</span>' : ''}</dd>
             <dt>Auftrag</dt><dd>${o ? `<button class="link" data-sel="order|${esc(o.id)}">${esc(o.id)}</button> · ${esc(o.customer)}` : esc(c.orderId)}</dd>
@@ -2652,7 +2745,7 @@
             <dt>Gewicht</dt><dd>${esc(kg(c.weightKg))} inkl. ${c.weightKg > 60 ? 'Gitterbox' : 'Kleinladungsträger'}${c.weightKg > 250 ? ' – nur per Stapler' : ' – AGV-fähig'}</dd>
             <dt>Erstellt</dt><dd>${esc(tclock(c.createdT, now))}${c.readyT ? ' · abholbereit ' + esc(tclock(c.readyT, now)) : ''}</dd>
             ${tr && tr.status !== 'done' ? `<dt>Transport</dt><dd><span class="mono">${esc(tr.id)}</span> · ${esc(trStatusLabel(L.tr.get(tr.id) || { status: tr.status, mode: tr.mode }))}${tr.waitReason && tr.status === 'open' ? ' – ' + esc(tr.waitReason) : ''}</dd>` : ''}
-            ${c.location && c.location.kind === 'external' ? `<dt>Fremdbearbeitung</dt><dd>${esc(c.location.partner)} · ${esc(c.location.process)}<br>übergeben ${esc(tclock(c.location.sentT, now))} · zurück ca. ${esc(tclock(c.location.returnT, now))}</dd>` : ''}</dl>`);
+            ${c.location && c.location.kind === 'external' ? `<dt>Übergeben</dt><dd>${esc(tclock(c.location.sentT, now))} an ${esc(splitBsp(c.location.partner)[0])}${c.location.lotQty ? ' · Los ' + esc(stk(c.location.lotQty)) : ''}</dd>` : ''}</dl>`);
           // Arbeitsplan-Kette mit Position des Behälters
           if (o) {
             const chain = o.routing.map((r, i) => {
@@ -2665,7 +2758,19 @@
         }
         // Verlauf: Erstellung, Transporte, Fremdbearbeitung
         const items = [];
-        if (c) items.push({ t: c.createdT, h: `<b>Behälter angelegt</b><span>${c.src >= 0 ? 'an ' + esc(stName((s2.orders[c.orderId] || { routing: [] }).routing[c.src] ? s2.orders[c.orderId].routing[c.src].station : '')) : 'im Lager'}</span>` });
+        if (c) {
+          const o = s2.orders[c.orderId], rt = o ? o.routing : [];
+          const srcSt = c.src >= 0 && rt[c.src] ? rt[c.src].station : null;
+          const preStart = c.createdT <= (s2.startT || 0) + 1;
+          if (preStart) {
+            // Vor dem Simulationsstart angelegt: bisherigen Weg aus dem Arbeitsplan nachtragen, Stand bei Start aus erster Fahrt bzw. Ort
+            const steps = rt.slice(0, Math.max(0, c.src + 1)).map(r => `AG ${r.seq} ${r.station === 'EXT' ? haertName() : stName(r.station)}`);
+            if (steps.length) items.push({ t: c.createdT - 1, tl: 'vorher', h: `<b>Vor Simulationsstart bearbeitet</b><span>${esc(steps.join(' → '))}</span>` });
+            const first = trs[0];
+            const startAt = first ? stName(first.from) : c.state === 'shipped' ? stName('VERSAND') : c.state === 'external' ? haertName() : c.location && c.location.kind === 'station' ? stName(c.location.id) : (WF.sim.containerWhere ? WF.sim.containerWhere(id) : '') || '–';
+            items.push({ t: c.createdT, h: `<b>Stand bei Simulationsstart</b><span>${esc(startAt)}${c.state === 'shipped' && !first ? ' · Fertigteile bereit zur Auslieferung' : ''}</span>` });
+          } else items.push({ t: c.createdT, h: `<b>Behälter angelegt</b><span>${srcSt ? 'an ' + esc(stName(srcSt)) : 'im Lager'}</span>` });
+        }
         for (const r of trs) {
           if (r.pickupT != null) items.push({ t: r.pickupT, h: `<b>Abgeholt an ${esc(stName(r.from))}</b><span>${esc(r.carrier || r.mode)} · ${esc(r.id)} · Wartezeit ${dur(r.pickupT - r.createdT)}</span>` });
           else if (r.status !== 'done') items.push({ t: r.createdT, h: `<b>Transport nach ${esc(stName(r.to))} angefordert</b><span>${esc(r.id)} · ${esc(trStatusLabel(r))}</span>` });
@@ -2673,7 +2778,7 @@
         }
         for (const x of L.ext) if (x.containers.indexOf(id) >= 0) items.push({ t: x.t, h: x.type === 'out' ? `<b>An ${esc(haertName())} übergeben</b><span>${esc(x.process || '')}${x.returnT ? ' · Rückkehr ca. ' + esc(tclock(x.returnT, now)) : ''}</span>` : `<b>Zurück im Wareneingang</b><span>von ${esc(haertName())}</span>` });
         items.sort((a, b) => b.t - a.t);
-        setHTML(X.hist, `<h4>Verlauf</h4>${items.length ? `<div class="mt-d-list">${items.map(x => `<div class="mt-d-li"><span class="tm">${tclock(x.t, now)}</span><span class="mn">${x.h}</span><span></span></div>`).join('')}</div>` : '<div class="muted" style="font-size:12.5px">Noch keine Bewegung aufgezeichnet.</div>'}`);
+        setHTML(X.hist, `<h4>Verlauf</h4>${items.length ? `<div class="mt-d-list">${items.map(x => `<div class="mt-d-li"><span class="tm">${x.tl ? esc(x.tl) : tclock(x.t, now)}</span><span class="mn">${x.h}</span><span></span></div>`).join('')}</div>` : '<div class="muted" style="font-size:12.5px">Noch keine Bewegung aufgezeichnet.</div>'}`);
       },
     };
   });

@@ -68,6 +68,11 @@
       if (d === 0) return 'heute ' + util.fmtClock(t);
       if (d === 1) return 'morgen ' + util.fmtClock(t);
       if (d === -1) return 'gestern ' + util.fmtClock(t);
+      // Wochenbezug, damit „Mi“ der nächsten Woche nicht früher wirkt als „Do“ dieser Woche
+      const w = Math.floor(t / 604800) - Math.floor(now / 604800);
+      if (w === 1) return 'nächste Woche ' + util.fmtDayClock(t);
+      if (w === -1) return 'letzte Woche ' + util.fmtDayClock(t);
+      if (w > 1) return 'in ' + w + ' Wochen ' + util.fmtDayClock(t);
       return util.fmtDayClock(t);
     },
     fmtDur(sec) {
@@ -77,6 +82,7 @@
       const m = Math.round(sec / 60);
       if (m < 60) return m + ' min';
       const h = Math.floor(m / 60), r = m % 60;
+      if (h >= 24) { const dd = Math.floor(h / 24), hh = h % 24; return dd + ' T' + (hh ? ' ' + hh + ' h' : ''); }
       return h + ' h' + (r ? ' ' + String(r).padStart(2, '0') + ' min' : '');
     },
     fmtNum,

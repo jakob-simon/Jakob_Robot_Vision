@@ -109,7 +109,8 @@
   .md-explain .md-ex-h{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.04em}
   .md-explain .md-ex-h .ico{color:var(--info)}
   .md-explain .md-ex-h .spacer{flex:1}
-  .md-explain .md-rule{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:6px}
+  .md-explain .md-rule{font-size:11.5px;line-height:1.5;color:var(--muted);border-top:1px solid var(--line);padding-top:6px}
+  .md-explain .md-rule b{color:var(--text2);font-weight:600}
   .md-idle-tools{font-size:11.5px;color:var(--faint);margin-top:8px}
 
   .md-sig{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
@@ -120,7 +121,8 @@
   .md-s .v small{font:500 12px/1 var(--f-ui);color:var(--muted);margin-left:3px}
   .md-s .v.mono{font:500 12.5px/1.5 var(--f-mono);white-space:normal;overflow-wrap:anywhere}
   .md-s .sp{height:22px;margin-top:2px}
-  .md-s .sp svg{display:block;width:100%;height:22px}
+  .md-s .sp svg{display:block;width:100%;height:22px;overflow:visible}
+  .md-sp-ax{display:flex;justify-content:space-between;font:500 9.5px/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums;margin-top:2px}
   .md-stack{display:inline-flex;flex-direction:column;gap:2px;padding:3px;border-radius:4px;background:var(--bg2);border:1px solid var(--line2);vertical-align:middle;margin-right:8px}
   .md-stack i{width:9px;height:6px;border-radius:2px;background:var(--track)}
   .md-stack i.on{background:var(--c);box-shadow:0 0 6px var(--c)}
@@ -147,7 +149,7 @@
   .md-oee-v{font:600 34px/1 var(--f-cond);font-variant-numeric:tabular-nums}
   .md-oee-v small{display:block;font:500 11.5px/1.3 var(--f-ui);color:var(--muted);margin-top:4px}
   .md-apq{display:flex;flex-direction:column;gap:6px}
-  .md-apq div{display:grid;grid-template-columns:86px minmax(0,1fr) 46px;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
+  .md-apq div{display:grid;grid-template-columns:86px minmax(0,1fr) 52px;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
   .md-apq div b{font-variant-numeric:tabular-nums;text-align:right;color:var(--text2);font-weight:600}
   .md-dist{display:flex;height:10px;border-radius:3px;overflow:hidden;background:var(--track)}
   .md-dist i{display:block;height:100%;background:var(--c)}
@@ -174,17 +176,63 @@
   @media (max-width:440px){ .md-dl4{grid-template-columns:repeat(2,minmax(0,1fr))} .md-tools .md-slot{display:none} }
   `, 'md-css');
 
-  // ------------------------------------------------------------------ Signal-Aufzeichnung (für Sparklines; läuft im Hintergrund, 1×/s)
-  const SAMPLES = {};
+  // ------------------------------------------------------------------ Signal-Aufzeichnung (für Sparklines; läuft im Hintergrund, 2×/s)
+  // Live-Werte kommen aus machineView().signals (5-s-Raster). Damit die Verläufe schon beim ersten Öffnen und auch bei
+  // hohem Sim-Tempo das ganze 30-min-Fenster zeigen, werden fehlende Zeitpunkte aus dem Zustandsverlauf (segments) mit
+  // demselben Signalmodell ergänzt: Leistung aus Stillstands-/Schnittleistung des Arbeitsplatzes, Spindel nur beim Schneiden
+  // (Takt = Einlegen + Bearbeiten), Drehzahl/Last auf dem zuletzt gemessenen Niveau.
+  const SAMPLES = {}, SIGCTX = {};
+  const STEP = 10;
+  const hn = (a, b) => { let h = Math.imul((a | 0) ^ 0x9E3779B1, 0x85EBCA6B) ^ Math.imul((b | 0) + 0x632BE5AB, 0xC2B2AE35); h ^= h >>> 15; h = Math.imul(h, 0x2C1B3C6D); h ^= h >>> 12; return ((h >>> 0) / 4294967296) * 2 - 1; };
+  function segAt(segs, t) {
+    for (let i = segs.length - 1; i >= 0; i--) { const g = segs[i]; if (g.t0 <= t) return (g.t1 == null || g.t1 > t) ? g : null; }
+    return null;
+  }
+  function synth(id, mv, t, cx) {
+    const g = segAt(mv.segments || [], t), st = g ? g.state : 'idle';
+    const nz = hn(Math.floor(t / 5), cx.k);
+    let cutting = false;
+    if (st === 'running') { const ph = ((t - g.t0) % cx.period + cx.period) % cx.period; cutting = ph >= cx.loadSec; }
+    const p = cx.power;
+    const kwBase = st === 'running' ? (cutting ? p.run : p.idle + (p.run - p.idle) * 0.25) : st === 'fault' ? p.idle * 0.8 : (st === 'setup' || st === 'toolchange') ? p.idle * 1.1 : p.idle;
+    const kw = Math.round(kwBase * (1 + 0.03 * nz) * 10) / 10;
+    return {
+      t, syn: 1,
+      rpm: cx.spindle ? (cutting ? (cx.rpm != null ? Math.round(cx.rpm * (1 + 0.015 * nz)) : null) : 0) : null,
+      load: cx.spindle ? (cutting ? (cx.load != null ? Math.max(5, Math.round(cx.load + 4 * nz)) : null) : 0) : null,
+      kw, amp: Math.round(kw * 1000 / (1.732 * 400 * 0.85) * 10) / 10,
+      temp: cx.washer ? Math.round(((st === 'fault' ? 48 : 60) + 1.5 * nz) * 10) / 10 : null,
+    };
+  }
+  function ctxOf(id, mv, sg) {
+    const P = (WF.profile.stationById || {})[id] || {};
+    const cx = SIGCTX[id] || (SIGCTX[id] = { k: WF.profile.machines.indexOf(id) + 1 });
+    cx.power = P.power || { idle: 1, run: 5 };
+    cx.spindle = sg.spindleRpm != null;
+    cx.washer = sg.bathTempC != null;
+    const learn = cx.rpm == null && sg.spindleRpm > 0;
+    if (sg.spindleRpm > 0) cx.rpm = sg.spindleRpm;
+    if (sg.spindleLoadPct > 0 && sg.spindleRpm > 0) cx.load = sg.spindleLoadPct;
+    // Drehzahl/Last erst jetzt bekannt (beim ersten Öffnen wurde nicht geschnitten) → ergänzte Schnittphasen nachtragen
+    if (learn && SAMPLES[id]) for (const x of SAMPLES[id]) if (x.syn && x.rpm === null) { const nz = hn(Math.floor(x.t / 5), cx.k); x.rpm = Math.round(cx.rpm * (1 + 0.015 * nz)); x.load = cx.load != null ? Math.max(5, Math.round(cx.load + 4 * nz)) : null; }
+    const cyc = mv.order && mv.order.cycleMin ? mv.order.cycleMin * 60 : 300;
+    cx.loadSec = Math.max(10, (P.loadMin != null ? P.loadMin : (mv.loading === 'auto' ? 0.3 : 1)) * 60);
+    cx.period = cyc + cx.loadSec;
+    return cx;
+  }
   function sampleOne(id, mv) {
     const sg = mv && mv.signals; if (!sg) return;
     const arr = SAMPLES[id] || (SAMPLES[id] = []);
-    const last = arr[arr.length - 1];
+    let last = arr[arr.length - 1];
     if (last && last.t === sg.t) return;
-    if (last && sg.t < last.t) arr.length = 0; // Reset
+    if (last && sg.t < last.t) { arr.length = 0; last = null; } // Reset
+    const cx = ctxOf(id, mv, sg);
+    // Lücke (erstes Öffnen, hohes Tempo) aus dem Zustandsverlauf füllen
+    const from = last ? Math.max(last.t + STEP, sg.t - SPARK_WIN) : sg.t - SPARK_WIN;
+    for (let t = Math.ceil(from / STEP) * STEP; t < sg.t - 2; t += STEP) arr.push(synth(id, mv, t, cx));
     arr.push({ t: sg.t, rpm: sg.spindleRpm, load: sg.spindleLoadPct, kw: sg.powerKw != null ? sg.powerKw : mv.powerKw, amp: sg.currentA, temp: sg.bathTempC });
     while (arr.length && arr[0].t < sg.t - SPARK_WIN - 60) arr.shift();
-    if (arr.length > 400) arr.splice(0, arr.length - 400);
+    if (arr.length > 600) arr.splice(0, arr.length - 600);
   }
   setInterval(() => {
     try {
@@ -194,19 +242,30 @@
   }, 500);
   if (WF.bus) WF.bus.on('sim:reset', () => { for (const k in SAMPLES) delete SAMPLES[k]; });
 
+  /** Zeitverlauf der letzten 30 min: feste Zeitachse (−30 min … jetzt), Lücken bleiben Lücken, Endpunkt betont */
   function timeSpark(arr, key, now, color) {
     const w = 200, h = 22, pad = 2;
-    const pts = (arr || []).filter(x => x[key] != null && isFinite(x[key]) && x.t >= now - SPARK_WIN && x.t <= now);
-    if (pts.length < 2) return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><line x1="0" x2="${w}" y1="${h - pad}" y2="${h - pad}" style="stroke:var(--line2)" stroke-dasharray="2 3" vector-effect="non-scaling-stroke"/></svg>`;
-    let min = Math.min(...pts.map(p => p[key])), max = Math.max(...pts.map(p => p[key]));
+    const pts = (arr || []).filter(x => x.t >= now - SPARK_WIN && x.t <= now);
+    const vals = pts.filter(x => x[key] != null && isFinite(x[key]));
+    if (vals.length < 2) return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><line x1="0" x2="${w}" y1="${h - pad}" y2="${h - pad}" style="stroke:var(--line2)" stroke-dasharray="2 3" vector-effect="non-scaling-stroke"/></svg>`;
+    let min = Math.min(...vals.map(p => p[key])), max = Math.max(...vals.map(p => p[key]));
     if (min > 0 && min / Math.max(1e-9, max) > 0.6) min = min * 0.85;
     if (max === min) { max += 1; min = Math.max(0, min - 1); }
-    const t0 = Math.max(now - SPARK_WIN, Math.min(pts[0].t, now - 300)), span = Math.max(60, now - t0);
+    const t0 = now - SPARK_WIN, span = SPARK_WIN;
     const X = (t) => pad + (t - t0) / span * (w - 2 * pad);
     const Y = (v) => h - pad - (v - min) / (max - min) * (h - 2 * pad);
-    const d = pts.map((p, i) => (i ? 'L' : 'M') + X(p.t).toFixed(1) + ',' + Y(p[key]).toFixed(1)).join('');
-    const a = `${d}L${X(pts[pts.length - 1].t).toFixed(1)},${h}L${X(pts[0].t).toFixed(1)},${h}Z`;
-    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><path d="${a}" style="fill:${color}" opacity=".14"/><path d="${d}" style="fill:none;stroke:${color}" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
+    let d = '', a = '', run = [], lastP = null;
+    const flush = () => {
+      if (run.length > 1) {
+        const seg = run.map((p, i) => (i ? 'L' : 'M') + X(p.t).toFixed(1) + ',' + Y(p[key]).toFixed(1)).join('');
+        d += seg; a += `${seg}L${X(run[run.length - 1].t).toFixed(1)},${h}L${X(run[0].t).toFixed(1)},${h}Z`;
+      }
+      run = [];
+    };
+    for (const p of pts) { if (p[key] == null || !isFinite(p[key])) { flush(); continue; } run.push(p); lastP = p; }
+    flush();
+    const dot = lastP ? `<path d="M${X(lastP.t).toFixed(1)},${Y(lastP[key]).toFixed(1)}h0" style="stroke:${color}" stroke-width="5" stroke-linecap="round" vector-effect="non-scaling-stroke"/>` : '';
+    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><path d="${a}" style="fill:${color}" opacity=".14"/><path d="${d}" style="fill:none;stroke:${color}" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>${dot}</svg>`;
   }
 
   // ------------------------------------------------------------------ Abschnitte
@@ -379,17 +438,27 @@
         <td class="r"><div class="md-rest">${esc(rest)}<small>${esc(need)}</small></div><span class="md-chip" style="--c:${c}">${esc(WF.sim.label('toolStatus', t.status))}</span></td></tr>`;
     }).join('');
     const sel = ts.find(t => (t.id || t.typeId) === st.toolSel) || ts[0];
-    const pa = (WF.profile.sim.toolPolicy || {}).planAtParts || 2;
     return `<div class="tbl-wrap"><table class="md-tools"><thead><tr><th class="md-slot"></th><th>Werkzeug</th><th class="r">Verschleiß</th><th class="r">Rest · Status</th></tr></thead><tbody>${rows}</tbody></table></div>
       ${idle.length ? `<div class="md-idle-tools">Außerdem montiert, im Arbeitsgang nicht im Einsatz: ${idle.map(t => esc(t.name) + ' (' + esc(U.fmtNum(t.wearPct, 0)) + ' %)').join(', ')}</div>` : ''}
       <div class="md-explain" style="margin-top:10px">
         <div class="md-ex-h">${icon('info', 14)}<span>WARUM? · ${esc(sel.name)}</span><span class="spacer"></span>${sel.id ? `<button class="link" data-ent="tool|${esc(sel.id)}" style="font-size:11.5px;font-weight:500;letter-spacing:0">Werkzeugdetails</button>` : ''}</div>
         <div>${esc(sel.explain || '–')}</div>
-        <div class="md-rule">Regel: Verschleiß steigt nur am Ende eines Teils. Geschnitten wird nur, wenn die Reststandzeit für das ganze nächste Teil reicht; gewechselt wird nie mitten im Teil, sondern an der Teilegrenze, sobald höchstens ${pa} Teile (bzw. 10 % der Standzeit) übrig sind – angekündigt mit Vorlauf für das Holen des Werkzeugs.</div>
+        <div class="md-rule">${toolRule(sel)}</div>
       </div>`;
   }
+  /** Die eine Regel – mit den Werten genau dieses Werkzeugs (Ankündigung = planHorizonParts, Wechselgrenze = changeAtParts) */
+  function toolRule(t) {
+    const base = 'Regel: Verschleiß zählt am Ende jedes Teils; geschnitten wird nur, wenn die Reststandzeit für das ganze nächste Teil reicht, gewechselt nie mitten im Teil.';
+    const H = t.planHorizonParts, at = t.changeAtParts;
+    if (H == null || at == null) return esc(base + ' Wechselzeitpunkt und Vorlauf werden berechnet, sobald die Serie läuft.');
+    const wear = t.planWearPct != null ? ` (ab ca. ${U.fmtNum(t.planWearPct, 0)} % Verschleiß)` : '';
+    const change = at === 0
+      ? `<b>Wechsel:</b> an der letzten Teilegrenze, an der die Standzeit noch für ein ganzes Teil reicht${esc(wear)} – Wechselgrenze 0 Teile, weil bei langen Schnitten sonst mehr als ca. 10 % der Standzeit ungenutzt blieben.`
+      : `<b>Wechsel:</b> an der Teilegrenze, sobald höchstens ${esc(teile(at))} Reststandzeit übrig ${at === 1 ? 'ist' : 'sind'}${esc(wear)} – Wechselgrenze ${esc(teile(at))}.`;
+    return `${esc(base)}<br><b>Ankündigung:</b> ${esc(teile(H))} vorher (Vorlauf zum Holen des Werkzeugs).<br>${change} Reicht die Reststandzeit bis zum Ende des Arbeitsgangs, wird nicht gewechselt.`;
+  }
   function sigTools(mv, st) {
-    return st.toolSel + '|' + mv.tools.map(t => [t.id, t.status, t.remainingParts, t.wearPct != null ? Math.round(t.wearPct) : '', t.plannedChange ? t.plannedChange.text + t.plannedChange.by + t.plannedChange.stage : '', t.explain].join('~')).join('||');
+    return st.toolSel + '|' + mv.tools.map(t => [t.id, t.status, t.remainingParts, t.wearPct != null ? Math.round(t.wearPct) : '', t.plannedChange ? t.plannedChange.text + t.plannedChange.by + t.plannedChange.stage : '', t.explain, t.changeAtParts, t.planHorizonParts].join('~')).join('||');
   }
 
   function secSignals(mv, now) {
@@ -403,7 +472,7 @@
       </div></div></div>`;
     }
     const arr = SAMPLES[mv.id] || [];
-    const tile = (l, v, spark, wide) => `<div class="md-s${wide ? ' wide' : ''}"><span class="l">${l}</span><span class="v${typeof v === 'object' ? ' ' + v.cls : ''}" ${typeof v === 'object' && v.live ? `data-live="${v.live}"` : ''}>${typeof v === 'object' ? v.html : v}</span>${spark ? `<div class="sp">${spark}</div>` : ''}</div>`;
+    const tile = (l, v, spark, wide) => `<div class="md-s${wide ? ' wide' : ''}"><span class="l">${l}</span><span class="v${typeof v === 'object' ? ' ' + v.cls : ''}" ${typeof v === 'object' && v.live ? `data-live="${v.live}"` : ''}>${typeof v === 'object' ? v.html : v}</span>${spark ? `<div class="sp">${spark}</div><div class="md-sp-ax"><span>−30 min</span><span>jetzt</span></div>` : ''}</div>`;
     const light = `<span class="md-stack"><i class="${sg.stackLight === 'red' ? 'on' : ''}" style="--c:${STACK.red}"></i><i class="${sg.stackLight === 'yellow' ? 'on' : ''}" style="--c:${STACK.yellow}"></i><i class="${sg.stackLight === 'green' ? 'on' : ''}" style="--c:${STACK.green}"></i></span>${esc(sg.stackLightLabel || '–')}`;
     let h = '<div class="md-sig">';
     if (lv === 1) {
@@ -430,7 +499,7 @@
       if (sg.alarm) h += tile('Alarm', { cls: 'mono', html: `<span style="color:var(--st-fault)">${esc(sg.alarm)}</span>` }, null, true);
     }
     h += '</div>';
-    h += `<div class="md-sig-f">Quelle: ${esc(sg.source || mv.conn.protocol)} · Gateway ${esc(mv.conn.gateway || '–')} · Raster 5 s · Stand ${esc(U.fmtClock(sg.t || now))}${lv >= 2 ? '' : ' · Level 2 (Steuerung lesen) liefert zusätzlich Programm, Spindel und Stückzähler'}</div>`;
+    h += `<div class="md-sig-f">Quelle: ${esc(sg.source || mv.conn.protocol)} · Gateway ${esc(mv.conn.gateway || '–')} · Raster 5 s · Verläufe: letzte 30 min · Stand ${esc(U.fmtClock(sg.t || now))}${lv >= 2 ? '' : ' · Level 2 (Steuerung lesen) liefert zusätzlich Programm, Spindel und Stückzähler'}</div>`;
     return h;
   }
   function sigSignals(mv, now) {
@@ -453,7 +522,7 @@
 
   function secToday(mv) {
     const o = mv.oeeToday || {}, os = mv.oeeShift || {};
-    const apq = (l, v, c) => `<div><span>${l}</span>${WF.ui.bar(v || 0, { color: c, thin: true })}<b>${esc(U.fmtPct(v, 0))}</b></div>`;
+    const apq = (l, v, c) => `<div><span>${l}</span>${WF.ui.bar(v || 0, { color: c, thin: true })}<b>${esc(U.fmtPct(v, 1))}</b></div>`;
     const tot = Object.values(mv.stateTimes || {}).reduce((a, b) => a + b, 0) || 1;
     const keys = Object.keys(WF.STATE).filter(k => (mv.stateTimes || {})[k] > 0);
     const dist = keys.map(k => `<i style="--c:${WF.STATE[k].color};width:${((mv.stateTimes[k] / tot) * 100).toFixed(2)}%" title="${esc(WF.STATE[k].label)}: ${esc(U.fmtDur(mv.stateTimes[k]))}"></i>`).join('');

@@ -1482,7 +1482,9 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-hint .btn{align-self:center}
   @media (max-width:560px){.ka-hint{grid-template-columns:20px minmax(0,1fr)}.ka-hint .btn{grid-column:2;justify-self:start}}
   /* Fußleiste */
-  .ka-foot{position:sticky;bottom:0;z-index:6;display:flex;align-items:center;gap:12px 16px;flex-wrap:wrap;padding:12px 14px;border-radius:var(--r);background:color-mix(in srgb,var(--card2) 94%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--line2);box-shadow:0 -10px 30px rgba(4,8,16,.45)}
+  /* bündig am unteren Rand angedockt: hebt den unteren Innenabstand der Ansicht (28 px) auf, Inhalt läuft mit Verlauf darunter */
+  .ka-foot{position:sticky;bottom:-28px;margin-bottom:-28px;z-index:6;display:flex;align-items:center;gap:12px 16px;flex-wrap:wrap;padding:12px 14px calc(12px + env(safe-area-inset-bottom,0px));border-radius:var(--r) var(--r) 0 0;background:color-mix(in srgb,var(--card2) 94%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--line2);border-bottom:0;box-shadow:0 -10px 30px rgba(4,8,16,.45)}
+  .ka-foot::before{content:"";position:absolute;left:-1px;right:-1px;bottom:calc(100% + 1px);height:26px;background:linear-gradient(180deg,color-mix(in srgb,var(--bg) 0%,transparent),var(--bg));pointer-events:none}
   .ka-foot .sum{display:flex;align-items:baseline;gap:6px 22px;flex-wrap:wrap;min-width:0;flex:1}
   .ka-foot .sum div{display:flex;flex-direction:column;min-width:0}
   .ka-foot .sum .l{font:600 10px/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
@@ -1522,13 +1524,26 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-cap{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
   .ka-cap .eyebrow{display:flex;justify-content:space-between;gap:10px}
   .ka-capg{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:6px;margin-top:9px}
-  .ka-capg .c{display:grid;grid-template-columns:7px minmax(0,1fr);grid-template-rows:auto auto;gap:1px 8px;align-items:center;padding:6px 9px;border-radius:7px;background:var(--bg2);border:1px solid var(--line);font-size:12px;min-width:0}
+  .ka-capg .c{display:grid;grid-template-columns:7px minmax(0,1fr);grid-template-rows:auto auto auto;gap:2px 8px;align-items:center;padding:7px 9px 8px;border-radius:7px;background:var(--bg2);border:1px solid var(--line);font-size:12px;min-width:0}
   .ka-capg .c .nmw{display:flex;gap:6px;align-items:baseline;min-width:0}
-  .ka-capg .c .fr{grid-column:2}
+  .ka-capg .c .frw{grid-column:2;display:flex;align-items:baseline;gap:6px;min-width:0}
+  .ka-capg .c .bis{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;font-variant-numeric:tabular-nums}
+  .ka-capg .c .occ{grid-column:1/-1;position:relative;display:block;height:4px;margin-top:4px;border-radius:2px;background:var(--track);overflow:hidden}
+  .ka-capg .c .occ i{position:absolute;top:0;bottom:0;width:auto;height:auto;border-radius:1px;background:color-mix(in srgb,var(--muted) 55%,transparent)}
+  .ka-capg .c .occ i.a{background:var(--c)}
+  .ka-capg .c .fr.bad{color:var(--st-fault)}
+  .ka-capg .c.bn{border-color:color-mix(in srgb,var(--st-wait) 40%,var(--line))}
+  .ka-capg .c .bnt{flex:none;align-self:center;display:inline-grid;place-items:center;color:var(--st-wait)}
+  .ka-caplg .bnl{display:inline-flex;align-items:center;gap:5px}
+  .ka-caplg .bnl .ico{color:var(--st-wait)}
+  .ka-caplg{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:11px;color:var(--muted)}
+  .ka-caplg span{display:inline-flex;align-items:center;gap:6px}
+  .ka-caplg i{display:inline-block;width:14px;height:4px;border-radius:2px;background:color-mix(in srgb,var(--muted) 55%,transparent)}
+  .ka-caplg i.a{background:var(--st-run)}
   .ka-capg .c i{width:7px;height:7px;border-radius:50%;flex:none;background:var(--c)}
   .ka-capg .c .id{font-family:var(--f-mono);font-size:11px;color:var(--muted)}
   .ka-capg .c .nm{color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
-  .ka-capg .c .fr{white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--text)}
+  .ka-capg .c .fr{white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--text);flex:none}
   .ka-capg .c .fr.ok{color:var(--st-run)}
   .ka-note{padding:18px;display:flex;gap:14px;align-items:flex-start}
   .ka-note .ic{flex:none;width:40px;height:40px;border-radius:11px;display:grid;place-items:center;color:var(--c,var(--st-wait));background:color-mix(in srgb,var(--c,var(--st-wait)) 13%,transparent)}
@@ -1538,7 +1553,21 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-qt{width:100%;min-height:330px;font-family:var(--f-mono);font-size:12px;line-height:1.5;resize:vertical}
   .ka-zm{background:var(--bg2);border-radius:8px;overflow:hidden;position:relative}
   .ka-zm svg{display:block;width:100%;height:auto}
-  .ka-zm .ka-mk{animation:none}
+  .ka-zm .ka-mk{animation:none;cursor:pointer}
+  .ka-mk{cursor:pointer}
+  .ka-zhint{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin:-4px 0 0}
+  .ka-zhint .ico{flex:none;color:var(--faint)}
+  /* Telefon: Lightbox als Vollbild, Zeichnung in fester Breite – verschieben und mit zwei Fingern zoomen */
+  .modal-back.ka-zback{padding:0}
+  .modal.ka-zmodal{width:100vw !important;max-width:none;height:100dvh;max-height:none;border-radius:0;border:0;display:flex;flex-direction:column;overflow:hidden}
+  .modal.ka-zmodal .modal-h{padding-top:max(14px,env(safe-area-inset-top,0px))}
+  .modal.ka-zmodal .modal-b{flex:1;min-height:0;padding:10px 0 0;gap:8px}
+  .modal.ka-zmodal .ka-zhint{padding:0 16px;margin:0}
+  .ka-zpan{flex:1;min-height:0;overflow:auto;touch-action:pan-x pan-y pinch-zoom;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;background:var(--bg2);padding-bottom:env(safe-area-inset-bottom,0px)}
+  .ka-zpan .ka-zm{width:1100px;border-radius:0}
+  .ka-zpan .ka-mk{width:26px;height:26px;margin:-13px 0 0 -13px;font-size:12.5px}
+  .ka-feat.flash{animation:kaFlash 1.6s ease}
+  @keyframes kaFlash{0%,60%{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,var(--bg2));box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}100%{box-shadow:0 0 0 0 transparent}}
   @keyframes kaIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
   @keyframes kaScan{0%{transform:translateY(-100%)}100%{transform:translateY(390%)}}
   @keyframes kaPop{0%{opacity:0;transform:scale(.2)}70%{opacity:1;transform:scale(1.18)}100%{opacity:1;transform:scale(1)}}
@@ -1704,10 +1733,12 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
       else H.push({ sev: 'ok', ic: 'box', t: m.viaOrder ? 'Material kommt rechtzeitig' : 'Material aus dem Lager', p: m.viaOrder ? `Bestellung ${m.viaOrder.qty ? qtyU(m.viaOrder.qty, mt) + ' ' : ''}${mt.name} trifft ${fRel(m.viaOrder.etaT)} ein – vor dem Start dieses Auftrags.` : `${qtyU(m.need, mt)} ${mt.name} frei verfügbar – danach ${qtyU(m.after, mt)} (Mindestbestand ${qtyU(mt.min, mt)}).` });
       if (m.ok && m.viaOrder && m.belowMin && !m.laterShort) H.push({ sev: 'info', ic: 'box', t: 'Bestand danach unter Mindestbestand', p: `${mt.name}: nach diesem Auftrag ${qtyU(Math.max(0, m.after), mt)} (Mindestbestand ${qtyU(mt.min, mt)}).` });
     } else if (q.raw && !q.raw.materialId) H.push({ sev: 'info', ic: 'box', t: 'Rohteil nicht im Lager', p: `${q.raw.text} – Beistellung durch den Kunden oder Beschaffung klären${q.raw.costPerPart ? ` (geschätzt ${eur(q.raw.costPerPart)} je Teil)` : ''}.` });
+    const bw = plantBottleneck();
     for (const s of sch.steps) {
       if (s.kind !== 'machine' || s.wait < 2 * 3600) continue;
       const sn = STN(s.station), ids = [...new Set(s.blockers.filter(e => e.end > s.earliest).map(e => e.orderId))];
-      H.push({ sev: s.wait > 8 * 3600 ? 'warn' : 'info', ic: 'gauge', t: `Engpass ${s.station} ${sn.short}`, p: `Belegt bis ${fRel(s.start)}${ids.length ? ' durch ' + ids.slice(0, 3).join(', ') + (ids.length > 3 ? ' …' : '') : ''} – ${fDurL(s.wait)} Wartezeit vor AG ${(s.k + 1) * 10} „${q.routing[s.k].op}“.` });
+      const isBn = bw && bw.stationId === s.station;
+      H.push({ sev: s.wait > 8 * 3600 || isBn ? 'warn' : 'info', ic: 'gauge', t: `${isBn ? 'Engpass im Werk' : 'Wartezeit an'} ${s.station} ${sn.short}`, p: `Belegt bis ${fRel(s.start)}${ids.length ? ' durch ' + ids.slice(0, 3).join(', ') + (ids.length > 3 ? ' …' : '') : ''} – ${fDurL(s.wait)} Wartezeit vor AG ${(s.k + 1) * 10} „${q.routing[s.k].op}“.${isBn && bw.why ? ' ' + bw.why + '.' : ''}` });
     }
     c.altEta.forEach((al, k) => {
       if (!al) return;
@@ -2388,7 +2419,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
       <div class="tx"><b>${esc(o.id)} eingelastet · ${esc(o.part.name)}</b>
         <p>${esc(stTxt)}${eta != null ? ` · Prognose Plantafel ${esc(fDay(eta))}` : ''}${dev != null && Math.abs(dev) > 900 ? ` (Angebot: ${esc(fDay(placed.etaQuote))})` : ''}</p>
         <div class="bar" title="Fortschritt ${U.fmtPct(o.progress)}">${WF.ui.bar(o.progress, { color: 'var(--st-run)', thin: true })}</div></div>
-      <div class="row"><button type="button" class="btn sm" data-act="open" data-id="${esc(o.id)}">Auftrag öffnen</button>${hasView('auftraege') ? '<button type="button" class="btn sm ghost" data-act="plan">Plantafel</button>' : ''}${hasView('halle') ? '<button type="button" class="btn sm ghost" data-act="hall">In der Halle</button>' : ''}</div></div>`;
+      <div class="row"><button type="button" class="btn sm" data-act="open" data-id="${esc(o.id)}">Auftrag öffnen</button>${hasView('auftraege') ? `<button type="button" class="btn sm ghost" data-act="plan" data-id="${esc(o.id)}">${icon('layers', 14)} Plantafel</button>` : ''}${hasView('halle') ? `<button type="button" class="btn sm ghost" data-act="hall" data-id="${esc(o.id)}">${icon('cube', 14)} In der Halle</button>` : ''}</div></div>`;
     n.hidden = false; put(n, h);
   }
   function renderRecent() {
@@ -2406,16 +2437,63 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   }
 
   // ------------------------------------------------------------------ Leer-, Hinweis- und Fehlerzustand
+  /** Uhrzeit kurz relativ zu heute: „14:17“, „morgen 08:27“, „Mi 19:04“ */
+  function fShort(t) {
+    const now = S() ? S().t : 0, d = Math.floor(t / DAY) - Math.floor(now / DAY);
+    return d === 0 ? fClock(t) : d === 1 ? 'morgen ' + fClock(t) : DAYS[Math.floor(t / DAY) % 7] + ' ' + fClock(t);
+  }
+  /** Ende eines Fensters kompakt: „16:31“ heute, sonst „Di 13:20“ */
+  function fBis(t) { const now = S() ? S().t : 0; return Math.floor(t / DAY) === Math.floor(now / DAY) ? fClock(t) : DAYS[Math.floor(t / DAY) % 7] + ' ' + fClock(t); }
+  const FREE_MIN = 2 * 3600, CAP_H = 48;
+  /** Engpass im Werk und Arbeitsvorrat je Arbeitsplatz – Werte der Engine (eine Wahrheit), falls vorhanden */
+  function plantBottleneck() { try { return WF.sim && typeof WF.sim.bottleneck === 'function' ? WF.sim.bottleneck() : null; } catch (e) { return null; } }
+  function plantOccupancy() {
+    try {
+      if (WF.sim && typeof WF.sim.occupancy === 'function') return WF.sim.occupancy();
+      const k = WF.sim && WF.sim.state && WF.sim.state.kpi; return k && k.occupancy && k.occupancy.byMachine ? k.occupancy : null;
+    } catch (e) { return null; }
+  }
+  /** Belegung eines Arbeitsplatzes aus der Plantafel (WF.sim.forecast().machines): erstes freies Fenster ≥ 2 h ab jetzt,
+      belegte Abschnitte und Belegungsanteil der nächsten 48 h */
+  function capOf(fc, id, now) {
+    const list = (fc.machines[id] || []).filter(e => e.end > now).slice().sort((a, b) => a.start - b.start);
+    let cur = now, win = null;
+    for (const e of list) {
+      if (e.start - cur >= FREE_MIN) { win = { a: cur, b: e.start }; break; }
+      cur = Math.max(cur, e.end);
+    }
+    if (!win) win = { a: cur, b: null };
+    const h1 = now + CAP_H * 3600, segs = [];
+    let busy = 0;
+    for (const e of list) {
+      const a = Math.max(now, e.start), b = Math.min(h1, e.end); if (b <= a) continue;
+      const last = segs[segs.length - 1];
+      if (last && a <= last.b + 60 && last.active === !!e.active) last.b = Math.max(last.b, b); else segs.push({ a, b, active: !!e.active });
+    }
+    let reach = now;
+    for (const g of segs) { busy += Math.max(0, g.b - Math.max(g.a, reach)); reach = Math.max(reach, g.b); }
+    return { win, segs, share: busy / (CAP_H * 3600), next: list[0] || null };
+  }
   function emptyHtml() {
-    const fc = WF.sim.forecast(120), now = S().t;
+    const fc = WF.sim.forecast(120), now = S().t, H = CAP_H * 3600;
+    const bw = plantBottleneck(), occ = plantOccupancy();
     const caps = P().machines.map(id => {
-      const l = fc.machines[id] || [], free = l.reduce((m, e) => Math.max(m, e.end), now), sn = STN(id);
-      const fr = free <= now + 900 ? '<span class="fr ok">jetzt frei</span>' : `<span class="fr">frei ab ${esc(fRel(free))}</span>`;
-      return `<div class="c" style="--c:${stColor(id)}" title="${esc(sn.name + ' · ' + stLabel(id))}"><i></i><span class="nmw"><span class="id">${id}</span><span class="nm">${esc(sn.short)}</span></span>${fr}</div>`;
+      const sn = STN(id), m = S().machines[id], c = capOf(fc, id, now);
+      let fr, bis = '';
+      if (m && m.state === 'fault') fr = '<span class="fr bad">Störung</span>';
+      else if (c.win.a <= now + 900) { fr = '<span class="fr ok">jetzt frei</span>'; bis = c.win.b != null ? 'bis ' + fBis(c.win.b) : 'ohne Auftrag'; }
+      else { fr = `<span class="fr">frei ab ${esc(fShort(c.win.a))}</span>`; bis = c.win.b != null ? 'bis ' + fBis(c.win.b) : ''; }
+      const bar = c.segs.map(g => `<i class="${g.active ? 'a' : ''}" style="left:${((g.a - now) / H * 100).toFixed(2)}%;width:${Math.max(0.8, (g.b - g.a) / H * 100).toFixed(2)}%"></i>`).join('');
+      const isBn = !!(bw && bw.stationId === id), bd = occ && occ.byMachine ? occ.byMachine[id] : null;
+      const tipTxt = `${sn.name} · ${stLabel(id)}` + (m && m.op ? ` (${m.op.oid})` : '') +
+        (bd != null ? `\nArbeitsvorrat ${nf(bd, bd < 10 ? 1 : 0)} Schichttage` : '') +
+        `\nBelegt in den nächsten 48 h: ${U.fmtPct(c.share)}` + (c.win.b != null ? `\nFreies Fenster ≥ 2 h: ${fShort(Math.max(now, c.win.a))} – ${fShort(c.win.b)}` : `\nFrei ab ${fShort(Math.max(now, c.win.a))}`) +
+        (isBn ? `\nEngpass im Werk – ${bw.why || ''}` : '');
+      return `<div class="c${isBn ? ' bn' : ''}" style="--c:${stColor(id)}" title="${esc(tipTxt)}"><i></i><span class="nmw"><span class="id">${id}</span><span class="nm">${esc(sn.short)}</span>${isBn ? `<span class="bnt" aria-label="Engpass im Werk">${icon('gauge', 13)}</span>` : ''}</span><span class="frw">${fr}${bis ? `<span class="bis">${esc(bis)}</span>` : ''}</span><span class="occ" aria-hidden="true">${bar}</span></div>`;
     }).join('');
     const step = (ic, t, d, who) => `<li><span class="d">${icon(ic, 16)}</span><div><b>${t}</b><span>${d}</span></div><span class="who ${who === 'Claude' ? 'c' : 'w'}">${who}</span></li>`;
     return `<div class="ka-empty"><div class="hd"><span class="ic">${icon('sparkles', 22)}</span><div><h2>Vom Zeichnungsstand zum Angebot – in einer Minute</h2>
-        <p>Links eine Zeichnung wählen oder ablegen und „Analysieren“ klicken. Claude liest die Zeichnung; werkfluss rechnet Preis und Liefertermin aus der aktuellen Belegung Ihrer Fertigung – und lastet den Auftrag auf Wunsch sofort ein.</p></div></div>
+        <p>Eine Beispielzeichnung wählen oder eine eigene ablegen und „Analysieren“ klicken. Claude liest die Zeichnung; werkfluss rechnet Preis und Liefertermin aus der aktuellen Belegung Ihrer Fertigung – und lastet den Auftrag auf Wunsch sofort ein.</p></div></div>
       <ol class="ka-esteps">
         ${step('eye', 'Zeichnung lesen', 'Bemaßung, Schriftfeld, Werkstoff, Masse und Hinweise.', 'Claude')}
         ${step('target', 'Merkmale', 'Passungen, Oberflächen, Härte, Form- und Lagetoleranzen – nummeriert auf der Zeichnung.', 'Claude')}
@@ -2423,7 +2501,8 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
         ${step('euro', 'Kalkulation', 'Lagermaterial, Maschinenstundensätze, Werkzeugverschleiß, Fremdbearbeitung, Zuschlag – jede Formel sichtbar.', 'werkfluss')}
         ${step('clock', 'Termin', 'Warteschlangen der Maschinen, Schichtkalender, Härterei-Lieferfenster und Materialbestand – live.', 'werkfluss')}
       </ol>
-      <div class="ka-cap"><div class="eyebrow"><span>Live-Belegung der Arbeitsplätze</span><span>${esc(WF.sim.clock())}</span></div><div class="ka-capg">${caps}</div></div></div>`;
+      <div class="ka-cap"><div class="eyebrow"><span>Live-Belegung der Arbeitsplätze · nächste 48 h</span><span>${esc(WF.sim.clock())}</span></div><div class="ka-capg">${caps}</div>
+        <div class="ka-caplg"><span><i class="a"></i>laufender Auftrag</span><span><i></i>eingeplant</span>${bw && bw.stationId ? `<span class="bnl" title="${esc(bw.why || '')}">${icon('gauge', 13)}Engpass im Werk</span>` : ''}<span>„frei“ = erste Lücke von mindestens 2 h laut Plantafel</span></div></div></div>`;
   }
   function noticeHtml(kind) {
     const exBtns = EXAMPLES.map(e => `<button type="button" class="btn sm" data-act="ex" data-id="${e.id}">${esc(e.title)}</button>`).join('');
@@ -2515,16 +2594,50 @@ Erstellt mit werkfluss KI-Auftrag · ${WF.sim.clock()}`;
       } },
     ] });
   }
+  /** Merkmal in der Ergebnisliste zeigen (Klick auf eine nummerierte Markierung der Zeichnung) */
+  function flashFeature(i) {
+    const n = root && root.querySelector(`.ka-feat[data-fi="${i}"]`);
+    if (!n || !shown.sPart) return false;
+    try { n.scrollIntoView({ block: 'center', behavior: reduceMotion() ? 'auto' : 'smooth' }); } catch (e) { n.scrollIntoView(); }
+    n.classList.remove('flash'); void n.offsetWidth; n.classList.add('flash');
+    setTimeout(() => n.classList.remove('flash'), 1700);
+    return true;
+  }
   function openZoom() {
     let inner = '';
     if (ui.src.kind === 'example') inner = exById(ui.src.id).draw(' role="img"');
     else if (ui.upload && ui.upload.kind === 'image') inner = `<img src="${ui.upload.url}" alt="" style="display:block;width:100%;height:auto">`;
     else return;
+    const phone = window.matchMedia('(max-width: 640px)').matches;
     const box = el('div', { class: 'ka-zm', html: inner + `<div class="ka-ov">${markerHtml()}</div>` });
     const title = ui.src.kind === 'example' ? exById(ui.src.id).result.part.drawing + ' · ' + exById(ui.src.id).title : ui.upload.name;
+    const hasMk = !!box.querySelector('.ka-mk');
+    let body = box, pan = null;
+    if (phone) {
+      pan = el('div', { class: 'ka-zpan' }, box);
+      const portrait = window.matchMedia('(orientation: portrait)').matches;
+      body = el('div', { style: { display: 'contents' } },
+        el('div', { class: 'ka-zhint', html: icon(portrait ? 'refresh' : 'search', 14) + `<span>${portrait ? 'Querformat empfohlen · ' : ''}verschieben und mit zwei Fingern zoomen${hasMk ? ' · Nummer antippen zeigt das Merkmal' : ''}</span>` }), pan);
+    } else if (hasMk) {
+      body = el('div', { class: 'stack' }, box, el('div', { class: 'ka-zhint', html: icon('info', 14) + '<span>Nummer anklicken zeigt das Merkmal in der Auswertung</span>' }));
+    }
     const ar = ui.src.kind === 'example' ? 297 / 210 : (ui.upload.w && ui.upload.h ? ui.upload.w / ui.upload.h : 1.414);
-    const w = Math.round(Math.max(320, Math.min(1180, (window.innerHeight - 130) * ar + 34)));
-    WF.app.modal({ title, body: box, width: w });
+    const w = Math.round(Math.max(320, Math.min(1180, (window.innerHeight - 150) * ar + 34)));
+    const m = WF.app.modal({ title, body, width: phone ? null : w });
+    box.addEventListener('click', (e) => {
+      const mk = e.target.closest('.ka-mk'); if (!mk) return;
+      const i = mk.dataset.fi;
+      if (root.querySelector(`.ka-feat[data-fi="${i}"]`) && shown.sPart) { m.close(); setTimeout(() => flashFeature(i), 60); }
+    });
+    if (phone && m.body) {
+      const modal = m.body.closest('.modal'); if (modal) { modal.classList.add('ka-zmodal'); if (modal.parentNode) modal.parentNode.classList.add('ka-zback'); }
+      // Start beim Schriftfeld (rechts unten): Benennung, Zeichnungsnummer, Werkstoff, Maßstab
+      requestAnimationFrame(() => {
+        if (!pan) return;
+        if (ui.src.kind === 'example') { pan.scrollLeft = Math.max(0, 1100 * 167 / 297 - 12); pan.scrollTop = pan.scrollHeight; }
+        else { pan.scrollLeft = pan.scrollWidth; pan.scrollTop = pan.scrollHeight; }
+      });
+    }
   }
 
   // ------------------------------------------------------------------ Ereignisse
@@ -2548,6 +2661,8 @@ Erstellt mit werkfluss KI-Auftrag · ${WF.sim.clock()}`;
     if (quote) { recalc(); renderSections(); }
   }
   function onClick(e) {
+    const mk = e.target.closest && e.target.closest('.ka-stage .ka-mk');
+    if (mk && root.contains(mk)) { flashFeature(mk.dataset.fi); return; }
     const b = e.target.closest('[data-act]'); if (!b || !root.contains(b)) return;
     const a = b.dataset.act;
     if (a === 'ex') selectExample(b.dataset.id);
@@ -2582,8 +2697,11 @@ Erstellt mit werkfluss KI-Auftrag · ${WF.sim.clock()}`;
     else if (a === 'place') place();
     else if (a === 'quote') openQuote();
     else if (a === 'open') WF.app.select('order', b.dataset.id);
-    else if (a === 'plan') WF.app.navigate('auftraege');
-    else if (a === 'hall') WF.app.navigate('halle');
+    else if (a === 'plan') WF.app.navigate('auftraege', b.dataset.id ? { mode: 'gantt', order: b.dataset.id } : null);
+    else if (a === 'hall') {
+      WF.app.navigate('halle');
+      if (b.dataset.id && WF.hall && WF.hall.focusOrder) { try { WF.hall.focusOrder(b.dataset.id); } catch (err) { console.warn(err); } }
+    }
   }
   function selectAlt(k, sid) {
     const r = quote.routing[k]; if (!r) return;

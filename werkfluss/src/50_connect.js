@@ -31,7 +31,7 @@
   @keyframes cnFade{from{opacity:0}to{opacity:1}}
   @keyframes cnSpin{to{transform:rotate(360deg)}}
   @keyframes cnShimmer{0%{background-position:-160px 0}100%{background-position:160px 0}}
-  .cn-spin{width:14px;height:14px;border-radius:50%;border:2px solid color-mix(in srgb,var(--accent) 25%,transparent);border-top-color:var(--accent);animation:cnSpin .8s linear infinite;flex:none}
+  .cn-spin{display:inline-block;box-sizing:border-box;width:14px;height:14px;min-width:14px;max-width:14px;border-radius:50%;border:2px solid color-mix(in srgb,var(--accent) 25%,transparent);border-top-color:var(--accent);animation:cnSpin .8s linear infinite;flex:none}
   .cn-shim{display:block;height:10px;border-radius:4px;background:linear-gradient(90deg,var(--card2) 0,var(--raise) 50%,var(--card2) 100%);background-size:320px 100%;animation:cnShimmer 1.2s linear infinite}
 
   /* ---------- Kopf: Anbindungsgrad */
@@ -144,7 +144,8 @@
   @media (max-width:560px){.cn-mx{font-size:11.5px}.cn-mx td.l{white-space:normal}.cn-mx th .t{font-size:9.5px;letter-spacing:.03em}.cn-mn{font-size:9.5px;padding:1px 3px}}
 
   /* ---------- Maschinenliste */
-  .cn-lh,.cn-lr{display:grid;grid-template-columns:minmax(168px,1.45fr) 52px minmax(116px,1.05fr) minmax(140px,1.25fr) 46px minmax(190px,2fr) 112px 128px;gap:12px;align-items:center;padding:0 14px}
+  .cn-list{container-type:inline-size;min-width:0}
+  .cn-lh,.cn-lr{display:grid;grid-template-columns:minmax(168px,1.45fr) 58px minmax(116px,1.05fr) minmax(140px,1.25fr) 46px minmax(190px,2fr) 112px 128px;gap:12px;align-items:center;padding:0 14px}
   .cn-lh{font:600 10.5px/1.2 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-top:10px;padding-bottom:10px;border-bottom:1px solid var(--line)}
   .cn-lh span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .cn-lr{padding-top:9px;padding-bottom:9px;border-bottom:1px solid var(--line);cursor:pointer;min-height:56px}
@@ -174,22 +175,27 @@
   .cn-ago i{width:6px;height:6px;border-radius:50%;background:var(--st-run);flex:none;opacity:.35;transition:opacity .2s}
   .cn-ago i.on{opacity:1;box-shadow:0 0 6px var(--st-run)}
   .cn-ago.old{color:var(--st-wait)}.cn-ago.old i{background:var(--st-wait);opacity:.8}
-  .cn-opt-ok{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap}
-  .cn-opt-ok .ico{color:var(--st-run)}
+  .cn-opt-ok{display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:1.25;color:var(--muted)}
+  .cn-opt-ok .ico{color:var(--st-run);flex:none}
   .cn-lr .btn{width:100%}
   .cn-filter{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  @media (max-width:1280px){.cn-lh,.cn-lr{grid-template-columns:minmax(160px,1.4fr) 50px minmax(140px,1.4fr) 46px minmax(190px,2fr) 92px 122px}.cn-c-ctrl{display:none}}
-  @media (max-width:980px){
+  .cn-c-d,.m-ago{display:none}
+  /* Karte < 1080 px: ohne Steuerungsspalte */
+  @container (max-width:1079px){.cn-lh,.cn-lr{grid-template-columns:minmax(150px,1.4fr) 58px minmax(130px,1.3fr) 44px minmax(170px,2fr) 104px 118px}.cn-c-ctrl{display:none}}
+  /* < 890 px: Baujahr und „Letzte Meldung“ wandern in die Zeile (Alter rechts in den Live-Daten) */
+  @container (max-width:889px){.cn-lh,.cn-lr{grid-template-columns:minmax(150px,1.3fr) minmax(130px,1.2fr) 44px minmax(170px,2fr) 118px}.cn-c-year,.cn-c-ago{display:none}
+    .cn-c-live .m-ago{display:inline-flex;margin-left:auto}}
+  /* < 700 px: gestapelte Zeilen */
+  @container (max-width:699px){
     .cn-lh{display:none}
     .cn-lr{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"m lv" "d d" "p act" "live live";gap:8px 12px;padding:12px 14px}
     .cn-c-m{grid-area:m}.cn-c-lv{grid-area:lv;justify-self:end}.cn-c-year{display:none}.cn-c-ctrl{display:none}
     .cn-c-proto{grid-area:p;align-self:center}.cn-c-live{grid-area:live}.cn-c-ago{display:none}.cn-c-act{grid-area:act;justify-self:end;align-self:center}
-    .cn-c-d{display:block !important;grid-area:d;margin-top:-4px}
+    .cn-c-d{display:block;grid-area:d;margin-top:-4px}
     .cn-lr .btn{width:auto}
     .cn-c-live .cn-livec{background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:7px 9px}
-    .cn-c-live .m-ago{display:inline-flex !important;margin-left:auto}
+    .cn-c-live .m-ago{display:inline-flex;margin-left:auto}
   }
-  .cn-c-d,.m-ago{display:none}
 
   /* ---------- Neue Maschine */
   .cn-newc{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2.2fr);gap:18px;padding:16px;align-items:center}
@@ -436,7 +442,7 @@
   .cn-det-r .k{font:600 10.5px/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
   .cn-det-r .w{font-size:12px;color:var(--muted)}
   .cn-det-m{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 10px;border-radius:8px;font-size:12.8px;font-weight:600}
-  .cn-det-m>span{flex:1;min-width:0}
+  .cn-det-m>span:not(.cn-spin){flex:1;min-width:0}
   .cn-det-m .ico{flex:none}
   .cn-det-m .btn{flex-basis:100%;margin-top:2px}
   .cn-det-m.ok{color:var(--st-run);background:color-mix(in srgb,var(--st-run) 10%,transparent);border:1px solid color-mix(in srgb,var(--st-run) 30%,transparent)}
@@ -1318,7 +1324,7 @@
             <button data-act="filter" data-f="up" class="${filter === 'up' ? 'on' : ''}">Ausbaufähig ${up.length}</button>
             <button data-act="filter" data-f="max" class="${filter === 'max' ? 'on' : ''}">Optimal ${optimal}</button></div></div></div>
         <div class="cn-list">
-          <div class="cn-lh"><span>Maschine</span><span>Baujahr</span><span class="cn-c-ctrl">Steuerung</span><span>Protokoll · Gateway</span><span>Level</span><span>Live-Daten</span><span>Letzte Meldung</span><span></span></div>
+          <div class="cn-lh"><span>Maschine</span><span class="cn-c-year">Baujahr</span><span class="cn-c-ctrl">Steuerung</span><span>Protokoll · Gateway</span><span>Level</span><span>Live-Daten</span><span class="cn-c-ago">Letzte Meldung</span><span></span></div>
           ${list.map(rowHtml).join('') || '<div class="empty">Keine Station in dieser Auswahl.</div>'}
         </div>
       </div>

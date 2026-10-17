@@ -143,6 +143,9 @@
   .qa-kpis .kpi .v small{margin-left:0}
   .qa-kpis .kpi .v .sep{color:var(--faint);font-weight:400;margin:0 3px}
   .qa-kpis .kpi .s b{color:var(--text2);font-weight:600}
+  .qa-kpis .kpi .s{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.4}
+  .qa-now .m b{color:var(--text2);font-weight:600}
+  .qa-now .m.occ{color:var(--faint);font-size:11.5px}
   .qa-kpis .kpi.warn{border-color:color-mix(in srgb,var(--st-wait) 45%,var(--line));background:color-mix(in srgb,var(--st-wait) 6%,var(--card))}
   .qa-kpis .kpi.warn .v{color:color-mix(in srgb,var(--st-wait) 72%,var(--text))}
   .qa-kpis .kpi.crit{border-color:color-mix(in srgb,var(--st-fault) 45%,var(--line));background:color-mix(in srgb,var(--st-fault) 6%,var(--card))}
@@ -162,8 +165,9 @@
   .qa-now .t{font-size:13px;line-height:1.4;color:var(--text)}
   .qa-now .m{font-size:12px;color:var(--muted)}
   .qa-now .bar{height:5px}
-  .qa-q{display:flex;align-items:center;gap:8px;overflow-x:auto;padding-bottom:4px;min-height:58px;scrollbar-width:thin}
-  .qa-ct{--c:var(--mat);flex:none;display:flex;flex-direction:column;gap:2px;min-width:118px;padding:7px 10px;border-radius:8px;background:color-mix(in srgb,var(--c) 8%,var(--bg2));border:1px solid color-mix(in srgb,var(--c) 30%,transparent);cursor:pointer;font-size:12px;position:relative}
+  .qa-q{display:flex;align-items:center;gap:6px;overflow:hidden;padding-bottom:2px;min-height:58px}
+  .qa-ct{--c:var(--mat);flex:none;display:flex;flex-direction:column;gap:2px;width:var(--qa-cw,136px);min-width:0;padding:7px 10px;border-radius:8px;background:color-mix(in srgb,var(--c) 8%,var(--bg2));border:1px solid color-mix(in srgb,var(--c) 30%,transparent);cursor:pointer;font-size:12px;position:relative}
+  .qa-ct > *{min-width:0;overflow:hidden;text-overflow:ellipsis}
   .qa-ct:hover{border-color:color-mix(in srgb,var(--c) 60%,transparent)}
   .qa-ct b{font:600 12.5px/1.2 var(--f-mono);color:var(--text)}
   .qa-ct span{color:var(--muted);white-space:nowrap;font-size:11.5px}
@@ -173,8 +177,9 @@
   .qa-q{padding-top:8px}
   .qa-ct.cur{--c:var(--info)}
   .qa-ct.cur::before{content:"in Prüfung";position:absolute;top:-8px;left:8px;font:600 9px/14px var(--f-ui);letter-spacing:.06em;text-transform:uppercase;padding:0 5px;border-radius:4px;background:var(--info);color:var(--accent-ink)}
-  .qa-arrow{flex:none;color:var(--faint);display:flex;align-items:center}
-  .qa-arrow .ico{transform:rotate(180deg)}
+  .qa-arrow{flex:none;width:16px;color:var(--faint);display:flex;align-items:center;justify-content:center}
+  .qa-more{flex:none;align-self:stretch;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;width:52px;border-radius:8px;border:1px dashed var(--line2);color:var(--text2);font:600 13px/1.1 var(--f-ui);cursor:default}
+  .qa-more small{font:500 10.5px/1.1 var(--f-ui);color:var(--muted)}
   .qa-q-empty{font-size:12.5px;color:var(--muted)}
   .qa-fpis{display:flex;flex-direction:column;gap:6px}
   .qa-fp{--c:var(--st-setup);display:flex;align-items:center;gap:8px;font-size:12px;padding:6px 9px;border-radius:7px;background:color-mix(in srgb,var(--c) 8%,var(--bg2));border:1px solid color-mix(in srgb,var(--c) 28%,transparent);cursor:pointer}
@@ -221,6 +226,7 @@
   .qa-hint .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
   .qa-hint.info{--c:var(--info)}
   .qa-hint.ok{--c:var(--st-run)}
+  .qa-hint.crit{--c:var(--st-fault)}
   .qa-spc-foot{height:14px}
   .qa-tip{position:fixed;z-index:80;pointer-events:none;background:var(--card2);border:1px solid var(--line2);border-radius:8px;padding:7px 10px;font-size:12px;line-height:1.45;box-shadow:var(--shadow);max-width:280px;color:var(--text2)}
   .qa-tip b{color:var(--text);font-weight:600}
@@ -298,7 +304,7 @@
 
   // ------------------------------------------------------------------ Ansicht
   let root = null, R = {}, selKey = null, winN = 60, userPicked = false, logFilter = 'all';
-  let sig = {}, chartW = 0, chartModel = null, tipEl = null, ro = null;
+  let sig = {}, chartW = 0, chartModel = null, tipEl = null, ro = null, labQW = 0;
 
   function mount(el) {
     root = el;
@@ -309,7 +315,7 @@
         <div class="kpis qa-kpis">
           <div class="kpi"><div class="l">Gutteilquote (FPY)</div><div class="v" data-r="kFpy">–</div><div class="s" data-r="kFpyS">–</div><div class="qa-fpy" data-r="kFpyB"></div></div>
           <div class="kpi click" data-r="kScrapBox" title="Zu Ausschuss nach Ursache"><div class="l">Ausschuss heute</div><div class="v" data-r="kScrap">–</div><div class="s" data-r="kScrapS">–</div></div>
-          <div class="kpi click" data-r="kFpiBox" title="Zu den Erstteilprüfungen"><div class="l">Erstteilprüfungen heute</div><div class="v" data-r="kFpi">–</div><div class="s" data-r="kFpiS">–</div></div>
+          <div class="kpi click" data-r="kFpiBox" title="Zu den Erstteilprüfungen"><div class="l">Erstteile heute</div><div class="v" data-r="kFpi">–</div><div class="s" data-r="kFpiS">–</div></div>
           <div class="kpi"><div class="l">Prüflose am Messraum</div><div class="v" data-r="kLab">–</div><div class="s" data-r="kLabS">–</div></div>
           <div class="kpi click" data-r="kSpcBox" title="SPC-Regelkarte des betroffenen Merkmals öffnen"><div class="l">SPC-Warnungen</div><div class="v" data-r="kSpc">–</div><div class="s" data-r="kSpcS">–</div></div>
         </div>
@@ -372,7 +378,8 @@
     R.kFpiBox.addEventListener('click', () => R.fpiCard.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     R.kSpcBox.addEventListener('click', () => {
       const n = (S().notifications || []).find(x => x.status === 'open' && x.key && x.key.startsWith('spc:'));
-      if (n) selectKey(n.key.slice(4)); R.spcCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (n) selectKey(n.key.slice(4)); else if (capInfo.min && capInfo.min.cpk < 1.33) selectKey(capInfo.min.k);
+      R.spcCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
     el.addEventListener('click', (e) => {
       const fx = e.target.closest('[data-fix]');
@@ -388,7 +395,8 @@
     }
     R.chart.addEventListener('mousemove', onChartMove);
     R.chart.addEventListener('mouseleave', hideTip);
-    if (window.ResizeObserver) { ro = new ResizeObserver(() => { const w = R.chart.clientWidth; if (Math.abs(w - chartW) > 2) { chartW = w; sig.chart = ''; renderSpc(true); } }); ro.observe(R.chart); }
+    if (window.ResizeObserver) { ro = new ResizeObserver(() => { const w = R.chart.clientWidth; if (Math.abs(w - chartW) > 2) { chartW = w; sig.chart = ''; renderSpc(true); } }); ro.observe(R.chart);
+      new ResizeObserver(() => { labQW = R.labQ.clientWidth; }).observe(R.labQ); }
     R.cap.addEventListener('click', () => {});
     WF.bus.on('sim:reset', () => { sig = {}; if (!userPicked) selKey = null; for (const k in costCache) delete costCache[k]; });
   }
@@ -419,11 +427,31 @@
     setHTML(R.kLab, `${lab.items.length}<small>${lab.items.length === 1 ? 'Los' : 'Lose'}</small>${lab.items.length ? `<span class="sep">·</span>${U.fmtNum(lab.qty)}<small>Stk</small>` : ''}`);
     setText(R.kLabS, lab.items.length ? `ca. ${U.fmtDur(lab.sec)} Prüfzeit${lab.transit ? ` · ${lab.transit} unterwegs` : ''}` : lab.transit ? `${lab.transit} unterwegs zum Messraum` : 'Warteschlange leer');
     setAttr(R.kLabS, 'title', 'Behälter im Eingang des Messraums (inkl. Restmenge des Loses in Prüfung); Prüfzeit = Menge × Prüfzeit je Teil');
-    const spc = (Sx.notifications || []).filter(n => n.status !== 'resolved' && n.key && n.key.startsWith('spc:'));
-    const spcOpen = spc.filter(n => n.status === 'open');
-    setHTML(R.kSpc, `${spcOpen.length}<small>offen</small>`);
-    setText(R.kSpcS, spcOpen.length ? (spcOpen[0].entity ? spcOpen[0].entity.id + ' · ' : '') + charLabel(spcOpen[0].key.slice(4)).split(' · ').slice(-1)[0] + (spcOpen.length > 1 ? ` · +${spcOpen.length - 1}` : '') : spc.length ? `${spc.length} quittiert` : capInfo.n ? `kein Trend · ${capInfo.low ? capInfo.low + ' Merkmale Cpk < 1,33' : 'alle Merkmale fähig'}` : 'kein Trend gemeldet');
-    R.kSpcBox.classList.toggle('warn', spcOpen.length > 0);
+    const spcAll = (Sx.notifications || []).filter(n => n.key && n.key.startsWith('spc:'));
+    const spcOpen = spcAll.filter(n => n.status === 'open'), spcAck = spcAll.filter(n => n.status === 'ack');
+    const spcToday = spcAll.filter(n => n.t >= today0(now));
+    const worst = capInfo.min;
+    let kv, ks, kc = '';
+    if (spcOpen.length) {
+      kv = `${spcOpen.length}<small>offen</small>`;
+      ks = esc((spcOpen[0].entity ? spcOpen[0].entity.id + ' · ' : '') + charLabel(spcOpen[0].key.slice(4)).split(' · ').slice(-1)[0] + (spcOpen.length > 1 ? ` · +${spcOpen.length - 1}` : ''));
+      kc = 'warn';
+    } else {
+      kv = `0<small>offen</small>${spcToday.length ? `<span class="sep">·</span>${spcToday.length}<small>heute</small>` : ''}`;
+      const bits = [];
+      if (worst && worst.cpk < 1) bits.push(`<b>${esc(worst.station)} ${esc(worst.name)}: Cpk ${U.fmtNum(worst.cpk, 2)}</b> – nicht fähig`);
+      // Anzahl steht schon im Wert („2 heute“) – hier nur der Stand
+      if (spcToday.length) bits.push(spcToday.every(n => n.status === 'resolved') ? `${spcToday.length === 1 ? 'Trend' : 'Trends'} korrigiert` : `${spcAck.length} quittiert`);
+      else if (spcAck.length) bits.push(`${spcAck.length} quittiert`);
+      if (!bits.length) bits.push('kein Trend heute', capInfo.n ? (capInfo.low ? `${capInfo.low} ${capInfo.low === 1 ? 'Merkmal' : 'Merkmale'} Cpk < 1,33` : 'alle Merkmale fähig') : '');
+      ks = bits.filter(Boolean).join(' · ');
+      kc = worst && worst.cpk < 1 ? 'crit' : (spcToday.length || spcAck.length) ? 'warn' : '';
+    }
+    setHTML(R.kSpc, kv);
+    setHTML(R.kSpcS, ks);
+    setAttr(R.kSpcBox, 'title', spcOpen.length ? 'SPC-Regelkarte des betroffenen Merkmals öffnen' : worst ? `Regelkarte ${worst.station} ${worst.name} öffnen – mit Empfehlung` : 'Zur SPC-Regelkarte');
+    R.kSpcBox.classList.toggle('warn', kc === 'warn');
+    R.kSpcBox.classList.toggle('crit', kc === 'crit');
   }
 
   // ---------------- Messraum
@@ -454,42 +482,67 @@
     const Sx = S();
     let mv = null; try { mv = WF.sim.machineView('QS'); } catch (e) { mv = null; }
     const op = mv && mv.operator;
-    const nsig = mv ? [mv.state, mv.order && mv.order.id, mv.order && mv.order.seq, mv.partsDone, mv.partsTotal, op && op.id, op && op.state, Math.floor((mv.partRemainSec || 0) / 60), mv.cause].join('|') : '-';
+    const nsig = mv ? [mv.state, mv.order && mv.order.id, mv.order && mv.order.seq, mv.partsDone, mv.partsTotal, mv.partNo, op && op.id, op && op.state, mv.etaOpEnd != null ? Math.floor(mv.etaOpEnd / 60) : '', mv.etaBusyEnd != null ? Math.floor(mv.etaBusyEnd / 60) : '', mv.cause].join('|') : '-';
     if (sig.labNow !== nsig) {
       sig.labNow = nsig;
       if (!mv) R.labNow.innerHTML = '<div class="qa-q-empty">Kein Messraum im Profil.</div>';
       else {
         const o = mv.order;
+        // gleiche Wortwahl und gleiche Zeit wie Leitstand-Kachel und Maschinendetail: „Teil 4 von 30 · Arbeitsgang fertig ca. …“ (etaOpEnd)
+        const running = mv.state === 'running' && mv.partNo != null;
+        const cnt = running ? `Teil ${U.fmtNum(mv.partNo)} von ${U.fmtNum(mv.partsTotal)}` : `${U.fmtNum(mv.partsDone)} von ${U.fmtNum(mv.partsTotal)} geprüft`;
+        // Belegung (etaBusyEnd) nur zusätzlich, wenn der Messraum das Los zwischendurch freigibt (weitere Teile folgen vom Vorgänger)
+        const occ = o && mv.etaBusyEnd != null && mv.etaOpEnd != null && mv.etaOpEnd - mv.etaBusyEnd > 600
+          ? `<div class="m occ">Messraum mit diesem Los belegt bis ca. ${esc(tclock(mv.etaBusyEnd, now))} – die übrigen Teile folgen vom Vorgänger</div>` : '';
         R.labNow.innerHTML = `<div class="row">${WF.ui.pill(mv.state, mv.state === 'running' ? 'Prüfung läuft' : null)}${op ? `<button class="link" data-sel="person|${esc(op.id)}">${esc(op.name)}</button>` : '<span class="muted">niemand anwesend</span>'}</div>
           <div class="t">${o ? `<button class="link mono" data-sel="${hasDetail('order') ? 'order' : 'machine'}|${esc(hasDetail('order') ? o.id : 'QS')}">${esc(o.id)}</button> · AG ${o.seq} ${esc(o.op)}` : esc(mv.cause || 'Keine Prüfung eingeplant')}</div>
-          ${o ? `<div class="m">${esc(o.partName)} · ${U.fmtNum(mv.partsDone)}/${U.fmtNum(mv.partsTotal)} Stk${mv.etaBusyEnd ? ' · Los fertig ca. ' + esc(tclock(mv.etaBusyEnd, now)) : ''}</div>${WF.ui.bar(mv.partsTotal ? mv.partsDone / mv.partsTotal : 0, { color: mv.stateColor })}` : ''}
+          ${o ? `<div class="m">${esc(o.partName)} · ${cnt}${mv.etaOpEnd != null ? ` · Arbeitsgang fertig ca. <b>${esc(tclock(mv.etaOpEnd, now))}</b>` : ''}</div>${WF.ui.bar(mv.partsTotal ? mv.partsDone / mv.partsTotal : 0, { color: mv.stateColor })}${occ}` : ''}
           ${o && mv.state !== 'running' ? `<div class="m">${esc(mv.cause || '')}</div>` : ''}`;
       }
     }
     const lab = labQueue(now);
-    // Reihenfolge wie der Messraum abarbeitet: laufender Arbeitsgang zuerst, dann machineView('QS').queue (Teile am Platz, Termin)
+    // Reihenfolge und Zeiten aus dem Plan der Engine (forecast().machines.QS – dieselben Blöcke wie in der Plantafel);
+    // ohne Planeintrag: Reihenfolge von machineView('QS').queue
     const curO = mv && mv.order ? mv.order.id + '/' + mv.order.seq : null;
     const qIdx = {}; (mv && mv.queue || []).forEach((q, i) => { qIdx[q.orderId + '/' + q.seq] = i; });
+    let fc = null; try { fc = WF.sim.forecast(); } catch (e) { fc = null; }
+    const planL = (fc && fc.machines && fc.machines.QS) || [], plan = {};
+    for (const e of planL) plan[e.orderId + '/' + e.seq] = e;
     const keyC = (x) => x.c.orderId + '/' + (x.r ? x.r.seq : '');
-    const rk = (x) => (keyC(x) === curO ? -1 : qIdx[keyC(x)] != null ? qIdx[keyC(x)] : 99);
+    const rk = (x) => { const k = keyC(x); if (k === curO) return -1e12; if (plan[k]) return plan[k].start; return 1e11 + (qIdx[k] != null ? qIdx[k] : 99); };
     lab.items.sort((a, b) => rk(a) - rk(b));
     const trans = [];
     for (const id in Sx.transports) { const t = Sx.transports[id]; if (t.to && t.to.station === 'QS' && t.status !== 'done' && t.containerId && Sx.containers[t.containerId]) trans.push({ t, c: Sx.containers[t.containerId] }); }
-    const qsig = lab.items.map(x => x.c.id + ':' + x.c.qty).join(',') + '|' + trans.map(x => x.c.id + x.t.status).join(',') + '|' + curO;
+    if (!labQW) labQW = R.labQ.clientWidth;
+    const qw = labQW || 0, small = qw < 420, cw = small ? 108 : 136;
+    const planSig = lab.items.map(x => { const e = plan[keyC(x)]; return e ? Math.floor(e.start / 60) + '-' + Math.floor(e.end / 60) : ''; }).join(',');
+    const qsig = lab.items.map(x => x.c.id + ':' + x.c.qty).join(',') + '|' + trans.map(x => x.c.id + x.t.status).join(',') + '|' + curO + '|' + planSig + '|' + Math.round(qw / 10);
     if (sig.labQ !== qsig && !R.labQ._hover) {
       sig.labQ = qsig;
       setText(R.labQn, lab.items.length ? `${lab.items.length} · ${U.fmtNum(lab.qty)} Stk · ca. ${U.fmtDur(lab.sec)}` : '');
-      const chip = (c, r, tr, first, cur) => `<div class="qa-ct${tr ? ' tr' : ''}${first ? ' nx' : ''}${cur ? ' cur' : ''}" data-sel="${hasDetail('container') ? 'container|' + esc(c.id) : hasDetail('order') ? 'order|' + esc(c.orderId) : 'machine|QS'}" title="${esc(c.id)} · ${esc(c.partName || '')}${r ? ' · AG ' + r.seq + ' ' + esc(r.op) : ''}${tr ? ' – unterwegs: ' + esc(tr.label || '') : ''}">
-          <b>${esc(c.orderId)}</b><span><em>${U.fmtNum(c.qty)} Stk</em> · ${esc(r ? r.op : c.partName || '')}</span><span>${tr ? 'unterwegs (' + esc(tr.mode) + ')' : r && r.cycleMin ? 'ca. ' + esc(U.fmtDur(c.qty * r.cycleMin * 60)) : esc(c.id)}</span></div>`;
-      const parts = [];
+      const firstPlanned = planL.filter(e => !e.active).reduce((m, e) => Math.min(m, e.start), Infinity);
+      const all = lab.items.map(x => ({ c: x.c, r: x.r, tr: null })).concat(trans.map(x => { const o = Sx.orders[x.c.orderId]; return { c: x.c, r: o ? o.routing[x.c.idx] : null, tr: x.t }; }));
       let nextDone = false;
-      lab.items.forEach((x, i) => {
-        if (i) parts.push(`<span class="qa-arrow">${icon('chevron', 14)}</span>`);
-        const cur = keyC(x) === curO, first = !cur && !nextDone;
-        if (first) nextDone = true;
-        parts.push(chip(x.c, x.r, null, first, cur));
-      });
-      if (trans.length) { if (parts.length) parts.push(`<span class="qa-arrow">${icon('chevron', 14)}</span>`); trans.forEach((x, i) => { if (i) parts.push(`<span class="qa-arrow">${icon('chevron', 14)}</span>`); const o = Sx.orders[x.c.orderId]; parts.push(chip(x.c, o ? o.routing[x.c.idx] : null, x.t)); }); }
+      const chip = (x) => {
+        const { c, r, tr } = x, k = c.orderId + '/' + (r ? r.seq : ''), e = plan[k], cur = !tr && k === curO;
+        const first = !tr && !cur && !nextDone && (!e || e.start <= firstPlanned + 1);
+        if (!tr && !cur && !nextDone) nextDone = true;
+        const when = tr ? 'unterwegs (' + esc(tr.mode) + ')'
+          : cur ? (mv && mv.etaBusyEnd != null ? 'belegt bis ca. ' + esc(tclock(mv.etaBusyEnd, now)) : 'in Prüfung')
+          : e ? 'ca. ' + esc(tclock(e.start, now)) + '–' + esc(tclock(e.end, now))
+          : r && r.cycleMin ? 'ca. ' + esc(U.fmtDur(c.qty * r.cycleMin * 60)) + ' Prüfzeit' : esc(c.id);
+        const tip = `${c.id} · ${c.partName || ''}${r ? ' · AG ' + r.seq + ' ' + r.op : ''}${tr ? ' – unterwegs: ' + (tr.label || '') : e ? ` – Plan: Prüfung ${tclock(e.start, now)}–${tclock(e.end, now)}${e.opEnd > e.end + 600 ? ', Arbeitsgang fertig ca. ' + tclock(e.opEnd, now) : ''}` : ''}`;
+        return `<div class="qa-ct${tr ? ' tr' : ''}${first ? ' nx' : ''}${cur ? ' cur' : ''}" style="--qa-cw:${cw}px" data-sel="${hasDetail('container') ? 'container|' + esc(c.id) : hasDetail('order') ? 'order|' + esc(c.orderId) : 'machine|QS'}" title="${esc(tip)}">
+          <b>${esc(c.orderId)}</b><span><em>${U.fmtNum(c.qty)} Stk</em> · ${esc(r ? r.op : c.partName || '')}</span><span>${when}</span></div>`;
+      };
+      // so viele Behälter, wie ganz hineinpassen – der Rest als „+N“ statt abgeschnittener Karten
+      const arrowW = 16 + 12, moreW = 52 + 12;
+      let fit = all.length;
+      if (qw > 0) { fit = Math.max(1, Math.floor((qw + arrowW) / (cw + arrowW))); if (fit < all.length) fit = Math.max(1, Math.floor((qw + arrowW - moreW) / (cw + arrowW))); }
+      const parts = [];
+      all.slice(0, fit).forEach((x, i) => { if (i) parts.push(`<span class="qa-arrow" aria-hidden="true">${icon('arrowRight', 12)}</span>`); parts.push(chip(x)); });
+      const rest = all.slice(fit);
+      if (rest.length) parts.push(`<div class="qa-more" title="${esc(rest.map(x => `${x.c.orderId} (${x.c.qty} Stk${x.tr ? ', unterwegs' : ''})`).join(' · '))}">+${rest.length}<small>${rest.length === 1 ? 'Los' : 'Lose'}</small></div>`);
       R.labQ.innerHTML = parts.length ? parts.join('') : '<div class="qa-q-empty">Keine Prüflose in der Warteschlange – Behälter erscheinen hier, sobald sie am Messraum ankommen.</div>';
     }
     const fp = openFpis().filter(x => !x.local).sort((a, b) => b.waitingSec - a.waitingSec);
@@ -596,8 +649,17 @@
     return { active, pending, val, can, am, centred, html: can ? `<div class="acts"><button class="btn sm primary" data-fix="${esc(String(val))}">Korrektur ${esc(fv(val, ch, true))} ${esc(ch.unit)} an ${esc(ki.station)} übernehmen</button></div>` : '',
       note: pending ? `<br><span class="muted">Korrektur eingegeben ${esc(tclock(d.since, now))} – die Wirkung zeigt sich mit den nächsten ${pending} Teilen.</span>` : '' };
   }
+  /** Heute gemeldete SPC-Trends dieses Merkmals (Benachrichtigungen der Engine) – damit „kein Trend“ nie falsch klingt */
+  function trendsToday(key, now) {
+    const list = (S().notifications || []).filter(x => x.key === 'spc:' + key && x.t >= today0(now));
+    if (!list.length) return null;
+    const offs = allEvents().filter(e => e.type === 'offset' && e.t >= today0(now) && e.data && e.data.orderId + '/' + e.data.seq === key);
+    const lastOff = offs.length ? offs[offs.length - 1].t : null;
+    return { n: list.length, txt: `Heute ${list.length} ${list.length === 1 ? 'SPC-Trend' : 'SPC-Trends'}${offs.length ? `, ${offs.length}× korrigiert (zuletzt ${tclock(lastOff, now)})` : ''}` };
+  }
   function hint(d, n, now) {
     const ch = d.ch;
+    const tt = trendsToday(d.ki.key, now);
     const acts = n && n.status === 'open' ? (n.actions || []).map((a, i) => `<button class="btn sm${i === 0 ? ' primary' : ''}" data-act="${i}" data-nid="${esc(n.id)}">${esc(a.label)}</button>`).join('') : '';
     if (n) {
       return `<div class="qa-hint">${icon('alert', 16)}<div><b>${esc(n.title)}</b><br>${esc(n.body || '')}${n.suggestion ? `<br><span class="muted">${esc(n.suggestion)}</span>` : ''}${n.status === 'ack' ? `<br><span class="faint">quittiert${n.ackBy ? ' von ' + esc(n.ackBy) : ''} – Korrektur wird an der Maschine eingegeben</span>` : ''}${acts ? `<div class="acts">${acts}</div>` : ''}</div></div>`;
@@ -607,7 +669,7 @@
     const fx = d.enough ? fixOf(d, now) : { html: '', note: '', can: false };
     if (d.trend && d.trend.ratio > 0.4) {
       const lim = d.trend.side === 'upper' ? 'oberen' : 'unteren';
-      return `<div class="qa-hint">${icon('alert', 16)}<div><b>Trend zur ${lim} Toleranzgrenze:</b> Mittelwert der letzten 8 Teile ${esc(fv(d.trend.mean, ch))} ${esc(ch.unit)} – ${Math.round(d.trend.ratio * 100)} % des Wegs zur ${d.trend.side === 'upper' ? 'OSG' : 'USG'} (${esc(fv(d.trend.side === 'upper' ? d.usl : d.lsl, ch))}). Ab 55 % meldet werkfluss den SPC-Trend an QS und Bediener${fx.can ? ' – mit einer Korrektur lässt sich das vorher abfangen' : ''}.${fx.note}${fx.html}</div></div>`;
+      return `<div class="qa-hint">${icon('alert', 16)}<div><b>Trend zur ${lim} Toleranzgrenze:</b> Mittelwert der letzten 8 Teile ${esc(fv(d.trend.mean, ch))} ${esc(ch.unit)} – ${Math.round(d.trend.ratio * 100)} % des Wegs zur ${d.trend.side === 'upper' ? 'OSG' : 'USG'} (${esc(fv(d.trend.side === 'upper' ? d.usl : d.lsl, ch))}). Ab 55 % meldet werkfluss den SPC-Trend an QS und Bediener${fx.can ? ' – mit einer Korrektur lässt sich das vorher abfangen' : ''}.${tt ? `<br><span class="muted">${esc(tt.txt)}.${tt.n >= 2 ? ' Der Trend kommt wieder: Korrekturintervall verkürzen oder den Werkzeugwechsel vorziehen.' : ''}</span>` : ''}${fx.note}${fx.html}</div></div>`;
     }
     const lastV = d.pts.length ? d.pts[d.pts.length - 1] : null;
     if (d.outCtl) return `<div class="qa-hint info">${icon('info', 16)}<div><b>Letzter Wert außerhalb der Eingriffsgrenzen</b> (±3σ)${lastV && lastV.ok ? ' – noch in Toleranz, aber ungewöhnlich' : ''}. Nächste Teile beobachten; bei Wiederholung Ursache an der Maschine prüfen.</div></div>`;
@@ -617,10 +679,11 @@
       let txt;
       if (lageLimited) txt = fx.can ? `Hebel ist die Lage: Eine Werkzeugkorrektur von <b>${esc(fv(fx.val, ch, true))} ${esc(ch.unit)}</b> (aus den letzten Teilen) zentriert den Prozess.` : fx.pending ? 'Hebel ist die Lage – eine Korrektur wurde bereits eingegeben.' : fx.centred && d.since > 0 ? `Die Korrektur wirkt: Die letzten Teile liegen wieder mittig (Ø ${esc(fv(fx.am, ch))} ${esc(ch.unit)}). Cpk steigt, sobald die älteren Werte aus dem Fenster fallen.` : `Hebel ist die Lage: Mittelwert ${esc(fv(d.mean, ch))} statt Toleranzmitte ${esc(fv(d.center, ch))}${fx.active ? '' : ' – beim nächsten Rüsten Nullpunkt/Korrektur anpassen'}.`;
       else txt = 'Hebel ist die Streuung: Spannung, Schnittwerte und Werkzeugzustand prüfen oder Toleranz mit dem Kunden klären – eine Korrektur allein reicht nicht.';
-      return `<div class="qa-hint">${icon('alert', 16)}<div><b>${d.N < 30 ? 'Vorläufig: ' : ''}Stabil, aber nicht fähig.</b> ${txt}${lageLimited ? fx.note + fx.html : ''}</div></div>`;
+      const rec = tt && tt.n >= 2 ? ' Weil der Trend heute wiederholt auftrat: Korrekturintervall verkürzen oder den Werkzeugwechsel vorziehen.' : '';
+      return `<div class="qa-hint${d.cpk < 1 ? ' crit' : ''}">${icon('alert', 16)}<div><b>${d.N < 30 ? 'Vorläufig: ' : ''}Nicht fähig${tt ? '' : ', aber stabil'}.</b> ${txt}${tt ? `<br><span class="muted">${esc(tt.txt)}.${rec}</span>` : ''}${lageLimited ? fx.note + fx.html : ''}</div></div>`;
     }
-    if (d.cpk < 1.33) return `<div class="qa-hint info">${icon('info', 16)}<div><b>Stabil, bedingt fähig.</b> Kein Trend und keine Werte außerhalb der Eingriffsgrenzen; für Serienfreigabe wird Cpk ≥ 1,33 angestrebt.${lageLimited ? fx.note + fx.html : ''}</div></div>`;
-    return `<div class="qa-hint ok">${icon('check', 16)}<div><b>Stabil und fähig.</b> Kein Trend, keine Werte außerhalb der Eingriffsgrenzen${d.trend ? ` · Mittel der letzten 8 Teile ${Math.round(d.trend.ratio * 100)} % des Wegs zur ${d.trend.side === 'upper' ? 'OSG' : 'USG'}` : ''}.</div></div>`;
+    if (d.cpk < 1.33) return `<div class="qa-hint${tt ? '' : ' info'}">${icon(tt ? 'alert' : 'info', 16)}<div><b>Bedingt fähig.</b> ${tt ? `Aktuell kein Trend – ${esc(tt.txt)}.` : 'Kein Trend und keine Werte außerhalb der Eingriffsgrenzen'}; für Serienfreigabe wird Cpk ≥ 1,33 angestrebt.${lageLimited ? fx.note + fx.html : ''}</div></div>`;
+    return `<div class="qa-hint ok">${icon('check', 16)}<div><b>Stabil und fähig.</b> ${tt ? `Aktuell kein Trend (${esc(tt.txt)})` : 'Kein Trend'}, keine Werte außerhalb der Eingriffsgrenzen${d.trend ? ` · Mittel der letzten 8 Teile ${Math.round(d.trend.ratio * 100)} % des Wegs zur ${d.trend.side === 'upper' ? 'OSG' : 'USG'}` : ''}.</div></div>`;
   }
   function chartSvg(d, W) {
     const small = W < 520;
@@ -884,7 +947,7 @@
   }
 
   // ---------------- Prozessfähigkeit je Merkmal
-  let capRT = 0, capInfo = { n: 0, low: 0, worst: null };
+  let capRT = 0, capInfo = { n: 0, low: 0, worst: null, min: null };
   function renderCap(now, force) {
     if (!force && ((performance.now() - capRT < 3000 && sig.cap) || R.cap._hover)) return;
     const Sx = S(), rows = [];
@@ -906,7 +969,8 @@
     if (sig.cap === csig) return;
     sig.cap = csig;
     rows.sort((a, b) => a.d.cpk - b.d.cpk);
-    capInfo = { n: rows.length, low: rows.filter(r => r.d.cpk < 1.33).length, worst: (rows.find(r => r.active) || rows[0] || {}).k || null };
+    capInfo = { n: rows.length, low: rows.filter(r => r.d.cpk < 1.33).length, worst: (rows.find(r => r.active) || rows[0] || {}).k || null,
+      min: rows[0] ? { k: rows[0].k, cpk: rows[0].d.cpk, station: rows[0].ki.station || '–', name: rows[0].ki.ch ? rows[0].ki.ch.name : '–' } : null };
     const shown = rows.slice(0, 7), rest = rows.slice(7);
     const capable = rows.filter(r => r.d.cpk >= 1.33).length;
     setText(R.capSub, rows.length ? `${capable} von ${rows.length} fähig (Cpk ≥ 1,33)` : '');
@@ -924,10 +988,10 @@
   function update() {
     if (!root || !WF.sim || !S()) return;
     const now = S().t;
+    renderCap(now);
     updateKpis(now);
     renderLab(now);
     renderSpc(false);
-    renderCap(now);
     renderScrap(now);
     renderFpi(now);
     renderSperr(now);

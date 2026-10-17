@@ -290,7 +290,9 @@ function qualified(skills, tk, pid) {
     case 'setup': case 'correction': case 'load': return sk.has('setup') || own;
     // Wendeplatte/Werkzeug an der eigenen Maschine wechseln darf auch der dafür qualifizierte Stammbediener
     case 'toolchange': return sk.has('toolchange') || sk.has('setup') || (own && assigned);
-    case 'fpi': case 'inspect': return sk.has('qs');
+    // Kontrolle des ersten Teils nach Formwerkzeug-Wechsel (fpi local) darf der Bediener/Einrichter an der Maschine machen
+    case 'fpi': return sk.has('qs') || (!!(tk && tk.data && tk.data.local) && (own || sk.has('setup')));
+    case 'inspect': return sk.has('qs');
     case 'repair': return sk.has('repair');
     case 'forklift': case 'bars': return sk.has('forklift');
     case 'assembly': return sk.has('assembly');
@@ -1200,7 +1202,7 @@ function checkToolView(st, mid, v, t) {
     const rp = firstDef(vt.remainingParts, vt.restParts, vt.partsLeft);
     const req = op.step && (op.step.tools || []).find((r) => r.type === (toolType(stTool) ?? ty));
     if (num(rp) && req && num(req.cutMinPerPart)) {
-      const exp = Math.floor((l - u) / req.cutMinPerPart + 1e-9);
+      const exp = stTool.broken ? 0 : Math.floor((l - u) / req.cutMinPerPart + 1e-9);   // gebrochenes Werkzeug: 0 Teile
       ok('tools');
       if (rp !== exp) fail('tools', `${at(t)} machineView('${mid}') shows tool ${id || ty} 'noch ${rp} Teile' but floor((life−used)/cutMinPerPart) = ${exp}`, 'vrp:' + mid + (id || ty));
       // ≤ planAtParts: entweder ein geplanter Wechsel („nach Teil N · ca. hh:mm“) oder eine sichtbare Begründung
@@ -1383,9 +1385,11 @@ function finalChecksA(ctx) {
     const why = explainWait(st, o, po.id);
     if (why) { note('deadlock', `${po.id} not fertig – explainably waiting: ${why} | ${desc}`); continue; }
     const lp = ctx.orderProgT[po.id];
-    if (num(lp) && t - lp <= 6 * H) { warn('deadlock', `${po.id} not fertig after ${HOURS} h but still progressing (last progress ${clk(lp)}) – capacity, not deadlock | ${desc}`, 'prog:' + po.id); continue; }
+    // Auftragsvorrat + Auftragseingang halten die Fertigung voll: unfertig, aber in Arbeit bzw. hinter anderer Arbeit
+    // eingereiht ist Kapazität, kein Deadlock (Termine teils erst nächste Woche)
+    if (num(lp) && t - lp <= 6 * H) { note('deadlock', `${po.id} (due ${clk(o.due)}) not fertig after ${HOURS} h but still progressing (last progress ${clk(lp)}) – capacity, not deadlock`); continue; }
     const busy = openStations(o, po.id).filter((sid) => MACHINE_IDS.has(sid) && num(ctx.machProgT[sid]) && t - ctx.machProgT[sid] <= 6 * H);
-    if (busy.length) { warn('deadlock', `${po.id} not fertig, no own progress since ${clk(lp)}, queued behind other work at ${busy.join(', ')} | ${desc}`, 'queue:' + po.id); continue; }
+    if (busy.length) { note('deadlock', `${po.id} (due ${clk(o.due)}) not fertig, queued behind other work at ${busy.join(', ')}`); continue; }
     fail('deadlock', `${at(t)} ${po.id} stuck: no progress since ${clk(lp)} and not waiting for EXT/material | ${desc}`, 'stuck:' + po.id);
   }
   note('deadlock', `${fertig}/${PROFILE.orders.length} profile orders fertig after ${HOURS} h (${clk(t)})`);
@@ -1572,8 +1576,8 @@ function apiPhase(ctx) {
   const tR = S().t;
   if (typeof A.reorder === 'function' && mat) {
     const oh = firstDef(S().materials[mat.id].onHand, S().materials[mat.id].stock);
-    ctx.watchDelivery = { matId: mat.id, tR, last: oh, incT: null, eventT: null, lead: mat.leadMin * 60 };
-    simCall('actions.reorder', () => A.reorder(mat.id));
+    ctx.watchDelivery = { matId: mat.id, tR, last: oh, incT: null, eventT: null, lead: mat.leadMin * 60, puId: null };
+    simCall('actions.reorder', () => { const r = A.reorder(mat.id); if (r && r.id) ctx.watchDelivery.puId = r.id; });
   }
   let addId = null, tAdd = S().t, startedT = null, how = '';
   if (typeof A.addOrder === 'function') {
@@ -1609,6 +1613,10 @@ function apiPhase(ctx) {
   }
   const w = ctx.watchDelivery;
   if (w) {
+    // eigene Bestellung beobachten (Kanban-Abrufe anderer Bestellungen erhöhen den Bestand ebenfalls)
+    const puOf = () => w.puId && vals(S().purchases).find((x) => x.id === w.puId);
+    const deliveredT = () => { const pu = puOf(); return pu && pu.status === 'geliefert' && num(pu.deliveredT) ? pu.deliveredT : null; };
+    if (w.puId) { w.incT = null; w.eventT = null; while (deliveredT() == null && S().t - w.tR < w.lead + 90 * MIN) step(CHUNK); w.eventT = deliveredT(); }
     while (w.incT == null && w.eventT == null && S().t - w.tR < w.lead + 90 * MIN) step(CHUNK);
     if (w.incT == null && w.eventT == null) warn('api', `actions.reorder('${w.matId}'): no delivery (event or onHand increase) within leadMin ${w.lead / 60} min + 90 min`, 'nodeliv');
     else {
@@ -1621,18 +1629,25 @@ function apiPhase(ctx) {
   // --- moveOp (Alternativmaschine) – danach 1 h weiterrechnen, Invarianten müssen halten
   if (typeof A.moveOp === 'function') {
     const st = S();
-    let cand = null;
+    const cands = [];
     for (const oid of Object.keys(st.orders)) {
       const o = st.orders[oid];
       if (isDone(o)) continue;
       for (const x of opsOf(o, oid)) {
-        if ((x.station === 'M05' || x.station === 'M06') && !(x.done || x.scrap) && !MACHINE_IDS_LIST.some((id) => opInfo(st, st.machines[id]).key === `${oid}/${x.seq}`)) { cand = { oid, seq: x.seq, to: x.station === 'M05' ? 'M06' : 'M05' }; break; }
+        if ((x.station === 'M05' || x.station === 'M06') && !(x.done || x.scrap) && !MACHINE_IDS_LIST.some((id) => opInfo(st, st.machines[id]).key === `${oid}/${x.seq}`)) cands.push({ oid, seq: x.seq, to: x.station === 'M05' ? 'M06' : 'M05' });
       }
-      if (cand) break;
     }
-    if (!cand) note('api', 'moveOp: no unstarted M05/M06 op available – skipped');
+    let cand = null; const refused = [];
+    for (const c of cands) {
+      let r = null;
+      simCall('actions.moveOp', () => { r = A.moveOp(c.oid, c.seq, c.to); });
+      if (r && r.ok) { cand = c; break; }
+      if (!r || typeof r.msg !== 'string' || r.msg.length < 10) fail('api', `actions.moveOp('${c.oid}', ${c.seq}, '${c.to}') refused without explanation (${short(r)})`, 'moveopwhy');
+      else refused.push(`${c.oid}/${c.seq}→${c.to}: ${r.msg}`);
+    }
+    if (refused.length) note('api', `moveOp refused (explained): ${refused.slice(0, 2).join(' | ')}`);
+    if (!cand) note('api', 'moveOp: no movable unstarted M05/M06 op available – skipped');
     else {
-      simCall('actions.moveOp', () => A.moveOp(cand.oid, cand.seq, cand.to));
       const x = opsOf(S().orders[cand.oid], cand.oid).find((y) => y.seq === cand.seq);
       if (!x || x.station !== cand.to) warn('api', `actions.moveOp('${cand.oid}', ${cand.seq}, '${cand.to}') not visible in routing/op station (got ${x && x.station})`, 'moveop');
       else ok('api');

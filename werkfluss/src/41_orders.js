@@ -118,7 +118,47 @@
     const nx = key.charAt(i + 1 + id.length);
     return !nx || !/[0-9A-Za-z]/.test(nx);
   }
-  function bnSeq(v) { const m = v.bottleneck && /AG\s*(\d+)/.exec(v.bottleneck); return m ? Number(m[1]) : null; }
+  function bnSeq(v) {
+    if (v.bottleneckSeq != null) return v.bottleneckSeq;
+    const f = WF.sim.forecast().orders[v.id];
+    if (f && f.bottleneckSeq != null) return f.bottleneckSeq;
+    const m = v.bottleneck && /AG\s*(\d+)/.exec(v.bottleneck); return m ? Number(m[1]) : null;
+  }
+  /** Engpass im Werk – eine Definition (Engine), sonst null */
+  function plantBottleneck() {
+    if (!WF.sim || typeof WF.sim.bottleneck !== 'function') return null;
+    try { return WF.sim.bottleneck(); } catch (e) { return null; }
+  }
+  /** besondere Auftragsherkunft als Etikett (Profil-/ERP-Aufträge ohne Etikett) */
+  function srcTag(v) {
+    if (v.status === 'fertig') return null;
+    if (v.remakeOf || v.source === 'Nachfertigung') return { label: 'Nachfertigung', title: 'Nachfertigung' + (v.remakeOf ? ' für ' + v.remakeOf : '') + ' – Ausschuss nach dem ersten Arbeitsgang wird neu gefertigt' };
+    if (v.source === 'KI-Auftrag') return { label: 'KI-Auftrag', title: 'Aus einer Zeichnung mit dem KI-Auftrag eingelastet' };
+    return null;
+  }
+  /** Termin gefährdet (knapp oder verspätet) – nur dann wird der Engpass des Auftrags als Etikett gezeigt */
+  const atRisk = (v) => v.status !== 'fertig' && (v.risk === 'knapp' || v.risk === 'spät');
+  /** Fortschritt einer Auftragskarte: Stückzahl als Hauptaussage, Arbeitsinhalt (Engine: progress) als zweite Ebene */
+  function progOf(v) {
+    const qty = Math.max(1, v.qty), work = U.clamp(v.progress || 0, 0, 1);
+    // Menge gefährdet (Engine: qtyRisk) – Ausschuss nach dem 1. Arbeitsgang wird nicht automatisch nachgefertigt
+    const qr = v.status !== 'fertig' && v.qtyRisk && typeof v.qtyRisk === 'object' ? v.qtyRisk : null;
+    const xq = qr && qr.missing > 0 ? qr.expectedQty : null;
+    const qWarn = xq != null ? ` <span class="nw q" title="${esc(qr.text || '')}">nur ${nf(xq)}/${nf(v.qty)} Stk lieferbar</span>`
+      : qr && qr.remakeQty > 0 ? ` <span class="nw r" title="${esc(qr.text || '')}">${nf(qr.remakeQty)} Stk in Nachfertigung</span>` : '';
+    if (v.status === 'fertig') {
+      const short = Math.max(0, v.qty - v.shippedQty);
+      return { n: v.shippedQty, label: 'versandt', frac: v.shippedQty / qty, work: 1,
+        sub: short ? `<b>${nf(short)} Stk</b> fehlen` : 'vollständig geliefert',
+        title: `${nf(v.shippedQty)} von ${nf(v.qty)} Stk versandt${short ? ' – ' + nf(short) + ' Stk fehlen' : ''}` };
+    }
+    const fin = Math.min(v.qty, finishedGood(v));
+    return { n: fin, label: 'fertig', frac: fin / qty, work,
+      // Mengenwarnung zuerst – sie darf nicht im Abschneiden der Zeile verschwinden
+      sub: (xq != null ? qWarn.trim() + ' ' : '') + `<span class="nw">Arbeitsinhalt <b>${U.fmtPct(work)}</b></span>${v.shippedQty ? ` <span class="nw"><b>${nf(v.shippedQty)}</b> versandt</span>` : ''}${xq != null ? '' : qWarn}`,
+      title: `${nf(fin)} von ${nf(v.qty)} Stk fertig bearbeitet (kräftiger Balken) · ${nf(v.shippedQty)} Stk versandt\nArbeitsinhalt ${U.fmtPct(work)} erledigt (heller Balken: Rüst- und Bearbeitungszeit aller Arbeitsgänge, auch Teile in Arbeit)` +
+        (qr && qr.text ? `\n${qr.text}` : '') };
+  }
   function slackText(v) {
     if (v.status === 'fertig') {
       if (v.shippedQty < v.qty) return nf(v.qty - v.shippedQty) + ' Stk fehlen';
@@ -235,7 +275,15 @@
   WF.ui.css(`
   .or-root{display:flex;flex-direction:column;gap:14px;min-width:0}
   .or-head{margin-bottom:0}
-  .or-head .view-sub{display:flex;flex-wrap:wrap;gap:0 6px}
+  .or-head .view-sub{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;max-width:none}
+  @media (max-width:560px){.or-head .view-sub > .faint{display:none}.or-head .view-sub > span{flex-basis:100%}.or-head .view-sub > .or-bnw{margin-top:2px}}
+  .or-bnw{display:inline-flex;align-items:center;gap:6px;height:22px;margin-left:4px;padding:0 9px 0 7px;border-radius:999px;border:1px solid var(--line2);background:var(--card);color:var(--muted);font:500 12px/1 var(--f-ui);cursor:pointer;white-space:nowrap}
+  .or-bnw b{font-weight:600;color:var(--text2)}
+  .or-bnw .ico{color:var(--faint)}
+  .or-bnw:hover{border-color:var(--muted);color:var(--text2)}
+  .or-bnw.risk{border-color:color-mix(in srgb,var(--st-wait) 40%,transparent);background:color-mix(in srgb,var(--st-wait) 8%,var(--card))}
+  .or-bnw.risk .ico{color:var(--st-wait)}
+  @media (max-width:560px){.or-bnw{margin-left:0}}
   .or-head-r{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .or-mode button{display:inline-flex;align-items:center;gap:6px}
   .or-mode button .ico{opacity:.85}
@@ -294,7 +342,8 @@
   .or-card.done{background:color-mix(in srgb,var(--panel) 60%,var(--card))}
   .or-top{min-width:0}
   .or-top > *{min-width:0}
-  .or-l1{display:flex;align-items:center;gap:7px;min-width:0}
+  .or-ident{min-width:0;overflow:hidden}
+  .or-l1{display:flex;align-items:center;flex-wrap:wrap;gap:4px 7px;min-width:0}
   .or-sw{width:10px;height:10px;border-radius:3px;background:var(--oc);flex:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--oc) 22%,transparent)}
   .or-id{font:600 13px/1.2 var(--f-mono);color:var(--text);letter-spacing:.01em;white-space:nowrap}
   .or-tag{--c:var(--st-idle);display:inline-flex;align-items:center;gap:4px;font:600 10.5px/1 var(--f-ui);letter-spacing:.02em;padding:3px 6px;border-radius:5px;color:color-mix(in srgb,var(--c) 85%,white);background:color-mix(in srgb,var(--c) 13%,transparent);border:1px solid color-mix(in srgb,var(--c) 32%,transparent);white-space:nowrap;flex:none}
@@ -312,11 +361,18 @@
   .or-prog{display:flex;flex-direction:column;gap:5px;min-width:0}
   .or-prog-t{display:flex;align-items:baseline;justify-content:space-between;gap:8px;white-space:nowrap;font-variant-numeric:tabular-nums}
   .or-prog-t b{font:600 17px/1 var(--f-cond);color:var(--text)}
+  .or-prog-t b small{font:500 12px/1 var(--f-ui);color:var(--muted);margin-left:3px}
   .or-prog-t span{font-size:11.5px;color:var(--muted)}
   .or-pbar{position:relative;display:block;height:5px;border-radius:3px;background:var(--track);overflow:hidden}
   .or-pbar i{position:absolute;left:0;top:0;bottom:0;border-radius:inherit;background:var(--oc);transition:width .5s ease}
+  .or-pbar i.w{background:color-mix(in srgb,var(--oc) 32%,transparent)}
   .or-prog-s{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
   .or-prog-s b{color:var(--text2);font-weight:600}
+  .or-prog-s .q{color:color-mix(in srgb,var(--st-wait) 80%,var(--text))}
+  .or-prog-s .r{color:color-mix(in srgb,var(--info) 75%,var(--text))}
+  .or-prog-s .nw{white-space:nowrap}
+  .or-prog-s .nw + .nw::before{content:'·';margin:0 5px 0 1px;color:var(--faint);font-weight:400}
+  .or-hero-d small .nw{display:block}
   .or-dates{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;align-items:baseline;font-size:12.5px;font-variant-numeric:tabular-nums}
   .or-dates span{font:600 10px/1.2 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
   .or-dates b{font-weight:600;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -407,8 +463,10 @@
   /* Plantafel */
   .or-gbar{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}
   .or-gbar .seg button{min-width:52px}
-  .or-gleg{display:flex;align-items:center;gap:5px;flex-wrap:wrap;min-width:0;flex:1;justify-content:flex-end}
-  .or-gleg button{--oc:var(--accent);display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px 0 7px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--text2);font:500 11.5px/1 var(--f-mono);cursor:pointer;white-space:nowrap}
+  .or-gleg{display:flex;align-items:center;gap:5px;flex-wrap:nowrap;min-width:0;flex:1 1 0;overflow-x:auto;scrollbar-width:none;padding:2px 22px 3px 10px;-webkit-mask-image:linear-gradient(90deg,transparent,#000 12px,#000 calc(100% - 26px),transparent);mask-image:linear-gradient(90deg,transparent,#000 12px,#000 calc(100% - 26px),transparent)}
+  .or-gleg::-webkit-scrollbar{display:none}
+  .or-gleg .or-gl-l{flex:none;font:600 10.5px/1 var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin:0 4px 0 6px}
+  .or-gleg button{flex:none;--oc:var(--accent);display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px 0 7px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--text2);font:500 11.5px/1 var(--f-mono);cursor:pointer;white-space:nowrap}
   .or-gleg button i{width:9px;height:9px;border-radius:3px;background:var(--oc)}
   .or-gleg button:hover{border-color:var(--line2);color:var(--text)}
   .or-gleg button.on{border-color:var(--oc);background:color-mix(in srgb,var(--oc) 16%,var(--card));color:var(--text)}
@@ -469,6 +527,38 @@
   .or-gkey .k-lk{width:22px;height:2px;background:repeating-linear-gradient(90deg,var(--mat) 0 4px,transparent 4px 7px)}
   .or-gkey .k-ext{width:22px;height:12px;border-radius:3px;border:1px dashed var(--muted)}
 
+  /* Bestätigung Priorität */
+  .or-pm{display:flex;flex-direction:column;gap:10px}
+  .or-pm-lead{margin:0;font-size:13px;line-height:1.5;color:var(--text2)}
+  .or-pm-lead b{color:var(--text);font-weight:600}
+  .or-pm-h{display:flex;justify-content:space-between;gap:10px;margin-top:2px;font:600 10.5px/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .or-pm-t{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--r);background:var(--card);overflow:hidden}
+  .or-pm-r{--oc:var(--accent);display:grid;grid-template-columns:10px auto minmax(0,1fr) auto 64px auto;align-items:center;gap:4px 10px;padding:9px 12px;border-top:1px solid var(--line);font-size:12.5px;font-variant-numeric:tabular-nums}
+  .or-pm-r:first-child{border-top:0}
+  .or-pm-r.self{background:color-mix(in srgb,var(--oc) 9%,var(--card))}
+  .or-pm-r .or-sw{width:9px;height:9px}
+  .or-pm-id{font:600 12px/1.2 var(--f-mono);color:var(--text)}
+  .or-pm-pt{min-width:0;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .or-pm-pt small{display:block;font-size:11px;color:var(--muted)}
+  .or-pm-eta{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;color:var(--muted)}
+  .or-pm-eta s{text-decoration-color:color-mix(in srgb,var(--muted) 70%,transparent)}
+  .or-pm-eta b{color:var(--text);font-weight:600}
+  .or-pm-eta .ico{color:var(--faint)}
+  .or-pm-d{text-align:right;font-weight:600;color:var(--muted);white-space:nowrap}
+  .or-pm-d.up{color:var(--st-run)} .or-pm-d.dn{color:var(--st-wait)}
+  .or-pm-r .or-rb{font-size:11px;line-height:16px;padding:1px 8px 1px 6px;justify-self:end}
+  .or-pm-n{margin:0;font-size:11.5px;line-height:1.45;color:var(--muted)}
+  .or-pm-n b{color:var(--text2);font-weight:600}
+  .or-pm-w{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border-radius:8px;font-size:12.5px;line-height:1.45;color:var(--text2);background:color-mix(in srgb,var(--st-wait) 9%,var(--bg2));border:1px solid color-mix(in srgb,var(--st-wait) 32%,transparent)}
+  .or-pm-w .ico{flex:none;margin-top:1px;color:var(--st-wait)}
+  .or-pm-w b{color:var(--text);font-weight:600}
+  @media (max-width:560px){
+    .or-pm-r{grid-template-columns:10px auto minmax(0,1fr) auto;padding:9px 10px}
+    .or-pm-eta{grid-column:2/4;grid-row:2}
+    .or-pm-d{grid-column:4;grid-row:2}
+    .or-pm-r .or-rb{grid-column:4;grid-row:1}
+  }
+
   /* Detail */
   .or-d-sub{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
   .or-d-sub .or-sw{width:9px;height:9px}
@@ -483,6 +573,9 @@
   .or-hero-d b{font:600 19px/1.1 var(--f-cond);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
   .or-hero-d small{font-size:11.5px;color:var(--muted);line-height:1.3}
   .or-hero .or-pbar{height:6px}
+  .or-hero-d small b{font:inherit;font-weight:600;color:var(--text2)}
+  .or-hero-d small .q{color:color-mix(in srgb,var(--st-wait) 80%,var(--text))}
+  .or-hero-d small .r{color:color-mix(in srgb,var(--info) 75%,var(--text))}
   .or-hero-n{display:flex;align-items:flex-start;gap:8px;font-size:12.5px;line-height:1.45;color:var(--text2)}
   .or-hero-n .ico{flex:none;margin-top:1px;color:var(--muted)}
   .or-hero-n b{color:var(--text);font-weight:600}
@@ -582,6 +675,12 @@
   .or-mv-c button.no{border-color:color-mix(in srgb,var(--st-fault) 40%,var(--line2));background:color-mix(in srgb,var(--st-fault) 5%,var(--card));cursor:not-allowed}
   .or-mv-c button.no:hover{border-color:color-mix(in srgb,var(--st-fault) 40%,var(--line2))}
   .or-mv-no{font-size:11px;font-weight:600;color:color-mix(in srgb,var(--st-fault) 80%,var(--text))}
+  .or-mv-why{color:var(--muted)}
+  .or-mv-p{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;margin-top:2px;padding-top:6px;border-top:1px solid var(--line);width:100%;font-size:12px;color:var(--text2);font-variant-numeric:tabular-nums}
+  .or-mv-p b{font-weight:600;color:var(--text)}
+  .or-mv-p em{font-style:normal;font-weight:600;color:var(--muted);margin-left:auto}
+  .or-mv-p.up em{color:var(--st-run)} .or-mv-p.dn em{color:var(--st-wait)}
+  .or-mv-side{font-size:11.5px;color:color-mix(in srgb,var(--st-wait) 80%,var(--text))}
   .or-mv-msg{font-size:12.5px;line-height:1.45;padding:8px 10px;border-radius:8px;color:var(--text2);background:color-mix(in srgb,var(--st-wait) 9%,var(--bg2));border:1px solid color-mix(in srgb,var(--st-wait) 32%,transparent)}
   .or-mv-none{font-size:12.5px;color:var(--muted);line-height:1.45}
 
@@ -597,15 +696,35 @@
     .or-chain:not(.or-dchain){-webkit-mask-image:linear-gradient(90deg,var(--bg) calc(100% - 24px),transparent);mask-image:linear-gradient(90deg,var(--bg) calc(100% - 24px),transparent);padding-right:20px}
     .or-chain.many .or-lk{flex-basis:11px}
   }
-  @media (max-width:1180px){
-    .or-cust span{display:none}
-    .or-part-alt span{display:none}
-  }
-  @media (max-width:1380px){
+  /* Kartenlayout nach der verfügbaren Breite der Liste (nicht des Fensters): Seitenleiste, Tablet, Drawer */
+  .or-pane{container:orpane / inline-size;min-width:0}
+  @container orpane (max-width:1150px){
     .or-thead,.or-top{grid-template-columns:minmax(0,1.3fr) 160px 192px 128px 34px;gap:14px}
     .or-thead .h-part,.or-top .or-part{display:none}
     .or-part-alt{display:block;margin-top:4px;font-size:12.5px;color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .or-part-alt span{font:500 11px/1 var(--f-mono);color:var(--muted);margin-left:6px}
+  }
+  @container orpane (max-width:960px){
+    .or-cust span{display:none}
+    .or-part-alt span{display:none}
+  }
+  @container orpane (max-width:860px){
+    .or-thead{display:none}
+    .or-card{padding:12px 12px 11px 14px;gap:10px}
+    .or-top{grid-template-columns:minmax(0,1.05fr) minmax(0,1fr) 32px;grid-template-areas:"id risk act" "prog date date";gap:10px 12px;align-items:start}
+    .or-ident{grid-area:id}
+    .or-risk{grid-area:risk;align-items:flex-end;text-align:right}
+    .or-prio{grid-area:act}
+    .or-prog{grid-area:prog;align-self:end}
+    .or-dates{grid-area:date;align-self:end}
+    .or-chain:not(.or-dchain) .or-step:not(.s-done){min-width:124px}
+    .or-foot{flex-wrap:wrap}
+    .or-bn{flex-basis:100%}
+  }
+  @container orpane (max-width:520px){
+    .or-prog-s{white-space:normal;line-height:1.35}
+    .or-prog-s .nw{display:block}
+    .or-prog-s .nw + .nw::before{content:none}
   }
   @media (max-width:1180px){
     .or-kpis{grid-template-columns:repeat(6,minmax(0,1fr))}
@@ -618,19 +737,8 @@
     .or-kpis > .kpi{flex:0 0 44%;scroll-snap-align:start}
     .or-kpis > .or-k-risk{flex-basis:80%}
     .or-gsel:not(.on){display:none}
-    .or-thead{display:none}
-    .or-card{padding:12px 12px 11px 14px;gap:10px}
-    .or-top{grid-template-columns:minmax(0,1.05fr) minmax(0,1fr) 32px;grid-template-areas:"id risk act" "prog date date";gap:10px 12px;align-items:start}
-    .or-ident{grid-area:id}
-    .or-risk{grid-area:risk;align-items:flex-end;text-align:right}
-    .or-prio{grid-area:act}
-    .or-prog{grid-area:prog;align-self:end}
-    .or-dates{grid-area:date;align-self:end}
-    .or-chain:not(.or-dchain) .or-step:not(.s-done){min-width:124px}
     .or-kpis > .or-k-risk{order:-1}
     .or-op-q span{letter-spacing:.04em}
-    .or-foot{flex-wrap:wrap}
-    .or-bn{flex-basis:100%}
     .or-search{flex:1 1 100%;margin-left:0}
     .or-chips{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -2px;padding:0 2px}
     .or-chips::-webkit-scrollbar{display:none}
@@ -638,9 +746,7 @@
     .or-gl{padding:0 6px 0 9px;gap:7px}
     .or-gl small{display:none}
     .or-gl b{font-size:11.5px}
-    .or-gleg{justify-content:flex-start;flex-basis:100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
-    .or-gleg::-webkit-scrollbar{display:none}
-    .or-gleg button{flex:none}
+    .or-gleg{flex-basis:100%}
     .or-kpis .kpi{padding:9px 12px 9px}
     .or-kpis .kpi .v{font-size:24px}
     .or-rk b{font-size:22px}
@@ -750,6 +856,7 @@
     R = refs(el);
     R.modeSeg.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => setMode(b.dataset.mode));
     R.newBtn.onclick = () => WF.app.navigate('ki-auftrag');
+    R.sub.addEventListener('click', (e) => { const b = e.target.closest('[data-m]'); if (b) WF.app.select('machine', b.dataset.m); });
     R.chips.querySelectorAll('[data-f]').forEach(b => b.onclick = () => setFilter(b.dataset.f));
     R.rk.querySelectorAll('[data-rf]').forEach(b => b.onclick = () => { setMode('list'); setFilter(b.dataset.rf === 'ok' ? 'alle' : 'risk'); });
     R.kExt.onclick = () => { G.focusExt = true; if (mode === 'gantt') ganttRender(true); else setMode('gantt'); };
@@ -809,21 +916,89 @@
     update();
   }
 
+  /** Was-wäre-wenn der Engine (falls vorhanden) auf eine einheitliche Liste bringen: [{id, before, after}] */
+  function whatIfPrio(id, to) {
+    if (!WF.sim || typeof WF.sim.whatIfPriority !== 'function') return null;
+    let r;
+    try { r = WF.sim.whatIfPriority(id, to); } catch (e) { console.warn('[whatIfPriority]', e); return null; }
+    if (!r || r.ok === false) return null;
+    // Engine: { target: Zeile des Auftrags, affected: andere Aufträge mit ≥ 5 min Verschiebung, newlyLate, laterLate, text }
+    const list = (r.target || Array.isArray(r.affected)) ? [r.target].concat(r.affected || []).filter(Boolean)
+      : Array.isArray(r) ? r : Array.isArray(r.orders) ? r.orders : Array.isArray(r.changes) ? r.changes
+      : (r.orders && typeof r.orders === 'object') ? Object.keys(r.orders).map(k => Object.assign({ id: k }, r.orders[k])) : null;
+    if (!list) return null;
+    const num = (x) => (typeof x === 'number' && isFinite(x) ? x : null);
+    const rows = list.map(x => ({
+      id: x.id || x.orderId,
+      before: num(x.before != null && typeof x.before === 'object' ? x.before.eta : x.before) ?? num(x.etaBefore),
+      after: num(x.after != null && typeof x.after === 'object' ? x.after.eta : x.after) ?? num(x.etaAfter),
+      risk: x.riskAfter || null,
+    })).filter(x => x.id && x.before != null && x.after != null);
+    return { rows, raw: r, newlyLate: r.newlyLate || [], laterLate: r.laterLate || [], text: r.text || '' };
+  }
+  function riskOfEta(o, eta) {
+    if (eta == null) return 'unbekannt';
+    const slack = o.due - eta;
+    return slack < 0 ? 'spät' : slack < 4 * HOUR ? 'knapp' : 'ok';
+  }
+  const fmtDelta = (d) => (Math.abs(d) < 60 ? '±0' : (d < 0 ? '−' : '+') + durLong(Math.abs(d)));
+  /** Priorität ändern – vorher bestätigen, mit Liefertermin-Prognose vorher/nachher der betroffenen Aufträge */
   function togglePriority(id) {
     const s = S(), o = s && s.orders[id]; if (!o) return;
     if (o.status === 'fertig') { WF.app.toast('Auftrag ist bereits fertig – Priorität nicht mehr änderbar', 'warn'); return; }
     const to = o.priority === 'eil' ? 'normal' : 'eil';
+    const v = WF.sim.orderView(id), now = s.t;
+    const wi = whatIfPrio(id, to);
+    const body = document.createElement('div'); body.className = 'or-pm';
+    const lead = to === 'eil'
+      ? `<b>${esc(id)}</b> · ${esc(v.part.name)} wird an jeder Maschine beim nächsten Auftragswechsel vorgezogen. Laufende Teile werden nicht unterbrochen; andere Aufträge rücken dafür nach hinten.`
+      : `<b>${esc(id)}</b> · ${esc(v.part.name)} wird wieder nach Liefertermin eingereiht. Aufträge, die bisher warten mussten, können dadurch früher fertig werden.`;
+    let tbl = '';
+    /** Zeile: vorher → nachher (after == null: nur der heutige Stand) */
+    const row = (oid, before, after, self, riskK) => {
+      const oo = s.orders[oid]; if (!oo) return '';
+      const cmp = after != null;
+      const rk = riskK || riskOfEta(oo, cmp ? after : before), d = cmp ? after - before : 0;
+      const cls = !cmp || Math.abs(d) < 60 ? '' : d < 0 ? ' up' : ' dn';
+      const eta = cmp && Math.abs(d) >= 60 ? `<s>${esc(tShort(before, now))}</s>${icon('arrowRight', 12)}<b>${esc(tShort(after, now))}</b>` : `<b>${esc(tShort(cmp ? after : before, now))}</b>`;
+      return `<div class="or-pm-r${self ? ' self' : ''}" style="--oc:${colorOf(oid)}"><span class="or-sw"></span><span class="or-pm-id">${esc(oid)}</span><span class="or-pm-pt">${esc(oo.part.name)}<small>Termin ${esc(tShort(oo.due, now))}</small></span>` +
+        `<span class="or-pm-eta">${eta}</span><span class="or-pm-d${cls}">${cmp ? esc(fmtDelta(d)) : ''}</span>` +
+        `<span class="or-rb" style="--c:${RISK_C[rk]}"><i></i>${esc(riskLabel(rk))}</span></div>`;
+    };
+    if (wi) {
+      const rows = wi.rows.filter(x => x.id === id || Math.abs(x.after - x.before) >= 5 * 60);
+      rows.sort((a, b) => (a.id === id ? -1 : b.id === id ? 1 : Math.abs(b.after - b.before) - Math.abs(a.after - a.before)));
+      const others = rows.filter(x => x.id !== id);
+      const late = wi.newlyLate.concat(wi.laterLate.filter(x => !wi.newlyLate.includes(x)));
+      const self0 = wi.rows.find(x => x.id === id);
+      tbl = `<div class="or-pm-h"><span>Liefertermin-Prognose</span><span>vorher → nachher</span></div><div class="or-pm-t">${rows.slice(0, 8).map(x => row(x.id, x.before, x.after, x.id === id, x.risk)).join('')}</div>` +
+        (rows.length > 8 ? `<p class="or-pm-n">+ ${nf(rows.length - 8)} weitere Aufträge mit kleineren Verschiebungen.</p>` : '') +
+        (self0 && to === 'eil' && self0.before - self0.after < 15 * 60 ? `<p class="or-pm-n"><b>Vorziehen bringt ${esc(id)} laut Planung kaum Zeit</b> – die Reihenfolge an den Maschinen ist hier nicht der begrenzende Faktor.</p>` : '') +
+        (late.length ? `<div class="or-pm-w">${icon('alert', 15)}<span>Dadurch ${late.length === 1 ? 'wird' : 'werden'} <b>${late.map(esc).join(', ')}</b> ${wi.newlyLate.length ? 'zu spät' : 'noch später'} – Alternative: Arbeitsgang verlagern oder Überstunden am Engpass.</span></div>` : '') +
+        `<p class="or-pm-n">${others.length ? `${nf(others.length)} ${others.length === 1 ? 'weiterer Auftrag verschiebt' : 'weitere Aufträge verschieben'} sich um mehr als 5 min.` : 'Kein anderer Auftrag verschiebt sich um mehr als 5 min.'} Was-wäre-wenn-Rechnung derselben Planung wie die Plantafel; nach der Umstellung bestätigt die nächste Planrechnung die Werte.</p>`;
+    } else {
+      tbl = `<div class="or-pm-h"><span>Liefertermin-Prognose</span><span>derzeit</span></div><div class="or-pm-t">${v.eta != null ? row(id, v.eta, null, true) : ''}</div>` +
+        `<p class="or-pm-n">Die Planung rechnet nach der Umstellung neu – die Auswirkung auf alle Aufträge zeigt danach die Plantafel.</p>`;
+    }
+    body.innerHTML = `<p class="or-pm-lead">${lead}</p>${tbl}`;
+    WF.app.modal({ title: to === 'eil' ? 'Als Eilauftrag kennzeichnen?' : 'Eilauftrag aufheben?', body, width: 600, actions: [
+      { label: 'Abbrechen' },
+      { label: to === 'eil' ? 'Als Eilauftrag kennzeichnen' : 'Priorität aufheben', primary: true, onClick: () => { applyPriority(id, to, wi); } },
+    ] });
+  }
+  function applyPriority(id, to, wi) {
+    const s = S(), now = s.t;
     const before = WF.sim.orderView(id);
     const r = WF.sim.actions.setPriority(id, to);
     if (!r || r.ok === false) { WF.app.toast((r && r.msg) || 'Priorität konnte nicht geändert werden', 'warn'); return; }
     const after = WF.sim.orderView(id);
-    const now = s.t;
     let body = to === 'eil'
       ? 'Die Maschinen ziehen den Auftrag bei jedem Auftragswechsel vor – laufende Teile werden nicht unterbrochen.'
       : 'Reihenfolge wieder nach Liefertermin.';
-    if (before && after && before.etaRaw != null && after.etaRaw != null && Math.abs(after.etaRaw - before.etaRaw) >= 600)
-      body += ` Neu gerechnete Prognose: ${tShort(before.etaRaw, now)} → ${tShort(after.etaRaw, now)} (wird mit der nächsten Planrechnung bestätigt).`;
-    else body += ' Die Prognose ändert sich dadurch kaum.';
+    const self = wi && wi.rows.find(x => x.id === id);
+    const b0 = self ? self.before : before && before.etaRaw, a0 = self ? self.after : after && after.etaRaw;
+    if (b0 != null && a0 != null && Math.abs(a0 - b0) >= 600) body += ` Prognose ${tShort(b0, now)} → ${tShort(a0, now)} (wird mit der nächsten Planrechnung bestätigt).`;
+    else body += ' Die Prognose dieses Auftrags ändert sich dadurch kaum.';
     WF.app.toast(body, 'ok', { title: r.msg, ms: 6500, onClick: () => WF.app.select('order', id) });
     update();
   }
@@ -864,7 +1039,9 @@
     setHTML(R.kExtV, `${nf(q)}<small>Stk</small>`);
     setHTML(R.kExtS, q ? `${nf(lots.size)} ${lots.size === 1 ? 'Los' : 'Lose'} · zurück ab <b>${esc(tShort(nextT, now))}</b>` : 'keine Teile beim Härtepartner');
     const fc = WF.sim.forecast();
-    setHTML(R.sub, `<span>${nf(views.length)} Fertigungsaufträge</span><span class="faint">·</span><span>Liefertermin-Prognose aus Live-Daten, Stand ${esc(U.fmtClock(fc.t))}</span>`);
+    const bw = plantBottleneck();
+    setHTML(R.sub, `<span>${nf(views.length)} Fertigungsaufträge</span><span class="faint">·</span><span>Liefertermin-Prognose aus Live-Daten, Stand ${esc(U.fmtClock(fc.t))}</span>` +
+      (bw && bw.stationId ? `<button type="button" class="or-bnw${bw.atRisk ? ' risk' : ''}" data-m="${esc(bw.stationId)}" title="${esc('Engpass im Werk: ' + bw.name + ' (' + bw.stationId + ') – ' + (bw.why || ''))}">${icon('gauge', 13)}Engpass im Werk <b>${esc(bw.stationId)} ${esc(bw.short || '')}</b></button>` : ''));
     // Filterzähler
     setText(R.fAll, nf(open.length));
     setText(R.fRisk, nf(cnt.knapp + cnt['spät']));
@@ -882,14 +1059,14 @@
     el.innerHTML = `
       <div class="or-top">
         <div class="or-ident">
-          <div class="or-l1"><span class="or-sw"></span><span class="or-id" data-r="id"></span><span class="or-tag eil" data-r="eil" hidden>${icon('bolt', 11)}Eilauftrag</span><span class="or-tag" data-r="stat" hidden></span></div>
+          <div class="or-l1"><span class="or-sw"></span><span class="or-id" data-r="id"></span><span class="or-tag eil" data-r="eil" hidden>${icon('bolt', 11)}Eilauftrag</span><span class="or-tag rel" data-r="stat" hidden>Freigegeben</span><span class="or-tag src" data-r="src" hidden></span></div>
           <div class="or-cust"><b data-r="cust"></b><span data-r="sect"></span></div>
           <div class="or-part-alt" data-r="partAlt"></div>
         </div>
         <div class="or-part"><b data-r="pn"></b><span data-r="pno"></span></div>
         <div class="or-prog">
           <div class="or-prog-t"><b data-r="pct"></b><span data-r="qty"></span></div>
-          <span class="or-pbar"><i data-r="pbar"></i></span>
+          <span class="or-pbar"><i class="w" data-r="pwork"></i><i data-r="pbar"></i></span>
           <div class="or-prog-s" data-r="pS"></div>
         </div>
         <div class="or-dates"><span>Termin</span><b data-r="due"></b><span data-r="etaL">Prognose</span><b class="eta" data-r="eta"></b><small data-r="etaS" hidden></small></div>
@@ -925,7 +1102,7 @@
       if (ct.state === 'transit' && ct.seq != null) (transit[ct.seq] = transit[ct.seq] || []).push(ct);
       else if (ct.state === 'ready' && ct.srcSeq != null) (ready[ct.srcSeq] = ready[ct.srcSeq] || []).push(ct);
     }
-    const bn = v.status !== 'fertig' ? bnSeq(v) : null;
+    const bn = atRisk(v) ? bnSeq(v) : null;
     ops.forEach((op, i) => {
       const ch = c.chips[i]; const vis = opVis(op);
       setCls(ch.el, 'or-step s-' + vis.k + (bn === op.seq && op.state !== 'done' ? ' bn' : ''));
@@ -1003,22 +1180,26 @@
     setVar(c.el, '--rc', rb.c);
     setText(r.id, v.id);
     setHidden(r.eil, v.priority !== 'eil');
-    const stat = v.status === 'freigegeben' ? 'Freigegeben' : v.source && v.source !== 'profil' && v.status !== 'fertig' ? v.source : null;
-    setHidden(r.stat, !stat);
-    if (stat) { setText(r.stat, stat); setCls(r.stat, 'or-tag ' + (v.status === 'freigegeben' ? 'rel' : 'src')); setAttr(r.stat, 'title', v.status === 'freigegeben' ? 'Freigegeben, noch kein Arbeitsgang begonnen' : 'Auftragsquelle'); }
+    // Status- und Herkunftsetikett: „Freigegeben“ (noch kein Arbeitsgang begonnen) und besondere Quellen (KI-Auftrag, Nachfertigung)
+    setHidden(r.stat, v.status !== 'freigegeben');
+    setAttr(r.stat, 'title', 'Freigegeben, noch kein Arbeitsgang begonnen');
+    const src = srcTag(v);
+    setHidden(r.src, !src);
+    if (src) { setText(r.src, src.label); setAttr(r.src, 'title', src.title); }
     setText(r.cust, custShort(v.customer)); setAttr(r.cust, 'title', v.customer);
     setText(r.sect, v.sector || '');
     setText(r.pn, v.part.name); setAttr(r.pn, 'title', v.part.name);
     const pno = [v.part.no, v.part.material].filter(Boolean).join(' · ');
     setText(r.pno, pno);
     setHTML(r.partAlt, `${esc(v.part.name)}<span>${esc(v.part.no || '')}</span>`);
-    // Fortschritt
-    const fin = finishedGood(v);
-    setText(r.pct, U.fmtPct(v.progress));
-    setText(r.qty, nf(v.qty) + ' Stk');
-    setW(r.pbar, v.progress);
-    setHTML(r.pS, `<b>${nf(fin)}</b> fertig · <b>${nf(v.shippedQty)}</b> versandt`);
-    setAttr(r.pS.parentNode, 'title', `Arbeitsfortschritt ${U.fmtPct(v.progress)} (nach Arbeitsinhalt gewichtet) · ${nf(fin)} von ${nf(v.qty)} Stk fertig bearbeitet · ${nf(v.shippedQty)} Stk versandt`);
+    // Fortschritt: Stückzahl zuerst (fertig bearbeitet bzw. versandt), gewichteter Arbeitsinhalt als zweite Ebene
+    const pg = progOf(v);
+    setHTML(r.pct, `${nf(pg.n)}<small>/ ${nf(v.qty)} Stk ${pg.label}</small>`);
+    setText(r.qty, '');
+    setW(r.pbar, pg.frac);
+    setW(r.pwork, pg.work);
+    setHTML(r.pS, pg.sub);
+    setAttr(r.pS.parentNode, 'title', pg.title);
     // Termine
     setText(r.due, fmtDue(v.due, now));
     if (v.status === 'fertig') { setText(r.etaL, 'Fertig'); setText(r.eta, fmtDue(v.doneT, now)); }
@@ -1055,7 +1236,7 @@
       setText(r.msgT, nts.length === 1 ? top.title.replace(/\s*\(.*\)\s*$/, '').replace(': ' + v.id, '') : nts.length + ' Meldungen');
       setAttr(r.msg, 'title', nts.map(n => n.title + (n.status === 'ack' ? ' (quittiert)' : '')).join('\n'));
     }
-    const showBn = v.status !== 'fertig' && !!v.bottleneck;
+    const showBn = atRisk(v) && !!v.bottleneck;
     setHidden(r.bn, !showBn);
     if (showBn) { setHTML(r.bnT, `Engpass <b>${esc(v.bottleneck.replace(/\s*\(.*$/, ''))}</b>${bnSeq(v) ? ' · AG ' + bnSeq(v) : ''}`); setAttr(r.bn, 'title', 'Engpass laut Prognose (längste Durchlaufzeit): ' + v.bottleneck); }
   }
@@ -1597,12 +1778,12 @@
     if (G.nowTxt._t !== txt) { G.nowTxt._t = txt; G.nowTxt.textContent = txt; }
   }
   function updateLegend(views) {
-    const open = views.filter(v => v.status !== 'fertig').sort((a, b) => a.due - b.due);
+    const open = views.filter(v => v.status !== 'fertig').sort((a, b) => (RISK_RANK[a.risk] - RISK_RANK[b.risk]) || (a.due - b.due));
     const sig = open.map(v => v.id + v.risk + v.priority).join(',') + '|' + G.pin;
     if (R.gleg._sig === sig) return;
     R.gleg._sig = sig;
     if (G.pin && !open.some(v => v.id === G.pin)) G.pin = null;
-    R.gleg.innerHTML = open.map(v => `<button type="button" data-o="${esc(v.id)}" class="risk-${esc(v.risk)}${v.id === G.pin ? ' on' : ''}" style="--oc:${colorOf(v.id)}" title="${esc(v.id)} · ${esc(v.part.name)} · ${esc(v.customer)} – Termin ${esc(U.fmtDayClock(v.due))}, ${esc(v.riskLabel || '')}. Klick hebt den Auftrag hervor.">` +
+    R.gleg.innerHTML = (open.length ? '<span class="or-gl-l">Hervorheben</span>' : '') + open.map(v => `<button type="button" data-o="${esc(v.id)}" class="risk-${esc(v.risk)}${v.id === G.pin ? ' on' : ''}" style="--oc:${colorOf(v.id)}" title="${esc(v.id)} · ${esc(v.part.name)} · ${esc(v.customer)} – Termin ${esc(U.fmtDayClock(v.due))}, ${esc(v.riskLabel || '')}. Klick hebt den Auftrag hervor.">` +
       `<i></i>${esc(numId(v.id))}</button>`).join('');
   }
   function selStrip(oid) {
@@ -1627,8 +1808,15 @@
     setVar(box, '--oc', v ? colorOf(v.id) : 'var(--line2)');
     box.dataset.o = v ? v.id : '';
   }
+  /** hervorgehobenen Auftrag in der (waagrecht scrollbaren) Auftragsleiste sichtbar halten */
+  function revealPin() {
+    const box = R && R.gleg, b = box && box.querySelector('button.on'); if (!b) return;
+    const L = box.scrollLeft, W = box.clientWidth, x0 = b.offsetLeft - box.offsetLeft, x1 = x0 + b.offsetWidth;
+    if (x0 < L + 4) box.scrollLeft = Math.max(0, x0 - 40); else if (x1 > L + W - 28) box.scrollLeft = x1 - W + 40;
+  }
   function setHL(oid) {
     selStrip(oid);
+    if (G.pin) revealPin();
     const svg = R && R.gsvg; if (!svg) return;
     svg.classList.toggle('hl', !!oid);
     svg.querySelectorAll('.blk.on').forEach(n => n.classList.remove('on'));
@@ -1773,6 +1961,11 @@
       return m && mid !== stationId && m.kind === 'machine' && (m.type === from.type || (g && TYPE_GROUP[m.type] === g));
     });
   }
+  /** Was-wäre-wenn „Arbeitsgang verlagern“ (Engine), sonst null */
+  function whatIfMove(orderId, seq, stationId) {
+    if (!WF.sim || typeof WF.sim.whatIf !== 'function') return null;
+    try { return WF.sim.whatIf({ type: 'moveOp', orderId, seq, stationId }); } catch (e) { console.warn('[whatIf moveOp]', e); return null; }
+  }
   function openMoveModal(id) {
     const s = S(), v = WF.sim.orderView(id); if (!v) return;
     const now = s.t, fc = WF.sim.forecast();
@@ -1785,16 +1978,26 @@
         ? `Für die offenen Arbeitsgänge von ${esc(id)} gibt es keine gleichartige zweite Maschine (${movable.map(o => esc(o.stationName)).join(', ')}). Verlagern ist nur zwischen Dreh- bzw. Fräsmaschinen möglich.`
         : `${esc(id)} hat keinen offenen Bearbeitungsschritt auf einer Maschine mehr.`}</div>`;
     } else {
-      body.innerHTML = `<p class="muted" style="margin:0;font-size:12.5px;line-height:1.45">Nur gleichartige Maschinen werden angeboten. Die Engine prüft zusätzlich Teilegewicht, Durchmesser, Stangenmaterial und 5-Achs-Bedarf und begründet eine Ablehnung. Auf der neuen Maschine wird neu gerüstet.</p>`;
+      body.innerHTML = `<p class="muted" style="margin:0;font-size:12.5px;line-height:1.45">Angeboten werden gleichartige Maschinen. ${typeof WF.sim.whatIf === 'function' ? 'Teilegewicht, Durchmesser, Stangenmaterial und 5-Achs-Bedarf prüft die Planung vorab; die Prognose je Maschine stammt aus derselben Planrechnung wie die Plantafel (inkl. Neu-Rüsten).' : 'Die Engine prüft zusätzlich Teilegewicht, Durchmesser, Stangenmaterial und 5-Achs-Bedarf und begründet eine Ablehnung. Auf der neuen Maschine wird neu gerüstet.'}</p>`;
       for (const op of withAlt) {
         const sec = document.createElement('div'); sec.className = 'or-mv-op';
         const cands = compatMachines(op.station);
         sec.innerHTML = `<div class="or-mv-h"><em>AG ${op.seq}</em><b>${esc(op.op)}</b><span>derzeit ${esc(op.stationName)} (${esc(op.station)}) · ${nf(Math.max(0, op.target - op.good - op.scrap))} Stk offen</span></div>
           <div class="or-mv-c">${cands.map(mid => {
-            const m = s.machines[mid], st = WF.STATE[m.state] || WF.STATE.idle;
+            const m = s.machines[mid];
             const q = fc.machines[mid] || [];
             const busy = q.length ? Math.max(...q.map(b => b.end)) : null;
-            return `<button type="button" data-mid="${esc(mid)}" data-seq="${op.seq}"><b>${esc(m.short)}<em>${esc(mid)}</em></b>${WF.ui.pill(m.state)}<small>${esc(m.name)}<br>${busy && busy > now ? 'eingeplant bis ca. ' + esc(tShort(busy, now)) + ' (' + q.length + ' ' + (q.length === 1 ? 'Arbeitsgang' : 'Arbeitsgänge') + ')' : 'derzeit nichts eingeplant'}</small></button>`;
+            // Was-wäre-wenn der Engine: dieselbe Prüfung (Gewicht, Ø, Stange, 5-Achs) und dieselbe Prognose wie nach dem Verlagern
+            const w = whatIfMove(id, op.seq, mid);
+            let pred = '', no = false;
+            if (w && w.ok === false) { no = true; pred = `<span class="or-mv-no">nicht geeignet</span><small class="or-mv-why">${esc(w.msg || '')}</small>`; }
+            else if (w && w.target) {
+              const d = w.target.after - w.target.before, cls = Math.abs(d) < 300 ? '' : d < 0 ? ' up' : ' dn';
+              const late = (w.newlyLate || []).concat((w.laterLate || []).filter(x => !(w.newlyLate || []).includes(x)));
+              pred = `<span class="or-mv-p${cls}">${esc(id)} fertig ca. <b>${esc(tShort(w.target.after, now))}</b><em>${esc(fmtDelta(d))}</em></span>` +
+                (late.length ? `<span class="or-mv-side">macht ${late.map(esc).join(', ')} später</span>` : '');
+            }
+            return `<button type="button" data-mid="${esc(mid)}" data-seq="${op.seq}"${no ? ' class="no" disabled' : ''}><b>${esc(m.short)}<em>${esc(mid)}</em></b>${WF.ui.pill(m.state)}<small>${esc(m.name)}<br>${busy && busy > now ? 'eingeplant bis ca. ' + esc(tShort(busy, now)) + ' (' + q.length + ' ' + (q.length === 1 ? 'Arbeitsgang' : 'Arbeitsgänge') + ')' : 'derzeit nichts eingeplant'}</small>${pred}</button>`;
           }).join('')}</div><div class="or-mv-msg" hidden></div>`;
         body.append(sec);
       }
@@ -1900,19 +2103,23 @@
   function heroHtml(v, now) {
     const rb = riskBadge(v);
     const fc = WF.sim.forecast(), f = fc.orders[v.id] || {};
-    const fin = finishedGood(v);
-    const top = `<div class="or-hero-top"><span class="or-rb" style="--c:${rb.c}"><i></i>${esc(rb.label)}</span><span class="or-hero-slack">${esc(slackText(v))}</span><span class="spacer" style="flex:1"></span>${v.priority === 'eil' ? `<span class="or-tag eil">${icon('bolt', 11)}Eilauftrag</span>` : ''}${v.status === 'freigegeben' ? '<span class="or-tag rel">Freigegeben</span>' : ''}</div>`;
+    const pg = progOf(v);
+    const top = `<div class="or-hero-top"><span class="or-rb" style="--c:${rb.c}"><i></i>${esc(rb.label)}</span><span class="or-hero-slack">${esc(slackText(v))}</span><span class="spacer" style="flex:1"></span>${v.priority === 'eil' ? `<span class="or-tag eil">${icon('bolt', 11)}Eilauftrag</span>` : ''}${v.status === 'freigegeben' ? '<span class="or-tag rel">Freigegeben</span>' : ''}${(() => { const t = srcTag(v); return t ? `<span class="or-tag src" title="${esc(t.title)}">${esc(t.label)}</span>` : ''; })()}</div>`;
     const pend = v.status !== 'fertig' && v.etaPending != null && v.eta != null && Math.abs(v.etaPending - v.eta) > 900;
     const d = `<div class="or-hero-d">
       <div><span class="eyebrow">Liefertermin</span><b>${esc(fmtDue(v.due, now))}</b><small>${esc(v.status === 'fertig' ? U.fmtDayClock(v.due) : v.due >= now ? 'in ' + durLong(v.due - now) : 'seit ' + durLong(now - v.due) + ' überschritten')}</small></div>
       <div><span class="eyebrow">${v.status === 'fertig' ? 'Fertig' : 'Prognose fertig'}</span><b>${esc(v.status === 'fertig' ? fmtDue(v.doneT, now) : fmtDue(v.eta, now))}</b><small>${pend ? 'neu gerechnet ' + esc(tShort(v.etaPending, now)) + ' – wird geprüft' : v.status === 'fertig' ? (v.onTime ? 'termingerecht und vollständig' : 'nicht termingerecht') : 'aus Live-Daten, inkl. Fremdbearbeitung'}</small></div>
-      <div><span class="eyebrow">Fortschritt</span><b>${esc(U.fmtPct(v.progress))}</b><small>${nf(fin)}/${nf(v.qty)} fertig · ${nf(v.shippedQty)} versandt</small></div>
+      <div title="${esc(pg.title)}"><span class="eyebrow">${v.status === 'fertig' ? 'Versandt' : 'Fertig bearbeitet'}</span><b>${nf(pg.n)}/${nf(v.qty)} Stk</b><small>${pg.sub}</small></div>
     </div>`;
-    const bar = `<span class="or-pbar" style="--oc:${colorOf(v.id)}"><i style="width:${(U.clamp(v.progress, 0, 1) * 100).toFixed(1)}%"></i></span>`;
+    const bar = `<span class="or-pbar" style="--oc:${colorOf(v.id)}" title="${esc(pg.title)}"><i class="w" style="width:${(pg.work * 100).toFixed(1)}%"></i><i style="width:${(U.clamp(pg.frac, 0, 1) * 100).toFixed(1)}%"></i></span>`;
     const nl = nowLine(v, now);
     let notes = nl.parts ? nl.parts.map(p => `<div class="or-hero-n or-hero-a"><span>${p}</span></div>`).join('')
       : `<div class="or-hero-n ${nl.cls}">${icon(nl.ic || 'arrowRight', 15)}<span>${nl.html}</span></div>`;
-    if (v.status !== 'fertig' && v.bottleneck) notes += `<div class="or-hero-n">${icon('gauge', 15)}<span>Engpass laut Prognose: <b>${esc(v.bottleneck)}</b>${f.bottleneckSec ? ' – längster Arbeitsgang mit ca. ' + esc(durLong(f.bottleneckSec)) + ' Durchlauf' : ''}</span></div>`;
+    if (v.status !== 'fertig' && v.bottleneck) {
+      const bw = plantBottleneck(), bst = v.bottleneckStation || f.bottleneckStation;
+      const plant = bw && bst && bw.stationId === bst;
+      notes += `<div class="or-hero-n${plant && atRisk(v) ? ' warn' : ''}">${icon('gauge', 15)}<span>Engpass laut Prognose: <b>${esc(v.bottleneck)}</b>${f.bottleneckSec ? ' – längster Arbeitsgang mit ca. ' + esc(durLong(f.bottleneckSec)) + ' Durchlauf' : ''}${plant ? ' · zugleich <b>Engpass im Werk</b>' : ''}</span></div>`;
+    }
     return `<div class="or-hero" style="--rc:${rb.c}">${top}${d}${bar}${notes}</div>`;
   }
   function factsHtml(v, now) {
@@ -1926,7 +2133,9 @@
       ['Menge', nf(v.qty) + ' Stk' + (p.weightKg ? ' · ' + U.fmtKg(p.weightKg) + '/Stk' : '')], ['Ausschuss gesamt', scrap ? nf(scrap) + ' Stk (nachgefertigt)' : 'keiner'],
       ['Status', sLabel + (v.startT != null ? ' · begonnen ' + tAct(v.startT, now) : ''), 'wide'],
     ];
-    if (v.source && v.source !== 'profil') f.push(['Auftragsquelle', v.source]);
+    if (v.source && v.source !== 'profil') f.push(['Auftragsquelle', v.source === 'ERP' ? 'Auftragseingang (ERP)' : v.source]);
+    if (v.remakeOf) f.push(['Nachfertigung für', v.remakeOf]);
+    if (v.remakes && v.remakes.length) f.push(['Nachfertigung', v.remakes.join(', ')]);
     let h = f.map(([l, val, cls]) => `<div${cls ? ` class="${cls}"` : ''}><span>${esc(l)}</span><b>${esc(val)}</b></div>`).join('');
     if (v.note) h += `<div class="wide"><span>Notiz</span><b>${esc(v.note)}</b></div>`;
     return `<div class="or-facts">${h}</div>`;
@@ -2017,6 +2226,8 @@
         case 'move': openMoveModal(id); break;
         case 'hall':
           if (!hasView('halle')) { WF.app.toast('Die Ansicht Halle 3D ist in dieser Ausgabe nicht verfügbar', 'warn'); break; }
+          // Schmale Bildschirme: der Drawer deckt die Halle ganz zu – ausblenden, Auswahl (Route in der Halle) bleibt
+          if (window.matchMedia('(max-width: 900px)').matches && typeof WF.app.hideDrawer === 'function') WF.app.hideDrawer();
           WF.app.navigate('halle');
           if (WF.hall && WF.hall.focusOrder) { try { WF.hall.focusOrder(id); } catch (err) { console.warn(err); } }
           break;

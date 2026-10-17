@@ -15,13 +15,22 @@ bei Interessenten anpassen.
 vollständig eigenständig (Three.js eingebettet) und läuft offline. Auf claude.ai veröffentlicht nutzt der
 Copilot Claude live; lokal antwortet ein regelbasierter Offline-Copilot aus denselben Live-Daten.
 
+## Auf claude.ai veröffentlichen
+Als Artifact mit der Capability `{"sample": {"images": true}}` veröffentlichen. Dann beantwortet der Copilot Fragen
+live mit Claude (mit Werkzeugen auf die Simulationsdaten) und der KI-Auftrag liest hochgeladene Zeichnungen als Bild.
+Jede Person, die die Seite öffnet, bestätigt die Nutzung einmalig. Ohne Capability (oder lokal per Doppelklick)
+laufen Copilot und KI-Auftrag im Offline-Modus: regelbasierte Antworten aus denselben Live-Daten und vorberechnete
+Auswertungen der drei Beispielzeichnungen. Die Demo-Tour nutzt immer die vorberechnete Auswertung, damit sie ohne
+Wartezeit durchläuft.
+
 ## Bedienung
 - Links die Ansichten: **Leitstand**, **Halle 3D**, **Aufträge** (inkl. Plantafel), **Material & Logistik**,
   **Werkzeuge**, **Personal**, **Qualität**, **Anbindung** (Maschinen anschließen), **KI-Auftrag**
   (Zeichnung → Arbeitsplan, Preis, Liefertermin → einlasten).
 - Oben: Uhr und Schicht, Tempo (10×–600×, `P` = Pause), Benachrichtigungen, Copilot, Einstellungen.
 - Klick auf jede Maschine, jeden Auftrag, jede Person, jedes AGV öffnet die Details rechts.
-- Tasten `1`–`9` wechseln die Ansicht, `Esc` schließt Details.
+- Tasten `1`–`9` wechseln die Ansicht (Reihenfolge der Navigation, `0` = Analyse), `P` pausiert, `Esc` schließt Details.
+- Demo-Tour: Knopf „Tour“ oben oder Link mit `#tour` am Ende.
 
 ## Demo-Drehbuch (ca. 6 Minuten)
 1. **Leitstand** – „So sieht der Produktionsleiter um 08:40 seine Halle“: Kennzahlen, Kachel je Maschine

@@ -1,11 +1,14 @@
 /* werkfluss – Ansicht „Personal“ (47_people.js) + Detail „person“.
    Schichtkopf (laufende Schicht, Schichtwechsel, nächste Pause, Schichtleitung, Schichtmodell des Tages),
-   Kennzahlen, Personenkarten der laufenden Schicht (Zustand, Tätigkeit, Ort, Aufgabe, Auslastung),
-   nächste Schicht kompakt, offene Aufgaben ohne Person (wer wäre qualifiziert, warum wartet es),
-   Qualifikationsmatrix mit Engpass-Analyse je Schicht (einzige qualifizierte Person).
+   Kennzahlen, darunter ein Band aus Lageplan (wer ist wo) und offenen Aufgaben ohne Person (wer wäre qualifiziert,
+   warum wartet es), dann die Personenkarten der laufenden Schicht als strenges Raster (Zustand + Dauer, Tätigkeit,
+   Ort, Aufgabe, Tagesverlauf), die nächste Schicht kompakt und die Qualifikationsmatrix mit Engpass-Analyse
+   (laufende Schicht aufgeklappt, andere Schicht einklappbar).
    Nur lesen (WF.sim.state). Der Tagesverlauf je Person wird lokal aufgezeichnet (Engine speichert keine
-   Personen-Historie): Stichprobe bei jedem Sim-Ereignis (auch während des Vorrechnens) und alle 250 ms.
-   Öffentlich: WF.people = { whereOf, qualified, coverage, bottlenecks, timeline, recentTasks }. */
+   Personen-Historie): Stichprobe bei jedem Sim-Ereignis (auch während des Vorrechnens) und alle 250 ms. Je Abschnitt
+   wird der Zuwachs des Engine-Zählers workSec mitgeschrieben – die dunkelgrüne Arbeitszeit im Verlauf ist damit
+   exakt die Arbeitszeit der Engine (eine Wahrheit mit Kachel „Arbeitszeit“ und Auslastung).
+   Öffentlich: WF.people = { whereOf, qualified, coverage, bottlenecks, timeline, recentTasks, workCheck }. */
 (function () {
   const WF = window.WF;
   const { esc, icon } = WF.ui;
@@ -22,10 +25,10 @@
     offShift: { c: 'var(--faint)', label: 'Nicht im Dienst' },
   };
   const PST_ORDER = ['working', 'driving', 'walking', 'idle', 'break'];
-  // Verlauf: „working“ wird geteilt in echte Arbeit und Bereitschaft an der Maschine (wartet auf Zyklusende/Messmaschine) –
-  // so passt der grüne Anteil zur Arbeitszeit der Engine (workSec zählt nur Arbeitsschritte, Fahrten und bemannte Bearbeitung).
+  // Verlauf: je Abschnitt zuerst die Arbeitszeit laut Engine (workSec-Zuwachs: Arbeitsschritte, Staplerfahrten,
+  // begleitete Bearbeitung), der Rest nach Zustand – „arbeitet“ ohne Zählerzuwachs = Bereitschaft an der Maschine.
   const SEG = {
-    work: { c: 'var(--st-run)', label: 'Arbeitet' },
+    work: { c: 'var(--st-run)', label: 'Arbeitszeit' },
     standby: { c: 'color-mix(in srgb,var(--st-run) 38%,var(--track))', label: 'Bereitschaft an der Maschine' },
     driving: { c: 'var(--mat)', label: 'Fährt Stapler' },
     walking: { c: 'var(--info)', label: 'Unterwegs' },
@@ -49,7 +52,10 @@
     setup: 'Ein&shy;richten', toolchange: 'Werkzeug&shy;wechsel', qs: 'Qualitäts&shy;prüfung', forklift: 'Stapler', assembly: 'Montage', repair: 'Instand&shy;haltung',
   };
   const ACT_COLS = ['setup', 'toolchange', 'qs', 'forklift', 'assembly', 'repair'];
-  const LVL_TXT = { stamm: 'Stammarbeitsplatz', qual: 'qualifiziert', full: 'qualifiziert', own: 'nur an eigenen Maschinen', sub: 'vertretend' };
+  /** kleine Linien-Icons, die WF.ui.icon nicht kennt (gleiches 24er Raster, gleiche Strichstärke) */
+  const SVG = (p, s) => `<svg class="ico" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+  const IC_PIN = (s = 13) => SVG('<path d="M12 21s-6.5-5.8-6.5-11a6.5 6.5 0 0 1 13 0c0 5.2-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/>', s);
+  const IC_TASK = (s = 13) => SVG('<rect x="5" y="4" width="14" height="17" rx="2.2"/><path d="M9 3.5h6M8.5 10h7M8.5 14h5"/>', s);
 
   // ------------------------------------------------------------------ Helfer
   const S = () => WF.sim && WF.sim.state;
@@ -219,10 +225,11 @@
   }
 
   // ------------------------------------------------------------------ Tagesverlauf (lokale Aufzeichnung)
-  const LOG = {};           // personId → [{t0, t1, s, k (taskId), ty, lb, m, o, a}]
+  const LOG = {};           // personId → [{t0, t1, s, ss, k (taskId), ty, lb, m, o, a, w (workSec-Zuwachs der Engine in diesem Abschnitt)}]
   const SEEN = {};          // taskId → {t, by}: zuletzt einer Person zugeteilt gesehen (für zurückgegebene Aufgaben)
+  const LASTW = {};         // personId → workSec bei der letzten Stichprobe
   let lastT = -1;
-  function resetLog() { for (const k in LOG) delete LOG[k]; for (const k in SEEN) delete SEEN[k]; lastT = -1; }
+  function resetLog() { for (const k in LOG) delete LOG[k]; for (const k in SEEN) delete SEEN[k]; for (const k in LASTW) delete LASTW[k]; lastT = -1; }
   function segState(p, Sx) {
     if (p.state !== 'working') return p.state;
     if (p.workRem > 0) return 'work';
@@ -240,12 +247,16 @@
       const p = Sx.people[id], tk = p.task;
       const arr = LOG[id] || (LOG[id] = []);
       const last = arr[arr.length - 1];
+      // Arbeitszeit-Zuwachs seit der letzten Stichprobe gehört zum bis jetzt laufenden Abschnitt (Tageswechsel: Zähler beginnt bei 0)
+      const ws = p.workSec || 0, pw = LASTW[id];
+      LASTW[id] = ws;
+      if (last && pw != null) { const dw = ws >= pw ? ws - pw : ws; if (dw > 0) last.w = (last.w || 0) + dw; }
       const k = tk ? tk.id : null, ss = segState(p, Sx);
       if (tk) SEEN[tk.id] = { t, by: id };
       if (last && last.s === p.state && last.k === k && last.ss === ss) { last.t1 = t; continue; }
       if (last) last.t1 = t;
-      if (p.state === 'offShift' && (!last || last.s === 'offShift')) { if (!last) arr.push({ t0: t, t1: t, s: 'offShift', k: null }); continue; }
-      arr.push({ t0: t, t1: t, s: p.state, ss, k, ty: tk ? tk.type : null, lb: tk ? tk.label : null, m: tk ? tk.machineId : null, o: tk ? tk.orderId : null, a: p.activity || '' });
+      if (p.state === 'offShift' && (!last || last.s === 'offShift')) { if (!last) arr.push({ t0: t, t1: t, s: 'offShift', k: null, w: 0 }); continue; }
+      arr.push({ t0: t, t1: t, s: p.state, ss, k, ty: tk ? tk.type : null, lb: tk ? tk.label : null, m: tk ? tk.machineId : null, o: tk ? tk.orderId : null, a: p.activity || '', w: 0 });
       if (arr.length > 1600) arr.splice(0, arr.length - 1600);
     }
   }
@@ -256,7 +267,31 @@
 
   function timeline(pid, t0, t1) {
     const arr = LOG[pid] || [];
-    return arr.filter(x => x.t1 > t0 && x.t0 < t1).map(x => ({ t0: Math.max(t0, x.t0), t1: Math.min(t1, x.t1), state: x.s, seg: x.ss || x.s, task: x.ty, label: x.lb, machineId: x.m, orderId: x.o, activity: x.a }));
+    return arr.filter(x => x.t1 > t0 && x.t0 < t1).map(x => {
+      const a = Math.max(t0, x.t0), b = Math.min(t1, x.t1), full = x.t1 - x.t0;
+      // beim Abschneiden am Fensterrand die Arbeitszeit anteilig mitnehmen
+      const w = full > 0 ? (x.w || 0) * Math.min(1, (b - a) / full) : 0;
+      return { t0: a, t1: b, state: x.s, seg: x.ss || x.s, task: x.ty, label: x.lb, machineId: x.m, orderId: x.o, activity: x.a, w };
+    });
+  }
+  /** Abschnitt → Teilstücke für Verlauf und Summen: Arbeitszeit (Engine) zuerst, danach der Rest nach Zustand */
+  function pieces(x) {
+    const d = x.t1 - x.t0; if (d <= 0 || x.state === 'offShift') return [];
+    const wk = U.clamp(x.w || 0, 0, d);
+    const rest = x.state === 'working' ? 'standby' : x.state === 'driving' ? 'driving' : (SEG[x.state] ? x.state : 'idle');
+    const out = [];
+    if (wk > 0) out.push({ t0: x.t0, t1: x.t0 + wk, k: x.state === 'driving' ? 'driving' : 'work', work: true });
+    if (d - wk > 0) out.push({ t0: x.t0 + wk, t1: x.t1, k: rest, work: false });
+    return out;
+  }
+  /** Summen je Kategorie im Fenster; work = Arbeitszeit ohne Stapler, fork = Staplerfahrten (beides zählt als Arbeitszeit) */
+  function totals(tl) {
+    const tot = { work: 0, fork: 0 };
+    for (const x of tl) for (const q of pieces(x)) {
+      if (q.work) { if (q.k === 'driving') tot.fork += q.t1 - q.t0; else tot.work += q.t1 - q.t0; }
+      else tot[q.k] = (tot[q.k] || 0) + (q.t1 - q.t0);
+    }
+    return tot;
   }
   /** zuletzt bearbeitete Aufgaben (aus der Aufzeichnung): [{id, type, label, machineId, orderId, t0, t1, active}] */
   function recentTasks(pid, n = 10) {
@@ -266,12 +301,19 @@
       let r = map.get(x.k);
       if (!r) { r = { id: x.k, type: x.ty, label: x.lb, machineId: x.m, orderId: x.o, t0: x.t0, t1: x.t1, work: 0 }; map.set(x.k, r); }
       r.t1 = Math.max(r.t1, x.t1);
-      if (x.s === 'working' || x.s === 'driving') r.work += x.t1 - x.t0;
+      r.work += x.w || 0;
     }
     const p = S().people[pid];
     const list = [...map.values()].sort((a, b) => b.t0 - a.t0).slice(0, n);
     for (const r of list) r.active = !!(p && p.task && p.task.id === r.id);
     return list;
+  }
+  /** Prüfhilfe: Arbeitszeit laut Engine vs. dunkelgrüner Anteil des Verlaufs heute (Sekunden) */
+  function workCheck(pid) {
+    const Sx = S(), p = Sx && Sx.people[pid]; if (!p) return null;
+    sample();
+    const d0 = Math.floor(Sx.t / DAY) * DAY, tot = totals(timeline(pid, d0, Sx.t + 1));
+    return { engine: p.workSec || 0, band: Math.round(tot.work + tot.fork) };
   }
 
   // ------------------------------------------------------------------ Schicht
@@ -314,7 +356,7 @@
   WF.ui.css(`
   .pe-root{display:flex;flex-direction:column;gap:14px;min-width:0}
   .pe-root .view-h{margin-bottom:0}
-  .pe-sh{display:flex;flex-direction:column;gap:12px;padding:12px 14px 12px}
+  .pe-sh{display:flex;flex-direction:column;gap:14px;padding:12px 14px 12px}
   .pe-facts{display:grid;grid-template-columns:minmax(0,1.25fr) repeat(3,minmax(0,1fr));gap:0;border:1px solid var(--line);border-radius:9px;background:var(--bg2);overflow:hidden}
   .pe-f{display:flex;align-items:center;gap:10px;padding:9px 13px;min-width:0}
   .pe-f + .pe-f{border-left:1px solid var(--line)}
@@ -326,32 +368,44 @@
   .pe-f .pe-ic{flex:none;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--c,var(--muted));background:color-mix(in srgb,var(--c,var(--muted)) 12%,transparent)}
   .pe-f .avatar{width:30px;height:30px;font-size:11px}
   .pe-f.click{cursor:pointer}.pe-f.click:hover b{text-decoration:underline;text-underline-offset:2px}
-  .pe-tl{position:relative;padding-top:18px}
-  .pe-tl-tr{position:relative;height:26px;border-radius:7px;background:var(--track)}
-  .pe-tl-sh{position:absolute;top:0;bottom:0;border-radius:7px;background:color-mix(in srgb,var(--c) 16%,var(--card2));border:1px solid color-mix(in srgb,var(--c) 34%,transparent);display:flex;align-items:center;padding:0 10px;font-size:11.5px;font-weight:600;color:var(--text2);overflow:hidden;white-space:nowrap}
-  .pe-tl-sh.cur{background:color-mix(in srgb,var(--c) 26%,var(--card2));color:var(--text)}
-  .pe-tl-sh span{position:relative;z-index:1}
-  .pe-tl-br{position:absolute;top:3px;bottom:3px;border-radius:4px;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--st-wait) 55%,transparent) 0 3px,transparent 3px 6px);border:1px solid color-mix(in srgb,var(--st-wait) 45%,transparent)}
-  .pe-tl-past{position:absolute;left:0;top:0;bottom:0;border-radius:7px 0 0 7px;background:color-mix(in srgb,var(--bg) 45%,transparent);pointer-events:none}
-  .pe-tl-now{position:absolute;top:-18px;bottom:-3px;width:0;border-left:2px solid var(--accent);pointer-events:none}
-  .pe-tl-now b{position:absolute;top:0;left:0;transform:translateX(-50%);font:600 10.5px/16px var(--f-ui);padding:0 6px;border-radius:5px;background:var(--accent);color:var(--accent-ink);white-space:nowrap;font-variant-numeric:tabular-nums}
-  .pe-tl-ax{position:relative;height:14px;margin-top:5px;font:500 10.5px/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums}
+
+  /* Schichtmodell des Tages: Beschriftung über dem Balken, Jetzt-Marke in der Zeitachse – nichts überdeckt sich */
+  .pe-tl{position:relative;padding:0 1px}
+  .pe-tl-cap{position:relative;height:17px;margin-bottom:5px}
+  .pe-tl-c{--c:var(--st-setup);position:absolute;top:0;display:flex;align-items:baseline;gap:7px;padding-left:1px;white-space:nowrap;overflow:hidden;font-size:11.5px;color:var(--muted)}
+  .pe-tl-c b{font-weight:600;color:var(--text2)}
+  .pe-tl-c em{font-style:normal;font-variant-numeric:tabular-nums;color:var(--faint)}
+  .pe-tl-c i{font-style:normal;display:inline-flex;align-items:center;gap:5px;color:var(--st-run);font-weight:600;font-size:11px}
+  .pe-tl-c i::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--st-run);box-shadow:0 0 0 3px color-mix(in srgb,var(--st-run) 20%,transparent)}
+  .pe-tl-c.cur b{color:var(--text)}
+  .pe-tl-tr{position:relative;height:14px;border-radius:5px;background:var(--track)}
+  .pe-tl-sh{position:absolute;top:0;bottom:0;border-radius:5px;background:color-mix(in srgb,var(--c) 22%,var(--card2));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--c) 34%,transparent)}
+  .pe-tl-sh.cur{background:color-mix(in srgb,var(--c) 42%,var(--card2));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--c) 60%,transparent)}
+  .pe-tl-br{position:absolute;top:2px;bottom:2px;border-radius:3px;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--st-wait) 70%,transparent) 0 2.5px,transparent 2.5px 5px);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--st-wait) 55%,transparent)}
+  .pe-tl-past{position:absolute;left:0;top:0;bottom:0;border-radius:5px 0 0 5px;background:color-mix(in srgb,var(--bg) 50%,transparent);pointer-events:none}
+  .pe-tl-now{position:absolute;top:-4px;bottom:-9px;width:0;border-left:2px solid var(--accent);pointer-events:none;box-shadow:0 0 8px color-mix(in srgb,var(--accent) 60%,transparent)}
+  .pe-tl-ax{position:relative;height:16px;margin-top:6px;font:500 10.5px/16px var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums}
   .pe-tl-ax span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}
-  .pe-tl-ax span:first-child{transform:none}.pe-tl-ax span:last-child{transform:translateX(-100%)}
-  .pe-tl-note{font-size:12px;color:var(--muted);margin-top:2px}
+  .pe-tl-ax span.s0{transform:none}.pe-tl-ax span.s1{transform:translateX(-100%)}
+  .pe-tl-ax span.now{z-index:1;font-weight:600;padding:0 6px;border-radius:5px;background:var(--accent);color:var(--accent-ink)}
+  .pe-tl-note{font-size:12px;color:var(--muted);margin-top:4px}
 
   .pe-kpis .kpi.click{cursor:pointer}
   .pe-kpis .kpi.click:hover{border-color:var(--line2)}
   .pe-kpis .kpi .v{display:flex;align-items:baseline;gap:4px}
   .pe-kpis .kpi .v small{margin-left:0}
+  .pe-kpis .kpi .s{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.4}
   .pe-kpis .kpi .s b{color:var(--text2);font-weight:600}
   .pe-kpis .kpi.warn{border-color:color-mix(in srgb,var(--st-wait) 45%,var(--line));background:color-mix(in srgb,var(--st-wait) 6%,var(--card))}
   .pe-kpis .kpi.warn .v{color:color-mix(in srgb,var(--st-wait) 70%,var(--text))}
   .pe-dist{display:flex;height:6px;border-radius:3px;overflow:hidden;gap:2px;margin-top:7px;background:transparent}
   .pe-dist i{display:block;height:100%;background:var(--c);min-width:3px;border-radius:2px}
 
-  .pe-main{display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:14px;align-items:start}
-  .pe-side{display:flex;flex-direction:column;gap:14px;min-width:0}
+  /* Band: Lageplan + offene Aufgaben (gleich hoch, Liste scrollt in sich) */
+  .pe-band{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(0,1fr);gap:14px;align-items:stretch}
+  .pe-band > .card{display:flex;flex-direction:column;min-width:0}
+  .pe-qcard{contain:size}
+  .pe-qcard .pe-q{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain}
   .pe-sec-h{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;margin-bottom:10px}
   .pe-sec-h h2{margin:0;font:600 15px/1.2 var(--f-ui)}
   .pe-sec-h .muted{font-size:12.5px}
@@ -359,83 +413,101 @@
   .pe-legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
   .pe-legend i{width:8px;height:8px;border-radius:50%;background:var(--c)}
   .pe-legend b{color:var(--text2);font-weight:600;font-variant-numeric:tabular-nums}
-  .pe-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(244px,1fr))}
 
-  .pe-card{--c:var(--st-idle);position:relative;display:flex;flex-direction:column;gap:8px;min-width:0;padding:11px 12px 10px 14px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);cursor:pointer;box-shadow:inset 3px 0 0 var(--c);transition:border-color .15s ease,background-color .15s ease}
-  .pe-card:hover{border-color:var(--line2);background:color-mix(in srgb,var(--card2) 55%,var(--card))}
-  .pe-card.sel{border-color:color-mix(in srgb,var(--accent) 70%,transparent)}
-  .pe-card.prev{opacity:.86}
-  .pe-ch{display:flex;align-items:center;gap:10px;min-width:0}
-  .pe-av{position:relative;flex:none;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font:600 12.5px/1 var(--f-ui);color:var(--text);background:var(--raise);border:1px solid var(--line2)}
-  .pe-av::after{content:"";position:absolute;right:-1px;bottom:-1px;width:11px;height:11px;border-radius:50%;background:var(--c);border:2px solid var(--card)}
+  /* Personenkarten: strenges Raster – jede Zeile hat ihren festen Platz */
+  /* höchstens 5 Spalten (10 Personen = 2 volle Reihen), mindestens 212 px je Karte */
+  .pe-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(max(212px,calc((100% - 48px) / 5)),1fr))}
+  .pe-card{--c:var(--st-idle);position:relative;display:flex;flex-direction:column;min-width:0;padding:12px 13px 11px 16px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);cursor:pointer;box-shadow:inset 3px 0 0 var(--c);transition:border-color .15s ease,background-color .15s ease}
+  .pe-card:hover{border-color:var(--line2);background:color-mix(in srgb,var(--card2) 50%,var(--card))}
+  .pe-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .pe-card.sel{border-color:color-mix(in srgb,var(--accent) 65%,transparent);box-shadow:inset 3px 0 0 var(--c),0 0 0 1px color-mix(in srgb,var(--accent) 40%,transparent)}
+  .pe-card.prev{background:color-mix(in srgb,var(--panel) 55%,var(--card))}
+  .pe-ch{display:flex;align-items:center;gap:10px;min-width:0;height:36px}
+  .pe-av{position:relative;flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font:600 12px/1 var(--f-ui);color:var(--text);background:var(--raise);border:1px solid var(--line2)}
+  .pe-av::after{content:"";position:absolute;right:-2px;bottom:-2px;width:11px;height:11px;border-radius:50%;background:var(--c);border:2px solid var(--card)}
   .pe-card[data-state="working"] .pe-av::after,.pe-card[data-state="driving"] .pe-av::after{animation:pePulse 1.8s ease-in-out infinite}
   @keyframes pePulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--c) 60%,transparent)}50%{box-shadow:0 0 0 4px color-mix(in srgb,var(--c) 0%,transparent)}}
-  .pe-nm{min-width:0;flex:1;display:flex;flex-direction:column;gap:1px}
-  .pe-nm b{font:600 15px/1.2 var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .pe-nm span{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .pe-since{flex:none;align-self:flex-start;margin-top:2px;font-size:11px;color:var(--faint);white-space:nowrap;font-variant-numeric:tabular-nums}
-  .pe-act{font-size:12.8px;line-height:20px;color:var(--text);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:40px;overflow-wrap:break-word}
-  .pe-act .pill{margin-right:7px;vertical-align:1px;line-height:16px;font-size:11px;padding:1px 8px 1px 6px}
+  .pe-nm{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
+  .pe-nm b{font:600 14.5px/1.15 var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pe-nm span{font-size:11.5px;line-height:1.2;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pe-st{display:flex;align-items:center;gap:8px;min-width:0;height:22px;margin-top:11px}
+  .pe-st .pill{flex:none}
+  .pe-since{margin-left:auto;flex:none;font-size:11.5px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .pe-since b{color:var(--text2);font-weight:600}
+  .pe-act{margin-top:8px;font-size:12.8px;line-height:19px;height:38px;color:var(--text);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
   .pe-act.dim{color:var(--muted)}
-  .pe-rows{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 10px;font-size:12px;align-items:baseline}
-  .pe-rows dt{color:var(--faint);font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase}
-  .pe-rows dd{margin:0;color:var(--text2);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .pe-rows dd .link{font-size:12px}
-  .pe-tchip{--c:var(--st-idle);display:inline-flex;align-items:center;gap:5px;font:600 11px/1.5 var(--f-ui);padding:0 7px;border-radius:5px;color:color-mix(in srgb,var(--c) 80%,var(--text));background:color-mix(in srgb,var(--c) 12%,transparent);border:1px solid color-mix(in srgb,var(--c) 30%,transparent);white-space:nowrap;margin-right:4px}
-  .pe-tchip i{width:6px;height:6px;border-radius:50%;background:var(--c)}
-  .pe-foot{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:8px;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
-  .pe-ft{display:flex;align-items:center;gap:8px;white-space:nowrap}
-  .pe-ft b{color:var(--text);font-weight:600}
-  .pe-ft .sp{flex:1}
-  .pe-ft .pe-ub{width:52px;min-width:0;flex:none}
+  .pe-rows{display:flex;flex-direction:column;gap:4px;margin-top:10px;padding-top:9px;border-top:1px solid var(--line)}
+  .pe-r{display:flex;align-items:center;gap:8px;min-width:0;height:21px;font-size:12px;color:var(--text2)}
+  .pe-r > .ico{flex:none;color:var(--faint)}
+  .pe-r .tx{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pe-r .tx:empty{display:none}
+  .pe-r .tx.none{color:var(--faint)}
+  .pe-r .link{font-size:12px}
+  .pe-tchip{--c:var(--st-idle);display:inline-flex;align-items:center;gap:5px;flex:0 1 auto;min-width:0;max-width:100%;font:600 11px/19px var(--f-ui);padding:0 7px;border-radius:5px;color:color-mix(in srgb,var(--c) 80%,var(--text));background:color-mix(in srgb,var(--c) 12%,transparent);border:1px solid color-mix(in srgb,var(--c) 30%,transparent);white-space:nowrap}
+  .pe-tchip i{flex:none;width:6px;height:6px;border-radius:50%;background:var(--c)}
+  .pe-tchip span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .pe-foot{display:flex;flex-direction:column;gap:5px;margin-top:11px}
   .pe-mini{position:relative;height:8px}
   .pe-mini svg{display:block;width:100%;height:8px;border-radius:3px}
-  .pe-mini .nw{position:absolute;top:-2px;bottom:-2px;width:0;border-left:1.5px solid var(--text)}
-  .pe-mini-ax{display:flex;justify-content:space-between;font:500 9.5px/1 var(--f-ui);color:var(--faint);margin-top:-2px}
-  .pe-tag{font:600 10px/1 var(--f-ui);letter-spacing:.04em;padding:3px 6px;border-radius:5px;color:var(--muted);border:1px solid var(--line2);white-space:nowrap}
+  .pe-mini .nw{position:absolute;top:-3px;bottom:-3px;width:0;border-left:1.5px solid var(--text)}
+  .pe-mini-ax{display:flex;justify-content:space-between;font:500 9.5px/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums}
+  .pe-ft{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;margin-top:2px}
+  .pe-ft b{color:var(--text);font-weight:600}
 
-  .pe-map{padding:10px 12px 4px}
+  /* Lageplan */
+  .pe-map{padding:10px 12px 2px;min-width:0}
   .pe-map svg{display:block;width:100%;height:auto}
-  .pe-map-p{cursor:pointer;transition:transform .25s linear}
-  .pe-map-p circle{stroke:var(--card)}
+  .pe-map-p{cursor:pointer}
+  .pe-map-p .hit{fill:transparent}
+  .pe-map-p text{font-family:var(--f-ui);font-weight:700;fill:var(--accent-ink);pointer-events:none}
   .pe-map-m{cursor:pointer}
   .pe-map-m:hover rect{stroke:var(--text2)!important}
-  .pe-map-lg{display:flex;flex-wrap:wrap;gap:3px 12px;padding:4px 14px 11px;font-size:11px;color:var(--muted)}
+  .pe-map-lg{display:flex;flex-wrap:wrap;gap:3px 14px;padding:6px 14px 11px;font-size:11px;color:var(--muted)}
   .pe-map-lg span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
-  .pe-map-lg .dot{width:8px;height:8px;border-radius:50%;background:var(--c)}
+  .pe-map-lg .dot{display:inline-grid;place-items:center;width:15px;height:15px;border-radius:50%;background:var(--c);color:var(--accent-ink);font:700 7.5px/1 var(--f-ui);font-style:normal}
   .pe-map-lg .ln{width:14px;height:0;border-top:1.5px dashed var(--info)}
   .pe-map-lg .sq{width:10px;height:8px;border-radius:2px;background:color-mix(in srgb,var(--st-run) 30%,var(--card2));border:1px solid color-mix(in srgb,var(--st-run) 60%,transparent)}
+  .pe-map-lg .fk{width:10px;height:10px;border-radius:2px;background:var(--mat)}
+
+  /* Offene Aufgaben */
   .pe-q{display:flex;flex-direction:column}
   .pe-qi{--c:var(--st-idle);display:flex;flex-direction:column;gap:5px;padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer}
   .pe-qi:hover{background:color-mix(in srgb,var(--raise) 35%,transparent)}
   .pe-qi:last-child{border-bottom:0}
-  .pe-qi-h{display:flex;align-items:center;gap:8px;min-width:0}
-  .pe-qi-h{align-items:flex-start}
-  .pe-qi-h .pe-tchip{margin-top:1px}
+  .pe-qi-h{display:flex;align-items:flex-start;gap:8px;min-width:0}
+  .pe-qi-h .pe-tchip{margin-top:1px;flex:none}
   .pe-qi-h b{font-weight:600;font-size:13px;line-height:1.35;min-width:0;flex:1}
-  .pe-qi-h .pe-wait{flex:none;font:600 12px/1 var(--f-ui);font-variant-numeric:tabular-nums;color:var(--text2);white-space:nowrap}
+  .pe-qi-h .pe-wait{flex:none;font:600 12px/1.6 var(--f-ui);font-variant-numeric:tabular-nums;color:var(--text2);white-space:nowrap}
   .pe-qi-h .pe-wait.warn{color:var(--st-wait)}
   .pe-qi-who{font-size:12px;color:var(--muted);line-height:1.45}
   .pe-qi-who b{color:var(--text2);font-weight:600}
   .pe-qi-why{font-size:12px;line-height:1.45;color:color-mix(in srgb,var(--st-wait) 72%,var(--text));display:flex;gap:6px}
   .pe-qi-why .ico{flex:none;margin-top:1px}
-  .pe-qi.held{cursor:pointer}
   .pe-qi.held .pe-qi-h b{font-weight:500;color:var(--text2)}
-  .pe-q-sub{padding:8px 14px 6px;font:600 10px/1 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);border-bottom:1px solid var(--line);background:var(--bg2)}
-  .pe-q-empty{padding:22px 16px;text-align:center;color:var(--muted);font-size:12.5px;display:flex;flex-direction:column;align-items:center;gap:8px}
+  .pe-q-sub{position:sticky;top:0;z-index:1;padding:8px 14px 6px;font:600 10px/1 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);border-bottom:1px solid var(--line);background:var(--bg2)}
+  .pe-q-empty{flex:1;padding:22px 16px;text-align:center;color:var(--muted);font-size:12.5px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
   .pe-q-empty .ico{color:var(--st-run)}
+  .pe-q-empty.sm{flex:none;flex-direction:row;padding:12px 14px;justify-content:flex-start;text-align:left;border-bottom:1px solid var(--line)}
+  .pe-qa{display:flex;align-items:center;gap:9px;min-width:0;height:36px;padding:0 14px;border-bottom:1px solid color-mix(in srgb,var(--line) 70%,transparent);cursor:pointer;font-size:12.5px}
+  .pe-qa:last-child{border-bottom:0}
+  .pe-qa:hover{background:color-mix(in srgb,var(--raise) 35%,transparent)}
+  .pe-qa .pe-tchip{flex:none}
+  .pe-qa .w{flex:1;min-width:0;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pe-qa .who{--c:var(--st-idle);flex:none;display:inline-flex;align-items:center;gap:6px;color:var(--text);font-weight:600;white-space:nowrap}
+  .pe-qa .who i{width:7px;height:7px;border-radius:50%;background:var(--c)}
 
-  .pe-next{display:flex;flex-direction:column}
-  .pe-nx{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line);cursor:pointer;min-width:0}
-  .pe-nx:last-child{border-bottom:0}
-  .pe-nx:hover{background:color-mix(in srgb,var(--raise) 35%,transparent)}
-  .pe-nx .avatar{width:28px;height:28px;font-size:10.5px}
-  .pe-nx div{min-width:0;flex:1}
-  .pe-nx b{display:block;font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .pe-nx div span{display:block;font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .pe-nx em{font-style:normal;flex:none;font-size:11px;color:var(--faint)}
-  .pe-nx em.on{color:var(--st-run)}
+  /* Nächste Schicht (kompakte Leiste) */
+  .pe-nxs .card-h{flex-wrap:wrap}
+  .pe-nx{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;padding:10px 12px 12px}
+  .pe-nxp{display:flex;align-items:center;gap:9px;min-width:0;padding:7px 9px;border-radius:8px;border:1px solid var(--line);background:var(--bg2);cursor:pointer;color:var(--text);text-align:left;font:inherit}
+  .pe-nxp:hover{border-color:var(--line2);background:color-mix(in srgb,var(--raise) 40%,var(--bg2))}
+  .pe-nxp .avatar{width:28px;height:28px;font-size:10.5px}
+  .pe-nxp > span:not(.avatar){min-width:0;display:flex;flex-direction:column;gap:1px;flex:1}
+  .pe-nxp b{font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pe-nxp small{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pe-nxp em{flex:none;font-style:normal;width:7px;height:7px;border-radius:50%;background:var(--st-run);box-shadow:0 0 0 3px color-mix(in srgb,var(--st-run) 20%,transparent)}
 
+  /* Qualifikationsmatrix */
   .pe-mx-card .card-h{flex-wrap:wrap}
   .pe-mx-lg{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:var(--muted);align-items:center}
   .pe-mx-lg span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
@@ -446,25 +518,35 @@
   .pe-mx thead th small{display:block;font:500 10px/1.2 var(--f-mono);color:var(--faint);margin-top:3px;letter-spacing:0}
   .pe-mx thead tr.grp th{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);padding:8px 6px 4px;border-bottom:0;text-align:left}
   .pe-mx thead tr.grp th.g{border-bottom:1px solid var(--line2)}
-  .pe-mx .nm{position:sticky;left:0;z-index:1;text-align:left;background:var(--card);padding:6px 12px 6px 14px;min-width:210px;max-width:240px}
+  .pe-mx .nm{position:sticky;left:0;z-index:1;text-align:left;background:var(--card);padding:4px 12px 4px 14px;min-width:210px;max-width:240px}
   .pe-mx thead .nm{z-index:2}
   .pe-mx td.nm{border-right:1px solid var(--line)}
   .pe-mx thead th.nm{border-right:1px solid var(--line)}
   .pe-mx .sep{border-left:1px solid var(--line2)}
-  .pe-mx td{height:36px;border-bottom:1px solid color-mix(in srgb,var(--line) 70%,transparent);min-width:52px}
+  .pe-mx td{height:38px;border-bottom:1px solid color-mix(in srgb,var(--line) 70%,transparent);min-width:52px}
   .pe-mx tbody tr.pr{cursor:pointer}
   .pe-mx tbody tr.pr:hover td{background:color-mix(in srgb,var(--raise) 35%,var(--card))}
   .pe-mx tbody tr.pr.on td.nm{box-shadow:inset 2px 0 0 var(--accent)}
   .pe-mx-p{display:flex;align-items:center;gap:9px;min-width:0}
   .pe-mx-p .avatar{width:24px;height:24px;font-size:9.5px}
   .pe-mx-p div{min-width:0}
-  .pe-mx-p b{display:block;font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)}
-  .pe-mx-p div span{display:block;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pe-mx-p b{display:block;font-weight:600;font-size:12.5px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)}
+  .pe-mx-p div span{display:block;font-size:11px;line-height:1.25;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .pe-mx-p i{flex:none;width:7px;height:7px;border-radius:50%;background:var(--c);margin-left:auto}
-  .pe-mx tr.shr td{height:auto;padding:10px 14px 7px;text-align:left;background:var(--bg2);border-bottom:1px solid var(--line);font:600 10.5px/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
-  .pe-mx tr.shr td.nm{background:var(--bg2)}
-  .pe-mx tr.shr td span{letter-spacing:0;text-transform:none;font-weight:500;color:var(--faint);margin-left:8px;font-size:11.5px}
-  .pe-mx tr.shr td em{font-style:normal;color:var(--st-run);margin-left:8px;letter-spacing:0;text-transform:none;font-size:11.5px}
+  .pe-mx tr.shr td{height:44px;padding:0;text-align:left;background:var(--bg2);border-bottom:1px solid var(--line);cursor:pointer}
+  .pe-mx tr.shr:hover td{background:color-mix(in srgb,var(--raise) 40%,var(--bg2))}
+  .pe-mx tr.shr td.nm{max-width:none}
+  .pe-shr{position:sticky;left:0;display:inline-flex;align-items:center;gap:8px 10px;flex-wrap:wrap;padding:8px 14px;max-width:min(100%,calc(100vw - 72px))}
+  .pe-shr .ico{flex:none;color:var(--muted);transition:transform .18s ease}
+  .pe-mx tr.shr.open .pe-shr > .ico:first-child{transform:rotate(90deg)}
+  .pe-shr b{font:600 10.5px/1.2 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--text2)}
+  .pe-shr > span{font-size:11.5px;color:var(--faint);white-space:nowrap}
+  .pe-shr em{font-style:normal;display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--st-run)}
+  .pe-shr em::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--st-run)}
+  .pe-shr-w{--c:var(--st-wait);display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:6px;color:color-mix(in srgb,var(--c) 85%,white);background:color-mix(in srgb,var(--c) 11%,transparent);border:1px solid color-mix(in srgb,var(--c) 34%,transparent);white-space:nowrap}
+  .pe-shr-w.crit{--c:var(--st-fault)}
+  .pe-shr-w .ico{color:var(--c)}
+  .pe-shr-n{font-size:11.5px;color:var(--muted)}
   .pe-mx tr.cov td{height:34px;background:color-mix(in srgb,var(--bg2) 60%,var(--card));border-bottom:1px solid var(--line)}
   .pe-mx tr.cov td.nm{font-size:11.5px;color:var(--muted);background:color-mix(in srgb,var(--bg2) 60%,var(--card))}
   .pe-d{display:inline-block;width:13px;height:13px;border-radius:50%;vertical-align:middle}
@@ -479,29 +561,32 @@
   .pe-cv small{font-weight:500;color:var(--faint);margin-left:1px;font-size:10.5px}
   .pe-cv.warn{color:color-mix(in srgb,var(--st-wait) 85%,white);background:color-mix(in srgb,var(--st-wait) 15%,transparent);border:1px solid color-mix(in srgb,var(--st-wait) 40%,transparent)}
   .pe-cv.crit{color:color-mix(in srgb,var(--st-fault) 85%,white);background:color-mix(in srgb,var(--st-fault) 15%,transparent);border:1px solid color-mix(in srgb,var(--st-fault) 40%,transparent)}
-  .pe-bn{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:12px 14px 14px;border-top:1px solid var(--line)}
-  .pe-bn-s{display:flex;flex-direction:column;gap:7px;min-width:0}
-  .pe-bn-s h4{margin:0 0 2px;font:600 10.5px/1 var(--f-ui);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
+  .pe-bn{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 22px;padding:12px 14px 14px;border-top:1px solid var(--line)}
+  .pe-bn:empty{display:none}
+  .pe-bn.one{grid-template-columns:minmax(0,1fr)}
+  .pe-bn-s{display:flex;flex-direction:column;min-width:0}
+  .pe-bn-s h4{margin:0 0 8px;font:600 10.5px/1 var(--f-ui);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
   .pe-bn-s h4 em{font-style:normal;letter-spacing:0;text-transform:none;font-weight:500;color:var(--faint)}
-  .pe-bn-s{gap:0}
-  .pe-bn-s h4{margin-bottom:8px}
+  .pe-bn-l{display:grid;grid-template-columns:minmax(0,1fr);column-gap:22px}
+  .pe-bn.one .pe-bn-l{grid-template-columns:repeat(2,minmax(0,1fr))}
   .pe-bn-i{--c:var(--st-wait);display:flex;gap:9px;align-items:flex-start;font-size:12.5px;line-height:1.45;color:var(--text2);padding:6px 2px;border-bottom:1px solid color-mix(in srgb,var(--line) 70%,transparent)}
-  .pe-bn-i:last-child{border-bottom:0}
   .pe-bn-i .ico{flex:none;color:var(--c);margin-top:1px}
   .pe-bn-i b{color:var(--text);font-weight:600}
   .pe-bn-i.crit{--c:var(--st-fault)}
   .pe-bn-i.key{--c:var(--st-fault);padding:8px 10px;margin-bottom:6px;border-radius:8px;border:1px solid color-mix(in srgb,var(--c) 30%,transparent);background:color-mix(in srgb,var(--c) 7%,var(--bg2))}
+  .pe-bn-k{grid-column:1/-1}
 
-  @media (max-width:1240px){.pe-main{grid-template-columns:minmax(0,1fr) 330px}}
   .pe-kpis{grid-template-columns:repeat(5,minmax(0,1fr))}
-  @media (max-width:900px){.pe-kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}}
-  @media (max-width:560px){.pe-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.pe-kpis .kpi:last-child:nth-child(odd){grid-column:1/-1}}
-  @media (max-width:1100px) and (min-width:761px){.pe-side{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}.pe-side > section:first-child{grid-row:span 2}}
-  @media (max-width:1100px){.pe-main{grid-template-columns:minmax(0,1fr)}.pe-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.pe-f:nth-child(3){border-left:0}.pe-f:nth-child(n+3){border-top:1px solid var(--line)}}
-  @media (max-width:760px){.pe-bn{grid-template-columns:minmax(0,1fr)}}
-  @media (max-width:560px){.pe-act{min-height:0}.pe-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.pe-f{padding:8px 10px;gap:8px}.pe-f:first-child,.pe-f:last-child{grid-column:1/-1}.pe-f:nth-child(2){border-left:0}.pe-f:nth-child(3){border-left:1px solid var(--line)}.pe-f:nth-child(n+2){border-top:1px solid var(--line)}
-    .pe-f .pe-ic{display:none}.pe-f b{font-size:13px}.pe-tl-ax span.odd{display:none}.pe-tl-sh em{display:none}.pe-grid{grid-template-columns:minmax(0,1fr)}
-    .pe-mx .nm{min-width:150px;max-width:160px;padding-left:10px}.pe-mx-p div span{display:none}.pe-tl-sh{font-size:10.5px;padding:0 6px}.pe-legend{margin-left:0}}
+  @media (max-width:1100px){.pe-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.pe-f:nth-child(3){border-left:0}.pe-f:nth-child(n+3){border-top:1px solid var(--line)}}
+  @media (max-width:999px){.pe-band{grid-template-columns:minmax(0,1fr)}.pe-qcard{contain:none}.pe-qcard .pe-q{flex:none;overflow:visible}}
+  @media (max-width:900px){.pe-kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}.pe-bn{grid-template-columns:minmax(0,1fr)}.pe-bn.one .pe-bn-l{grid-template-columns:minmax(0,1fr)}
+    .pe-map{overflow-x:auto;overscroll-behavior-x:contain;-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent)}
+    .pe-map svg{min-width:680px}}
+  @media (max-width:560px){.pe-act{height:auto;max-height:38px}.pe-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.pe-kpis .kpi:last-child:nth-child(odd){grid-column:1/-1}
+    .pe-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.pe-f{padding:8px 10px;gap:8px}.pe-f:first-child,.pe-f:last-child{grid-column:1/-1}.pe-f:nth-child(2){border-left:0}.pe-f:nth-child(3){border-left:1px solid var(--line)}.pe-f:nth-child(n+2){border-top:1px solid var(--line)}
+    .pe-f .pe-ic{display:none}.pe-f b{font-size:13px}.pe-tl-c em{display:none}.pe-tl-c i{font-size:0;gap:0}
+    .pe-grid{grid-template-columns:minmax(0,1fr)}.pe-nx{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .pe-mx .nm{min-width:150px;max-width:160px;padding-left:10px}.pe-mx-p div span{display:none}.pe-legend{margin-left:0}}
 
   /* Detail-Drawer */
   .pe-dh{display:flex;flex-direction:column;gap:9px}
@@ -514,6 +599,7 @@
   .pe-dh-where .ico{color:var(--muted)}
   .pe-box{--c:var(--info);border-radius:9px;padding:10px 12px;background:color-mix(in srgb,var(--c) 8%,var(--bg2));border:1px solid color-mix(in srgb,var(--c) 28%,transparent);font-size:12.5px;line-height:1.5;color:var(--text2);display:flex;flex-direction:column;gap:5px}
   .pe-box-h{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;color:var(--text)}
+  .pe-box-h .pe-tchip{flex:none}
   .pe-box-h small{margin-left:auto;font-weight:500;color:var(--muted);font-size:11.5px;white-space:nowrap}
   .pe-box .row{gap:6px}
   .pe-steps{display:flex;flex-wrap:wrap;align-items:center;gap:4px 3px;margin-top:2px}
@@ -528,8 +614,8 @@
   .pe-s .v{font:600 20px/1.15 var(--f-cond);white-space:nowrap}
   .pe-s .v small{font:500 12px/1 var(--f-ui);color:var(--muted);margin-left:3px}
   .pe-s .bar{height:4px;margin-top:2px}
-  .pe-band{display:flex;flex-direction:column;gap:5px}
-  .pe-band svg{display:block;width:100%;height:22px;border-radius:5px}
+  .pe-band-d{display:flex;flex-direction:column;gap:5px}
+  .pe-band-d svg{display:block;width:100%;height:22px;border-radius:5px}
   .pe-band-ax{position:relative;height:12px;font:500 10px/1 var(--f-ui);color:var(--faint);font-variant-numeric:tabular-nums}
   .pe-band-ax span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}
   .pe-band-ax span:first-child{transform:none}.pe-band-ax span:last-child{transform:translateX(-100%)}
@@ -537,7 +623,8 @@
   .pe-band-lg span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
   .pe-band-lg i{width:8px;height:8px;border-radius:2px;background:var(--c)}
   .pe-band-lg b{color:var(--text2);font-weight:600;font-variant-numeric:tabular-nums}
-  .pe-band-note{font-size:11px;color:var(--faint)}
+  .pe-band-lg span.main b{color:var(--text)}
+  .pe-band-note{font-size:11px;color:var(--faint);line-height:1.45}
   .pe-tl-list{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--card)}
   .pe-tli{--c:var(--st-idle);display:grid;grid-template-columns:minmax(86px,max-content) minmax(0,1fr) auto;gap:10px;align-items:center;padding:7px 10px;border-bottom:1px solid var(--line);font-size:12.5px;box-shadow:inset 3px 0 0 var(--c)}
   .pe-tli:last-child{border-bottom:0}
@@ -557,6 +644,8 @@
   // ------------------------------------------------------------------ Ansicht
   let root = null, R = {}, cards = {}, gridSig = '', qSig = '', nxSig = '', mxSig = '', bnSig = '', tlSig = '';
   let heldCache = { t: -1, map: {} };
+  const mxOpen = {};        // Schicht-ID → vom Nutzer auf-/zugeklappt (sonst: laufende Schicht offen, andere zu)
+  let mxShift = null;
 
   function mount(el) {
     root = el;
@@ -582,28 +671,26 @@
           <div class="kpi"><div class="l">Ø Auslastung heute</div><div class="v" data-r="kUtil">–</div><div class="s" data-r="kUtilS">–</div></div>
           <div class="kpi click" data-r="kOpenBox" title="Zur Liste der offenen Aufgaben"><div class="l">Aufgaben ohne Person</div><div class="v" data-r="kOpen">–</div><div class="s" data-r="kOpenS">–</div></div>
         </div>
-        <div class="pe-main">
-          <section aria-label="Im Dienst">
-            <div class="pe-sec-h"><h2 data-r="gridT">Im Dienst</h2><span class="muted" data-r="gridSub"></span>
-              <div class="pe-legend" data-r="gridLg"></div></div>
-            <div class="pe-grid" data-r="grid"></div>
+        <div class="pe-band">
+          <section class="card" aria-label="Lageplan">
+            <div class="card-h"><h3>Lageplan · wer ist wo</h3><span class="muted" data-r="mapSub"></span></div>
+            <div class="pe-map" data-r="map"></div>
+            <div class="pe-map-lg"><span><i class="dot" style="--c:var(--st-run)">AB</i>Person (Farbe = Zustand)</span><span><i class="ln"></i>unterwegs zum Ziel</span><span><i class="sq"></i>Maschine (Farbe = Zustand)</span><span><i class="fk"></i>Stapler</span></div>
           </section>
-          <div class="pe-side">
-            <section class="card" aria-label="Lageplan">
-              <div class="card-h"><h3>Lageplan · wer ist wo</h3><span class="muted" data-r="mapSub"></span></div>
-              <div class="pe-map" data-r="map"></div>
-              <div class="pe-map-lg"><span><i class="dot" style="--c:var(--st-run)"></i>Person (Farbe = Zustand)</span><span><i class="ln"></i>unterwegs zum Ziel</span><span><i class="sq"></i>Maschine (Farbe = Maschinenzustand)</span></div>
-            </section>
-            <section class="card" data-r="qCard" aria-label="Offene Aufgaben">
-              <div class="card-h"><h3>Offene Aufgaben</h3><span class="muted" data-r="qSub"></span></div>
-              <div class="pe-q" data-r="q"></div>
-            </section>
-            <section class="card" aria-label="Nächste Schicht">
-              <div class="card-h"><h3 data-r="nxT">Nächste Schicht</h3><span class="muted" data-r="nxSub"></span></div>
-              <div class="pe-next" data-r="nx"></div>
-            </section>
-          </div>
+          <section class="card pe-qcard" data-r="qCard" aria-label="Offene Aufgaben">
+            <div class="card-h"><h3>Offene Aufgaben</h3><span class="muted" data-r="qSub"></span></div>
+            <div class="pe-q" data-r="q"></div>
+          </section>
         </div>
+        <section aria-label="Im Dienst">
+          <div class="pe-sec-h"><h2 data-r="gridT">Im Dienst</h2><span class="muted" data-r="gridSub"></span>
+            <div class="pe-legend" data-r="gridLg"></div></div>
+          <div class="pe-grid" data-r="grid"></div>
+        </section>
+        <section class="card pe-nxs" aria-label="Nächste Schicht">
+          <div class="card-h"><h3 data-r="nxT">Nächste Schicht</h3><span class="muted" data-r="nxSub"></span></div>
+          <div class="pe-nx" data-r="nx"></div>
+        </section>
         <section class="card pe-mx-card" aria-label="Qualifikationsmatrix">
           <div class="card-h"><h3>Qualifikationsmatrix</h3>
             <div class="pe-mx-lg">
@@ -632,44 +719,77 @@
     });
     R.nx.addEventListener('click', (e) => { const r = e.target.closest('[data-id]'); if (r) WF.app.select('person', r.dataset.id); });
     R.map.addEventListener('click', (e) => { const g = e.target.closest('[data-pid]'); if (g) { WF.app.select('person', g.dataset.pid); return; } const m = e.target.closest('[data-mid]'); if (m && hasDetail('machine')) WF.app.select('machine', m.dataset.mid); });
-    R.mx.addEventListener('click', (e) => { const r = e.target.closest('tr[data-id]'); if (r) WF.app.select('person', r.dataset.id); });
+    R.mx.addEventListener('click', (e) => {
+      const h = e.target.closest('tr[data-shift]');
+      if (h) { const id = h.dataset.shift; mxOpen[id] = !isOpen(id); mxSig = bnSig = ''; renderMatrix(WF.sim.shift()); renderBottlenecks(WF.sim.shift()); return; }
+      const r = e.target.closest('tr[data-id]'); if (r) WF.app.select('person', r.dataset.id);
+    });
+    R.mx.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('tr[data-shift]')) { e.preventDefault(); e.target.click(); } });
     WF.bus.on('select', (s) => {
       for (const id in cards) cards[id].el.classList.toggle('sel', !!(s && s.kind === 'person' && s.id === id));
       if (R.mx) R.mx.querySelectorAll('tr[data-id]').forEach(r => r.classList.toggle('on', !!(s && s.kind === 'person' && s.id === r.dataset.id)));
     });
     WF.bus.on('sim:reset', () => { gridSig = qSig = nxSig = mxSig = bnSig = tlSig = ''; });
     buildMap();
+    if (window.ResizeObserver) {
+      new ResizeObserver(() => { const w = R.map.clientWidth; if (w && Math.abs(w - mapW) > 8) buildMap(); }).observe(R.map);
+      new ResizeObserver(() => { const w = R.tl.clientWidth; if (w && Math.abs(w - tlW) > 8) { tlW = w; tlSig = ''; } }).observe(R.tl);
+      // Breiten nur hier messen (nicht in update(): kein erzwungenes Layout 4×/s)
+      new ResizeObserver(() => { gridW = R.grid.clientWidth; nxW = R.nx.clientWidth; }).observe(R.grid);
+    }
   }
 
-  // ---------------- Lageplan (2D, Meter): Stationen, Gänge, Personen live
-  let mapRefs = null;
-  const MAP_LBL = { CRIB: 'Werkzeuge', MAINT: 'Instandh.', OFFICE: 'Büro', RAW: 'Rohmaterial', PUF: 'Pufferlager', WE: 'Wareneingang', SPERR: 'Sperrlager', EXT: 'Fremdbearb.', VERSAND: 'Versand', CHG: '', QS: 'QS Messraum', M13: 'M13' };
+  // ---------------- Lageplan (2D, Meter): Stationen, Gänge, Personen live – Schrift und Punkte in Bildschirm-Pixeln
+  let mapRefs = null, mapW = 0, gridW = 0, nxW = 0;
+  const MAP_LBL = { CRIB: ['Werkzeugausgabe', 'Werkzeuge'], MAINT: ['Instandhaltung', 'Instandh.'], OFFICE: ['Leitstand', 'Büro'], RAW: ['Rohmaterial', 'Rohmat.'],
+    PUF: ['Pufferlager', 'Puffer'], WE: ['Wareneingang', 'WE'], SPERR: ['Sperrlager', 'Sperr'], EXT: ['Fremdbearbeitung', 'Härterei'], VERSAND: ['Versand'], CHG: ['AGV laden', 'AGV'], QS: ['QS · Messraum', 'Messraum', 'QS'], M13: ['Montage'] };
   function buildMap() {
     const H = P().hall, G = P().graph;
-    let h = `<svg viewBox="-1 -1 ${H.w + 2} ${H.d + 2}" role="img" aria-label="Lageplan der Halle mit Personen">`;
-    h += `<rect x="0" y="0" width="${H.w}" height="${H.d}" rx=".8" style="fill:var(--bg2);stroke:var(--line2)" stroke-width=".25"/>`;
+    const vw = H.w + 2;
+    const wpx = Math.max(280, R.map.clientWidth - 24 || 0);
+    // Breite Bildschirme: höchstens ~440 px hoch (zentriert), Telefon/Tablet: mindestens 680 px breit im Scroller
+    const phone = window.matchMedia('(max-width: 900px)').matches;
+    const svgW = phone ? Math.max(680, wpx) : Math.min(wpx, Math.round(440 * vw / (H.d + 2)));
+    mapW = R.map.clientWidth;
+    const u = vw / svgW;                          // Meter je Bildschirm-Pixel
+    const fs = (px) => (px * u).toFixed(3);
+    const tw = (txt, px, wt) => String(txt).length * px * u * (wt ? 0.58 : 0.54);   // grobe Textbreite (Barlow)
+    let h = `<svg viewBox="-1 -1 ${vw} ${H.d + 2}" role="img" aria-label="Lageplan der Halle mit Personen"${phone ? '' : ` style="max-width:${svgW}px;margin:0 auto"`}>`;
+    h += `<rect x="0" y="0" width="${H.w}" height="${H.d}" rx=".8" style="fill:var(--bg2);stroke:var(--line2)" stroke-width="${fs(1)}"/>`;
     for (const [a, b] of G.edges) { const A = G.nodes[a], B = G.nodes[b]; h += `<line x1="${A.x}" y1="${A.z}" x2="${B.x}" y2="${B.z}" style="stroke:var(--track)" stroke-width="2.2" stroke-linecap="round"/>`; }
-    for (const d of H.doors || []) if (d.wall === 'front') h += `<line x1="${d.x}" y1="${H.d}" x2="${d.x + d.w}" y2="${H.d}" style="stroke:var(--mat)" stroke-width=".6" opacity=".7"><title>${esc(d.name)}</title></line>`;
+    for (const d of H.doors || []) if (d.wall === 'front') h += `<line x1="${d.x}" y1="${H.d}" x2="${d.x + d.w}" y2="${H.d}" style="stroke:var(--mat)" stroke-width="${fs(3)}" opacity=".75"><title>${esc(d.name)}</title></line>`;
     for (const s of P().stations) {
       const f = s.footprint; if (!f) continue;
       const isM = !!(s.kind === 'machine' || s.kind === 'qs' || s.kind === 'assembly');
-      h += `<g ${isM ? `data-mid="${esc(s.id)}" class="pe-map-m"` : ''}><rect data-st="${esc(s.id)}" x="${f.x}" y="${f.z}" width="${f.w}" height="${f.d}" rx=".5" style="fill:var(--card2);stroke:var(--line2)" stroke-width=".18"><title>${esc(s.name)}${isM ? ' (' + esc(s.id) + ')' : ''}</title></rect>`;
-      if (s.kind === 'machine') h += `<text x="${f.x + f.w / 2}" y="${f.z + f.d / 2 + 0.5}" text-anchor="middle" style="fill:var(--text2);font:600 1.45px var(--f-ui)" pointer-events="none">${esc(s.id)}</text>`;
-      else { const lb = MAP_LBL[s.id] != null ? MAP_LBL[s.id] : s.short; if (lb) h += `<text x="${f.x + 0.6}" y="${f.z + 1.5}" style="fill:${isM ? 'var(--text2)' : 'var(--muted)'};font:600 ${isM ? 1.2 : 1.0}px var(--f-ui)" pointer-events="none">${esc(lb)}</text>`; }
+      h += `<g ${isM ? `data-mid="${esc(s.id)}" class="pe-map-m"` : ''}><rect data-st="${esc(s.id)}" x="${f.x}" y="${f.z}" width="${f.w}" height="${f.d}" rx=".5" style="fill:var(--card2);stroke:var(--line2)" stroke-width="${fs(1)}"><title>${esc(s.name)}${isM ? ' (' + esc(s.id) + ')' : ''}</title></rect>`;
+      if (s.kind === 'machine') {
+        // Kennung immer (≥ 10,5 px), Kurzname darunter nur, wenn er in die Grundfläche passt
+        const two = tw(s.short, 10, false) <= f.w - 0.6 && f.d >= 26 * u;
+        const cy = f.z + f.d / 2;
+        h += `<text x="${f.x + f.w / 2}" y="${(two ? cy - 2 * u : cy + 3.8 * u).toFixed(2)}" text-anchor="middle" style="fill:var(--text);font:700 ${fs(10.5)}px var(--f-ui)" pointer-events="none">${esc(s.id)}</text>`;
+        if (two) h += `<text x="${f.x + f.w / 2}" y="${(cy + 10 * u).toFixed(2)}" text-anchor="middle" style="fill:var(--text2);font:500 ${fs(10)}px var(--f-ui)" pointer-events="none">${esc(s.short)}</text>`;
+      } else {
+        const cands = MAP_LBL[s.id] || [s.short];
+        const lb = cands.find(c => tw(c, 10, true) <= f.w - 0.7);
+        if (lb) h += `<text x="${(f.x + 5 * u).toFixed(2)}" y="${(f.z + 13 * u).toFixed(2)}" style="fill:${isM ? 'var(--text2)' : 'var(--muted)'};font:600 ${fs(10)}px var(--f-ui)" pointer-events="none">${esc(lb)}</text>`;
+      }
       h += '</g>';
     }
+    const r = 8.5 * u;
     h += `<g data-r="lines"></g><g data-r="dots">`;
-    for (const pp of P().people) h += `<g class="pe-map-p" data-pid="${esc(pp.id)}" style="display:none"><circle r="1.05" stroke-width=".35"/><title></title></g>`;
-    h += `</g><g data-r="fork" style="display:none"><rect x="-.9" y="-.9" width="1.8" height="1.8" rx=".3" style="fill:var(--mat);stroke:var(--card)" stroke-width=".3"/></g></svg>`;
+    for (const pp of P().people) h += `<g class="pe-map-p" data-pid="${esc(pp.id)}" style="display:none"><circle class="hit" r="${(16 * u).toFixed(3)}"/><circle class="dot" r="${r.toFixed(3)}" stroke-width="${fs(1.8)}"/><text text-anchor="middle" y="${(3.1 * u).toFixed(3)}" style="font-size:${fs(8.5)}px">${esc(WF.ui.initials(pp.name))}</text><title></title></g>`;
+    h += `</g><g data-r="fork" style="display:none"><rect x="${(-9 * u).toFixed(3)}" y="${(-9 * u).toFixed(3)}" width="${(18 * u).toFixed(3)}" height="${(18 * u).toFixed(3)}" rx="${(3 * u).toFixed(3)}" style="fill:var(--mat);stroke:var(--card)" stroke-width="${fs(1.8)}"/><text text-anchor="middle" y="${(3.1 * u).toFixed(3)}" style="font:700 ${fs(8.5)}px var(--f-ui);fill:var(--accent-ink)" pointer-events="none"></text><title>Stapler</title></g></svg>`;
     R.map.innerHTML = h;
     const svg = R.map.querySelector('svg');
-    mapRefs = { svg, lines: svg.querySelector('[data-r="lines"]'), fork: svg.querySelector('[data-r="fork"]'), dots: {}, st: {} };
-    svg.querySelectorAll('[data-pid]').forEach(g => { mapRefs.dots[g.dataset.pid] = { g, c: g.querySelector('circle'), t: g.querySelector('title') }; });
-    svg.querySelectorAll('rect[data-st]').forEach(r => { mapRefs.st[r.dataset.st] = r; });
+    mapRefs = { svg, u, lines: svg.querySelector('[data-r="lines"]'), fork: svg.querySelector('[data-r="fork"]'), dots: {}, st: {} };
+    mapRefs.forkT = mapRefs.fork.querySelector('text'); mapRefs.forkTitle = mapRefs.fork.querySelector('title');
+    svg.querySelectorAll('[data-pid]').forEach(g => { mapRefs.dots[g.dataset.pid] = { g, c: g.querySelector('circle.dot'), t: g.querySelector('title') }; });
+    svg.querySelectorAll('rect[data-st]').forEach(rc => { mapRefs.st[rc.dataset.st] = rc; });
+    if (S()) updateMap(S().t);
   }
   function updateMap(now) {
     if (!mapRefs) return;
-    const Sx = S(), sel = WF.app.selected;
+    const Sx = S(), sel = WF.app.selected, u = mapRefs.u;
     let lines = '', n = 0;
     for (const pp of P().people) {
       const p = Sx.people[pp.id], d = mapRefs.dots[pp.id];
@@ -682,19 +802,24 @@
       const c = pColor(p.state);
       if (d._c !== c) { d._c = c; d.c.style.fill = c; }
       const on = !!(sel && sel.kind === 'person' && sel.id === pp.id);
-      if (d._on !== on) { d._on = on; d.c.style.stroke = on ? 'var(--accent)' : 'var(--card)'; d.c.setAttribute('r', on ? 1.4 : 1.05); }
+      if (d._on !== on) { d._on = on; d.c.style.stroke = on ? 'var(--accent)' : 'var(--card)'; d.c.setAttribute('r', ((on ? 10.5 : 8.5) * u).toFixed(3)); if (on) d.g.parentNode.append(d.g); }
       setText(d.t, `${pp.name} – ${pLabel(p.state)}: ${p.activity || ''}`);
       const tk = p.task, s0 = tk && tk.steps ? tk.steps[tk.si] : null;
       if (s0 && s0.to && (p.state === 'walking' || p.state === 'driving')) {
         const st0 = st(s0.to); const w = st0 && (st0.work || st0.dock);
-        if (w) lines += `<line x1="${p.pos.x.toFixed(2)}" y1="${p.pos.z.toFixed(2)}" x2="${w.x}" y2="${w.z}" style="stroke:var(--info)" stroke-width=".28" stroke-dasharray=".8 .6" opacity=".85"/><circle cx="${w.x}" cy="${w.z}" r=".55" style="fill:none;stroke:var(--info)" stroke-width=".25"/>`;
+        if (w) lines += `<line x1="${p.pos.x.toFixed(2)}" y1="${p.pos.z.toFixed(2)}" x2="${w.x}" y2="${w.z}" style="stroke:var(--info)" stroke-width="${(1.6 * u).toFixed(3)}" stroke-dasharray="${(5 * u).toFixed(2)} ${(4 * u).toFixed(2)}" opacity=".85"/><circle cx="${w.x}" cy="${w.z}" r="${(4 * u).toFixed(3)}" style="fill:none;stroke:var(--info)" stroke-width="${(1.5 * u).toFixed(3)}"/>`;
       }
     }
     if (mapRefs._lines !== lines) { mapRefs._lines = lines; mapRefs.lines.innerHTML = lines; }
     const f = Sx.forklift;
     if (f) {
       mapRefs.fork.style.display = '';
-      mapRefs.fork.setAttribute('transform', `translate(${f.pos.x.toFixed(2)} ${f.pos.z.toFixed(2)})`);
+      const tr = `translate(${f.pos.x.toFixed(2)} ${f.pos.z.toFixed(2)})`;
+      if (mapRefs._ftr !== tr) { mapRefs._ftr = tr; mapRefs.fork.setAttribute('transform', tr); }
+      const drv = f.driver && Sx.people[f.driver];
+      setText(mapRefs.forkT, drv ? WF.ui.initials(drv.name) : '');
+      setText(mapRefs.forkTitle, drv ? `Stapler – fährt ${drv.name}` : 'Stapler (abgestellt)');
+      if (drv) mapRefs.fork.dataset.pid = drv.id; else delete mapRefs.fork.dataset.pid;
       if (f.driver) n++;
     }
     for (const id in mapRefs.st) {
@@ -740,28 +865,41 @@
     }
     renderTimeline(sh, now);
   }
+  let tlW = 0;
   function renderTimeline(sh, now) {
     const d0 = Math.floor(now / DAY) * DAY, dow = Math.floor(now / DAY) % 7;
     const defs = P().shifts.map(s => ({ s, a: U.hm(s.start), b: U.hm(s.end) })).sort((x, y) => x.a - y.a);
     const A = defs[0].a, B = defs[defs.length - 1].b, span = B - A;
     const X = (sec) => U.clamp((sec - A) / span * 100, 0, 100);
     const s = now - d0, inWin = s >= A && s <= B && dow < 5;
-    const sig = [dow < 5, sh.id, Math.floor(s / 60), inWin].join('|');
+    if (!tlW) tlW = R.tl.clientWidth || 1000;
+    const sig = [dow < 5, sh.id, Math.floor(s / 60), inWin, tlW].join('|');
     if (sig === tlSig) return;
     tlSig = sig;
-    let h = '<div class="pe-tl-tr">';
+    const narrow = tlW < 520;
+    let cap = '', tr = '';
     for (const x of defs) {
       const cur = sh.id === x.s.id;
       const c = x.s.id === 'F' ? 'var(--st-setup)' : 'var(--st-tool)';
-      h += `<div class="pe-tl-sh${cur ? ' cur' : ''}" style="--c:${c};left:${X(x.a)}%;width:calc(${X(x.b) - X(x.a)}% - 2px)"><span>${esc(x.s.name)}<em style="font-style:normal;font-weight:500;color:var(--muted)"> ${x.s.start}–${x.s.end}</em></span></div>`;
-      for (const b of x.s.breaks) h += `<div class="pe-tl-br" title="Pause ${b[0]}–${b[1]}" style="left:${X(U.hm(b[0]))}%;width:${X(U.hm(b[1])) - X(U.hm(b[0]))}%"></div>`;
+      cap += `<span class="pe-tl-c${cur ? ' cur' : ''}" style="--c:${c};left:${X(x.a)}%;width:${(X(x.b) - X(x.a)).toFixed(2)}%"><b>${esc(x.s.name)}</b><em>${x.s.start}–${x.s.end}</em>${cur ? `<i>${sh.inBreak ? 'Pause' : 'läuft'}</i>` : ''}</span>`;
+      tr += `<div class="pe-tl-sh${cur ? ' cur' : ''}" title="${esc(x.s.name)} ${x.s.start}–${x.s.end}" style="--c:${c};left:${X(x.a)}%;width:calc(${(X(x.b) - X(x.a)).toFixed(2)}% - 2px)"></div>`;
+      for (const b of x.s.breaks) tr += `<div class="pe-tl-br" title="Pause ${b[0]}–${b[1]}" style="left:${X(U.hm(b[0]))}%;width:${(X(U.hm(b[1])) - X(U.hm(b[0]))).toFixed(2)}%"></div>`;
     }
-    if (inWin) h += `<div class="pe-tl-past" style="width:${X(s)}%"></div>`;
-    h += '</div>';
-    if (inWin) h += `<div class="pe-tl-now" style="left:${X(s)}%"><b>${U.fmtClock(now)}</b></div>`;
-    h += '<div class="pe-tl-ax">';
-    for (let hh = A, k = 0; hh <= B; hh += 7200, k++) h += `<span class="${k % 2 ? 'odd' : ''}" style="left:${X(hh)}%">${U.fmtClock(hh)}</span>`;
-    h += '</div>';
+    if (inWin) tr += `<div class="pe-tl-past" style="width:${X(s).toFixed(2)}%"></div><div class="pe-tl-now" style="left:${X(s).toFixed(2)}%"></div>`;
+    // Zeitachse: Stundenmarken, die die Jetzt-Marke überdecken würde, entfallen
+    const nowX = inWin ? X(s) : null, gap = 50 / tlW * 100;
+    let ax = '';
+    const step = narrow ? 4 * 3600 : 7200;
+    for (let hh = A; hh <= B; hh += step) {
+      const x = X(hh);
+      if (nowX != null && Math.abs(x - nowX) < gap) continue;
+      ax += `<span class="${hh === A ? 's0' : hh === B ? 's1' : ''}" style="left:${x.toFixed(2)}%">${U.fmtClock(hh)}</span>`;
+    }
+    if (inWin) {
+      const nx = U.clamp(nowX, 2.2 / tlW * 100 * 10, 100 - 2.2 / tlW * 100 * 10);
+      ax += `<span class="now" style="left:${nx.toFixed(2)}%">${U.fmtClock(now)}</span>`;
+    }
+    let h = `<div class="pe-tl-cap">${cap}</div><div class="pe-tl-tr">${tr}</div><div class="pe-tl-ax">${ax}</div>`;
     if (dow >= 5) h += `<div class="pe-tl-note">Wochenende – kein Schichtbetrieb. Nächste Schicht ${esc(U.fmtDayClock(sh.endsAt))}.</div>`;
     else if (!inWin) h += `<div class="pe-tl-note">Außerhalb der Schichten (Geisterschicht): niemand im Dienst, autonome Maschinen arbeiten ihre Puffer ab.</div>`;
     R.tl.innerHTML = h;
@@ -775,28 +913,40 @@
       const mine = sh.id && p.shift === sh.id;
       if (mine || p.state !== 'offShift') list.push({ p, prev: !mine });
     }
-    return list;
+    // laufende Schicht zuerst, Personen der Vorschicht (beenden noch / gehen) danach
+    return list.filter(x => !x.prev).concat(list.filter(x => x.prev));
   }
-  function miniBand(segs, t0, t1) {
+  function miniBand(tl, t0, t1) {
     const w = 400, span = Math.max(1, t1 - t0);
     let r = '';
-    for (const x of segs) {
-      if (x.state === 'offShift') continue;
-      const a = (x.t0 - t0) / span * w, ww = Math.max(0.6, (x.t1 - x.t0) / span * w);
-      r += `<rect x="${a.toFixed(1)}" y="0" width="${ww.toFixed(1)}" height="8" style="fill:${sColor(x.seg)}"/>`;
+    for (const x of tl) for (const q of pieces(x)) {
+      const a = (q.t0 - t0) / span * w, ww = Math.max(0.6, (q.t1 - q.t0) / span * w);
+      r += `<rect x="${a.toFixed(1)}" y="0" width="${ww.toFixed(1)}" height="8" style="fill:${sColor(q.k)}"/>`;
     }
     return `<svg viewBox="0 0 ${w} 8" preserveAspectRatio="none" aria-hidden="true"><rect width="${w}" height="8" style="fill:var(--track)"/>${r}</svg>`;
   }
+  /** Spaltenzahl für n Karten: so viele wie passen (höchstens max), Reihen möglichst gleich voll (10 → 5+5, 7 → 4+3) */
+  function balancedCols(n, width, minW, gap, max) {
+    const fit = Math.max(1, Math.min(max, Math.floor((width + gap) / (minW + gap))));
+    if (n <= 0) return fit;
+    const rows = Math.ceil(n / fit);
+    return Math.max(1, Math.ceil(n / rows));
+  }
+  const sinceTxt = (sec) => (sec < 60 ? '< 1 min' : U.fmtDur(Math.floor(sec / 60) * 60));
   function cardEl(p) {
     const el = document.createElement('article');
     el.className = 'pe-card'; el.dataset.id = p.id; el.tabIndex = 0; el.setAttribute('role', 'button');
     el.innerHTML = `
-      <div class="pe-ch"><span class="pe-av" data-r="av">${esc(WF.ui.initials(p.name))}</span>
-        <div class="pe-nm"><b>${esc(p.name)}</b><span data-r="role"></span></div><span class="pe-since" data-r="since"></span></div>
-      <div class="pe-act"><span data-r="pill"></span><span data-r="act"></span></div>
-      <dl class="pe-rows"><dt>Ort</dt><dd data-r="where"></dd><dt>Aufgabe</dt><dd data-r="task"></dd></dl>
+      <div class="pe-ch"><span class="pe-av">${esc(WF.ui.initials(p.name))}</span>
+        <div class="pe-nm"><b>${esc(p.name)}</b><span data-r="role"></span></div></div>
+      <div class="pe-st"><span data-r="pill"></span><span class="pe-since" data-r="since"></span></div>
+      <div class="pe-act" data-r="act"></div>
+      <div class="pe-rows">
+        <div class="pe-r" title="Ort">${IC_PIN(13)}<span class="tx" data-r="where"></span></div>
+        <div class="pe-r" data-r="taskRow">${IC_TASK(13)}<span data-r="tchip"></span><span class="tx" data-r="task"></span></div>
+      </div>
       <div class="pe-foot"><div class="pe-mini" data-r="mini"></div><div class="pe-mini-ax" data-r="ax"></div>
-        <div class="pe-ft"><span>Auslastung</span><span class="bar thin pe-ub" data-r="ubar"><i></i></span><b data-r="util"></b><span class="sp"></span><span data-r="tasks"></span></div></div>`;
+        <div class="pe-ft"><span>Auslastung <b data-r="util">–</b></span><span data-r="tasks"></span></div></div>`;
     const r = refs(el);
     return { el, r };
   }
@@ -814,7 +964,11 @@
       const sel = WF.app.selected;
       for (const id in cards) cards[id].el.classList.toggle('sel', !!(sel && sel.kind === 'person' && sel.id === id));
     }
+    if (!gridW) gridW = R.grid.clientWidth;
+    const gc = roster.length ? balancedCols(roster.length, gridW || 1000, 212, 12, 5) : 1;
+    setVar(R.grid, 'grid-template-columns', `repeat(${gc},minmax(0,1fr))`);
     const counts = {};
+    const d0 = Math.floor(now / DAY) * DAY;
     for (const x of roster) {
       const p = x.p, c = cards[p.id]; if (!c) continue;
       const r = c.r, w = whereOf(p);
@@ -822,32 +976,39 @@
       setVar(c.el, '--c', pColor(p.state));
       if (c.el.dataset.state !== p.state) c.el.dataset.state = p.state;
       c.el.classList.toggle('prev', x.prev);
-      setText(r.role, x.prev ? `${p.role} · ${shiftName(p.shift)} – beendet noch ${p.task ? 'die Aufgabe' : 'den Arbeitstag'}` : p.role);
+      setText(r.role, x.prev ? `${p.role} · ${shiftName(p.shift)}` : p.role);
       setHTML(r.pill, pill(p.state));
       let act = p.activity || '';
-      if (p.state === 'break' && p.breakUntil) act = `bis ${U.fmtClock(p.breakUntil)}${p.breakMakeup ? ' (holt die Pause nach)' : ''}`;
-      if (p.state === 'idle' && !p.task) act = p.endShift ? 'Schichtende – geht gleich' : p.breakPending ? 'geht gleich in die Pause' : 'wartet auf die nächste Aufgabe';
+      if (p.state === 'break' && p.breakUntil) act = `Pause bis ${U.fmtClock(p.breakUntil)}${p.breakMakeup ? ' (holt die Pause nach)' : ''}`;
+      if (p.state === 'idle' && !p.task) act = p.endShift ? 'Schichtende – geht gleich' : p.breakPending ? 'Geht gleich in die Pause' : 'Wartet auf die nächste Aufgabe';
+      if (x.prev) act = (p.task ? 'Beendet noch die Aufgabe: ' : '') + act;
       setHTML(r.act, escNb(act));
-      r.act.parentNode.classList.toggle('dim', p.state === 'idle' || p.state === 'break');
+      r.act.classList.toggle('dim', p.state === 'idle' || p.state === 'break');
       const lg = LOG[p.id], ls = lg && lg[lg.length - 1];
-      setText(r.since, ls && ls.s === p.state ? (now - ls.t0 < 60 ? '< 1 min' : U.fmtDur(Math.floor((now - ls.t0) / 60) * 60)) : '');
-      setAttr(r.since, 'title', ls && ls.s === p.state ? `${pLabel(p.state)} seit ${U.fmtClock(ls.t0)}` : null);
+      const has = !!(ls && ls.s === p.state);
+      setHTML(r.since, has ? `seit <b>${esc(sinceTxt(now - ls.t0))}</b>` : '');
+      setAttr(r.since, 'title', has ? `${pLabel(p.state)} seit ${U.fmtClock(ls.t0)}` : null);
       const sid = w.sid && st(w.sid) && (st(w.sid).kind === 'machine' || st(w.sid).kind === 'qs' || st(w.sid).kind === 'assembly') && hasDetail('machine') ? w.sid : null;
-      setHTML(r.where, sid ? `<button class="link" data-sel="machine|${esc(sid)}">${esc(w.text)}</button>` : esc(w.text));
+      setHTML(r.where, sid ? `<span class="link" role="button" data-sel="machine|${esc(sid)}">${esc(w.text)}</span>` : esc(w.text));
       if (p.task) {
-        const tk = p.task, since = tk.assignedT != null ? now - tk.assignedT : null;
+        const tk = p.task;
         const bits = [];
-        if (tk.machineId && tk.machineId !== w.sid) bits.push(esc(tk.machineId));
-        if (tk.orderId) bits.push(hasDetail('order') ? `<button class="link" data-sel="order|${esc(tk.orderId)}">${esc(tk.orderId)}</button>` : esc(tk.orderId));
-        if (since != null) bits.push(`<span class="faint" title="zugeteilt ${esc(U.fmtClock(tk.assignedT))}">${esc(since < 60 ? '< 1 min' : U.fmtDur(Math.floor(since / 60) * 60))}</span>`);
-        setHTML(r.task, `<span class="pe-tchip" style="--c:${TASK_C[tk.type] || 'var(--st-idle)'}"><i></i>${esc(taskLabel(tk.type))}</span>${bits.join(' · ')}`);
-      } else setHTML(r.task, `<span class="faint">keine</span>`);
-      const u = p.utilToday || 0;
-      setText(r.util, p.dutySec > 0 ? U.fmtPct(u) : '–');
-      setHTML(r.ubar, `<i style="width:${(U.clamp(u, 0, 1) * 100).toFixed(1)}%;background:${u >= 0.85 ? 'var(--st-wait)' : 'var(--st-run)'}"></i>`);
-      setHTML(r.tasks, `<b>${U.fmtNum(p.tasksToday || 0)}</b> ${(p.tasksToday || 0) === 1 ? 'Aufgabe' : 'Aufgaben'}`);
-      setAttr(r.tasks, 'title', 'heute übernommene Aufgaben');
-      const def = shiftDef(p.shift), d0 = Math.floor(now / DAY) * DAY;
+        if (tk.machineId && tk.machineId !== w.sid && !tk.orderId) bits.push(esc(mLabel(tk.machineId)));
+        if (tk.orderId) bits.push(hasDetail('order') ? `<span class="link" role="button" data-sel="order|${esc(tk.orderId)}">${esc(tk.orderId)}</span>` : esc(tk.orderId));
+        setHTML(r.tchip, `<span class="pe-tchip" style="--c:${TASK_C[tk.type] || 'var(--st-idle)'}"><i></i><span>${esc(taskLabel(tk.type))}</span></span>`);
+        setHTML(r.task, bits.join(' · '));
+        r.task.classList.remove('none');
+        setAttr(r.taskRow, 'title', `Aufgabe: ${tk.label || taskLabel(tk.type)}${tk.assignedT != null ? ` · zugeteilt ${U.fmtClock(tk.assignedT)} (vor ${sinceTxt(now - tk.assignedT)})` : ''}`);
+      } else {
+        setHTML(r.tchip, '');
+        setHTML(r.task, 'keine Aufgabe');
+        r.task.classList.add('none');
+        setAttr(r.taskRow, 'title', 'Keine Aufgabe zugeteilt');
+      }
+      setText(r.util, p.dutySec > 0 ? U.fmtPct(p.utilToday || 0) : '–');
+      setAttr(r.util.parentNode, 'title', p.dutySec > 0 ? `Arbeitszeit ${U.fmtDur(p.workSec)} von ${U.fmtDur(p.dutySec)} im Dienst` : null);
+      setHTML(r.tasks, `<b>${U.fmtNum(p.tasksToday || 0)}</b> ${(p.tasksToday || 0) === 1 ? 'Aufgabe' : 'Aufgaben'} heute`);
+      const def = shiftDef(p.shift);
       if (def) {
         const a = d0 + U.hm(def.start), b = d0 + U.hm(def.end);
         const msig = Math.floor(now / 90) + '|' + (LOG[p.id] || []).length + '|' + p.state;
@@ -857,7 +1018,8 @@
           const tl = timeline(p.id, a, Math.min(now, end));
           r.mini.innerHTML = miniBand(tl, a, end) + (now > a && now < end ? `<span class="nw" style="left:${((now - a) / (end - a) * 100).toFixed(2)}%"></span>` : '');
           setHTML(r.ax, `<span>${def.start}</span><span>${U.fmtClock(end)}</span>`);
-          setAttr(r.mini, 'title', `Tagesverlauf ${def.start}–${U.fmtClock(end)}: ` + SEG_ORDER.map(k => { const sec = tl.filter(x => x.seg === k).reduce((m, x) => m + x.t1 - x.t0, 0); return sec >= 60 ? SEG[k].label + ' ' + U.fmtDur(sec) : null; }).filter(Boolean).join(' · '));
+          const tot = totals(tl);
+          setAttr(r.mini, 'title', `Verlauf ${def.start}–${U.fmtClock(end)}: Arbeitszeit ${U.fmtDur(tot.work + tot.fork)}` + ['standby', 'walking', 'idle', 'break'].map(k => (tot[k] || 0) >= 60 ? ' · ' + SEG[k].label + ' ' + U.fmtDur(tot[k]) : '').join(''));
         }
       }
       setAttr(c.el, 'aria-label', `${p.name}, ${p.role}: ${pLabel(p.state)} – ${act}`);
@@ -881,7 +1043,14 @@
     const work = (counts.working || 0) + (counts.driving || 0);
     setHTML(R.kWork, `${work}<small>/ ${present.length}</small>`);
     const stby = roster.filter(x => x.p.state === 'working' && segState(x.p, Sx) === 'standby').length;
-    setText(R.kWorkS, present.length ? [stby ? `davon ${stby} in Bereitschaft` : '', counts.walking ? `${counts.walking} unterwegs` : '', counts.idle ? `${counts.idle} verfügbar` : '', counts.break ? `${counts.break} in der Pause` : ''].filter(Boolean).join(' · ') || 'alle bei der Arbeit' : 'niemand im Dienst');
+    // „davon“ nur für die Bereitschaft (Teil der Arbeitenden) – die übrigen Zustände stehen getrennt daneben
+    const others = [counts.walking ? `${counts.walking} unterwegs` : '', counts.idle ? `${counts.idle} verfügbar` : '', counts.break ? `${counts.break} in der Pause` : ''].filter(Boolean);
+    let ws;
+    if (!present.length) ws = 'niemand im Dienst';
+    else if (stby) ws = `davon ${stby} in Bereitschaft${others.length ? ' · außerdem ' + others.join(', ') : ''}`;
+    else ws = others.length ? others.join(' · ') : 'alle bei der Arbeit';
+    setText(R.kWorkS, ws);
+    setAttr(R.kWorkS, 'title', ws);
     const tot = present.length || 1;
     setHTML(R.kDist, present.length ? PST_ORDER.filter(k => counts[k]).map(k => `<i style="--c:${pColor(k)};flex:${counts[k] / tot}" title="${esc(pLabel(k))}: ${counts[k]}"></i>`).join('') : '');
     const br = sh.id ? breakInfo(sh, now) : null;
@@ -933,10 +1102,11 @@
   function updateQueue(now) {
     const Sx = S(), sh = WF.sim.shift();
     const open = Object.values(Sx.tasks).filter(t => t.status === 'open').sort((a, b) => (a.held ? 1 : 0) - (b.held ? 1 : 0) || b.prio - a.prio || a.createdT - b.createdT);
-    const assigned = Object.values(Sx.tasks).filter(t => t.status === 'assigned').length;
+    const assignedL = Object.values(Sx.tasks).filter(t => t.status === 'assigned' && t.assignee && Sx.people[t.assignee]).sort((a, b) => b.prio - a.prio || (a.assignedT || 0) - (b.assignedT || 0));
+    const assigned = assignedL.length;
     const parts = [];
     let firstHeld = true;
-    const sigParts = [assigned];
+    const sigParts = [assigned, assignedL.map(t => t.id + t.assignee + Sx.people[t.assignee].state).join(',')];
     for (const tk of open) {
       const who = whoFor(tk, now);
       const seen = SEEN[tk.id] && SEEN[tk.id].t > tk.createdT ? SEEN[tk.id] : null;
@@ -966,7 +1136,7 @@
         if (why) body += `<div class="pe-qi-why">${icon('alert', 14)}<span>${esc(why)}</span></div>`;
       }
       parts.push(`<div class="pe-qi${tk.held ? ' held' : ''}" ${sel}>
-        <div class="pe-qi-h"><span class="pe-tchip" style="--c:${c}"><i></i>${esc(taskLabel(tk.type))}</span><b>${esc(mid ? mLabel(mid) : '')}${tk.orderId ? ' · ' + esc(tk.orderId) : ''}</b>
+        <div class="pe-qi-h"><span class="pe-tchip" style="--c:${c}"><i></i><span>${esc(taskLabel(tk.type))}</span></span><b>${esc(mid ? mLabel(mid) : '')}${tk.orderId ? ' · ' + esc(tk.orderId) : ''}</b>
           <span class="pe-wait${!tk.held && wait >= 300 && who.on.some(p => p.state !== 'break' && !p.breakPending) ? ' warn' : ''}" title="${seen ? 'angelegt ' + esc(U.fmtClock(tk.createdT)) + ', zurückgegeben ' + esc(U.fmtClock(seen.t)) : 'angelegt ' + esc(U.fmtClock(tk.createdT))}">${tk.held ? 'seit ' + esc(U.fmtClock(tk.createdT)) : (seen ? 'wieder offen ' : 'wartet ') + esc(durMin(wait))}</span></div>
         ${body}</div>`);
     }
@@ -975,10 +1145,17 @@
     qSig = sig;
     const waiting = open.filter(t => !t.held).length;
     setText(R.qSub, `${waiting} wartend${open.length - waiting ? ` · ${open.length - waiting} vorgemerkt` : ''} · ${assigned} vergeben`);
-    R.q.innerHTML = parts.length ? parts.join('') : `<div class="pe-q-empty">${icon('check', 20)}<span>Jede Aufgabe hat eine Person. Neue Aufgaben (Rüsten, Einlegen, Werkzeugwechsel, Prüfen, Transporte) erscheinen hier, solange niemand Qualifiziertes frei ist.</span></div>`;
+    const empty = parts.length ? '' : `<div class="pe-q-empty">${icon('check', 20)}<span>Jede Aufgabe hat eine Person. Neue Aufgaben (Rüsten, Einlegen, Werkzeugwechsel, Prüfen, Transporte) erscheinen hier, solange niemand Qualifiziertes frei ist.</span></div>`;
+    // darunter: wer gerade woran arbeitet (vergebene Aufgaben) – Informationsfluss von der Aufgabe zur Person
+    const busy = assignedL.length ? `<div class="pe-q-sub">In Arbeit · ${assignedL.length} vergeben</div>` + assignedL.map(tk => {
+      const p = Sx.people[tk.assignee], mid = tk.machineId || (tk.target && tk.target.id);
+      return `<div class="pe-qa" data-sel="person|${esc(p.id)}" title="${esc(p.name)}: ${esc(p.activity || '')}"><span class="pe-tchip" style="--c:${TASK_C[tk.type] || 'var(--st-idle)'}"><i></i><span>${esc(taskLabel(tk.type))}</span></span>
+        <span class="w">${esc(mid ? mLabel(mid) : '')}${tk.orderId ? ' · ' + esc(tk.orderId) : ''}</span><span class="who" style="--c:${pColor(p.state)}"><i></i>${esc(shortName(p.name))}</span></div>`;
+    }).join('') : '';
+    R.q.innerHTML = parts.length ? parts.join('') + busy : (assignedL.length ? `<div class="pe-q-empty sm">${icon('check', 16)}<span>Keine Aufgabe wartet – jede hat eine Person.</span></div>` + busy : empty);
   }
 
-  // ---------------- Nächste Schicht
+  // ---------------- Nächste Schicht (kompakte Leiste)
   function skillSummary(pp) {
     const m = pp.skills.filter(k => SKILL[k] && k !== 'lead' && cols().some(c => c.kind === 'm' && c.key === k));
     const a = pp.skills.filter(k => ACT_COLS.includes(k));
@@ -991,22 +1168,35 @@
     const sh = WF.sim.shift(), nx = nextShift(sh, now);
     const list = P().people.filter(p => p.shift === nx.def.id);
     const Sx = S();
-    const sig = nx.def.id + nx.startT + '|' + list.map(p => Sx.people[p.id].state).join(',') + '|' + Math.floor((nx.startT - now) / 60);
+    if (!nxW) nxW = R.nx.clientWidth;
+    const nc = balancedCols(list.length, nxW - 24 || 1000, 140, 8, 7);
+    const sig = nx.def.id + nx.startT + '|' + list.map(p => Sx.people[p.id].state).join(',') + '|' + Math.floor((nx.startT - now) / 60) + '|' + nc;
     if (sig === nxSig || (R.nx._hover && nxSig)) return;
     nxSig = sig;
+    R.nx.style.gridTemplateColumns = `repeat(${nc},minmax(0,1fr))`;
     setText(R.nxT, `Nächste Schicht · ${nx.def.name}`);
-    setText(R.nxSub, `ab ${tclock(nx.startT, now)} · in ${U.fmtDur(Math.max(0, nx.startT - now))}`);
+    setText(R.nxSub, `${list.length} Personen · ab ${tclock(nx.startT, now)} · in ${U.fmtDur(Math.max(0, nx.startT - now))}`);
     R.nx.innerHTML = list.map(pp => {
       const p = Sx.people[pp.id], here = p && p.state !== 'offShift';
-      return `<div class="pe-nx" data-id="${esc(pp.id)}" title="${esc(pp.name)} – ${esc(pp.role)}"><span class="avatar">${esc(WF.ui.initials(pp.name))}</span>
-        <div><b>${esc(pp.name)}</b><span>${esc(pp.role)} · ${esc(skillSummary(pp))}</span></div><em class="${here ? 'on' : ''}">${here ? 'in der Halle' : 'ab ' + esc(U.fmtClock(nx.startT))}</em></div>`;
+      return `<button class="pe-nxp" data-id="${esc(pp.id)}" title="${esc(pp.name)} – ${esc(pp.role)} · ${esc(skillSummary(pp))}${here ? ' · schon in der Halle' : ''}"><span class="avatar">${esc(WF.ui.initials(pp.name))}</span>
+        <span><b>${esc(pp.name)}</b><small>${esc(pp.role)}</small></span>${here ? '<em aria-label="in der Halle"></em>' : ''}</button>`;
     }).join('');
   }
 
-  // ---------------- Qualifikationsmatrix
+  // ---------------- Qualifikationsmatrix (laufende Schicht offen, andere Schicht eingeklappt)
+  function defaultOpenShift(sh) { return sh.id || nextShift(sh, S().t).def.id; }
+  function isOpen(id) { const sh = WF.sim.shift(); return id in mxOpen ? mxOpen[id] : id === defaultOpenShift(sh); }
+  function keyRisks(shiftId) {
+    const b = bottlenecks(shiftId);
+    return { b, key: Object.entries(b.byPerson).filter(([, its]) => its.length >= 3) };
+  }
   function renderMatrix(sh) {
     const Sx = S();
-    const sig = sh.id || '-';
+    // Schichtwechsel: Nutzerwahl verwerfen, die neue laufende Schicht ist offen
+    const cur = defaultOpenShift(sh);
+    if (mxShift !== cur) { mxShift = cur; for (const k in mxOpen) delete mxOpen[k]; }
+    const opens = P().shifts.map(d => isOpen(d.id) ? 1 : 0).join('');
+    const sig = (sh.id || '-') + '|' + opens;
     if (sig === mxSig) { patchMatrix(); return; }
     mxSig = sig;
     const C = cols(), mc = C.filter(c => c.kind === 'm'), ac = C.filter(c => c.kind === 'a');
@@ -1016,8 +1206,13 @@
     for (const def of P().shifts) {
       const people = P().people.filter(p => p.shift === def.id);
       const cov = coverage(def.id);
-      const cur = sh.id === def.id;
-      h += `<tr class="shr"><td class="nm" colspan="${C.length + 1}">${esc(def.name)}<span>${def.start}–${def.end} · ${people.length} Personen</span>${cur ? '<em>● läuft</em>' : ''}</td></tr>`;
+      const running = sh.id === def.id, open = isOpen(def.id);
+      const { b, key } = keyRisks(def.id);
+      const warn = key.length
+        ? key.map(([pid]) => `<span class="pe-shr-w crit">${icon('alert', 13)}Klumpenrisiko ${esc(P().people.find(x => x.id === pid).name)}</span>`).join('')
+        : '';
+      h += `<tr class="shr${open ? ' open' : ''}" data-shift="${esc(def.id)}" tabindex="0" role="button" aria-expanded="${open}" title="${open ? 'Einklappen' : 'Aufklappen'}"><td class="nm" colspan="${C.length + 1}"><div class="pe-shr">${icon('chevron', 14)}<b>${esc(def.name)}</b><span>${def.start}–${def.end} · ${people.length} Personen</span>${running ? '<em>läuft</em>' : ''}${warn}<span class="pe-shr-n">${b.items.length} Engpässe</span></div></td></tr>`;
+      if (!open) continue;
       for (const pp of people) {
         const p = Sx.people[pp.id];
         h += `<tr class="pr" data-id="${esc(pp.id)}"><td class="nm"><div class="pe-mx-p"><span class="avatar">${esc(WF.ui.initials(pp.name))}</span><div><b>${esc(pp.name)}</b><span>${esc(pp.role)}</span></div><i data-live="${esc(pp.id)}"${p && p.state !== 'offShift' ? ` style="--c:${pColor(p.state)}" title="${esc(pLabel(p.state))}"` : ' hidden'}></i></div></td>`;
@@ -1056,22 +1251,23 @@
     }
   }
   function renderBottlenecks(sh) {
-    const sig = sh.id || '-';
+    const shown = P().shifts.filter(d => isOpen(d.id));
+    const sig = (sh.id || '-') + '|' + shown.map(d => d.id).join(',');
     if (sig === bnSig) return;
     bnSig = sig;
-    R.bn.innerHTML = P().shifts.map(def => {
-      const b = bottlenecks(def.id);
-      const keyPeople = Object.entries(b.byPerson).filter(([, its]) => its.length >= 3);
-      const rows = [];
-      for (const [pid, its] of keyPeople) {
+    R.bn.classList.toggle('one', shown.length === 1);
+    R.bn.innerHTML = shown.map(def => {
+      const { b, key } = keyRisks(def.id);
+      const head = [], rows = [];
+      for (const [pid, its] of key) {
         const pp = P().people.find(x => x.id === pid);
-        rows.push(`<div class="pe-bn-i key">${icon('alert', 15)}<span><b>Klumpenrisiko ${esc(pp.name)}:</b> einzige Person der ${esc(def.name)} für ${its.map(i => esc(SKILL[i.key])).join(', ')}. Fällt ${esc(pp.name.split(' ')[0])} aus, stehen diese Aufgaben bis zur nächsten Schicht.</span></div>`);
+        head.push(`<div class="pe-bn-i key">${icon('alert', 15)}<span><b>Klumpenrisiko ${esc(pp.name)}:</b> einzige Person der ${esc(def.name)} für ${its.map(i => esc(SKILL[i.key])).join(', ')}. Fällt ${esc(pp.name.split(' ')[0])} aus, stehen diese Aufgaben bis zur nächsten Schicht.</span></div>`);
       }
       for (const it of b.items) {
-        if (it.person && keyPeople.some(([pid]) => pid === it.person)) continue;
+        if (it.person && key.some(([pid]) => pid === it.person)) continue;
         rows.push(`<div class="pe-bn-i ${it.flag}">${icon(it.flag === 'crit' ? 'x' : 'user', 15)}<span>${esc(it.text)}</span></div>`);
       }
-      return `<div class="pe-bn-s"><h4>Engpässe ${esc(def.name)}<em>${b.items.length} von ${cols().length} Qualifikationen</em></h4>${rows.join('') || '<div class="muted" style="font-size:12.5px">Jede Qualifikation ist mindestens doppelt besetzt.</div>'}</div>`;
+      return `<div class="pe-bn-s"><h4>Engpässe ${esc(def.name)}<em>${b.items.length} von ${cols().length} Qualifikationen</em></h4>${head.join('')}<div class="pe-bn-l">${rows.join('') || (head.length ? '' : '<div class="muted" style="font-size:12.5px">Jede Qualifikation ist mindestens doppelt besetzt.</div>')}</div></div>`;
     }).join('');
   }
 
@@ -1093,13 +1289,12 @@
     badge() { const Sx = S(); if (!Sx || !Sx.tasks) return ''; let n = 0; for (const id in Sx.tasks) { const t = Sx.tasks[id]; if (t.status === 'open' && !t.held) n++; } return n ? String(n) : ''; } });
 
   // ------------------------------------------------------------------ Detail „person“
-  function bandSvg(segs, t0, t1) {
+  function bandSvg(tl, t0, t1) {
     const w = 1000, span = Math.max(1, t1 - t0);
     let r = '';
-    for (const s of segs) {
-      if (s.state === 'offShift') continue;
-      const x = (s.t0 - t0) / span * w, ww = Math.max(0.8, (s.t1 - s.t0) / span * w);
-      r += `<rect x="${x.toFixed(2)}" y="0" width="${ww.toFixed(2)}" height="22" style="fill:${sColor(s.seg)}"><title>${esc(U.fmtClock(s.t0))}–${esc(U.fmtClock(s.t1))} ${esc((SEG[s.seg] || {}).label || pLabel(s.state))}${s.label ? ' · ' + esc(s.label) : ''}</title></rect>`;
+    for (const s of tl) for (const q of pieces(s)) {
+      const x = (q.t0 - t0) / span * w, ww = Math.max(0.8, (q.t1 - q.t0) / span * w);
+      r += `<rect x="${x.toFixed(2)}" y="0" width="${ww.toFixed(2)}" height="22" style="fill:${sColor(q.k)}"><title>${esc(U.fmtClock(s.t0))}–${esc(U.fmtClock(s.t1))} ${esc(pLabel(s.state))}${q.work ? ' · ' + esc(U.fmtDur(q.t1 - q.t0)) + ' Arbeitszeit' : s.state === 'working' ? ' · Bereitschaft ' + esc(U.fmtDur(q.t1 - q.t0)) : ''}${s.label ? ' · ' + esc(s.label) : ''}</title></rect>`;
     }
     return `<svg viewBox="0 0 ${w} 22" preserveAspectRatio="none" aria-hidden="true"><rect width="${w}" height="22" style="fill:var(--track)"/>${r}</svg>`;
   }
@@ -1123,7 +1318,7 @@
         <section><div class="pe-dh">
           <div class="pe-dh-st"><span data-r="pill"></span><small data-r="since"></small></div>
           <div class="pe-dh-act" data-r="act"></div>
-          <div class="pe-dh-where">${icon('target', 14)}<span data-r="where"></span></div>
+          <div class="pe-dh-where">${IC_PIN(14)}<span data-r="where"></span></div>
         </div></section>
         <section data-r="taskSec"><h4>Aktuelle Aufgabe</h4><div data-r="task"></div></section>
         <section><h4>Heute</h4><div class="pe-stats">
@@ -1158,7 +1353,7 @@
         if (others.length) subs.push(`${SKILL[c.key]}: ${others.map(x => shortName(x.name)).join(', ')}`);
       }
       body.risk.innerHTML = (mine.length ? `<div class="pe-risk">${icon('alert', 15)}<span>Einzige Person der ${esc(def.name)} für <b>${mine.map(i => esc(SKILL[i.key])).join(', ')}</b>.</span></div>` : '') +
-        (subs.length ? `<div class="md-meta muted" style="font-size:12px;margin-top:${mine.length ? 8 : 0}px;line-height:1.5">Vertretung in der Schicht – ${subs.map(esc).join(' · ')}</div>` : (mine.length ? '' : '<div class="muted" style="font-size:12.5px">Keine Engpass-Qualifikation.</div>'));
+        (subs.length ? `<div class="muted" style="font-size:12px;margin-top:${mine.length ? 8 : 0}px;line-height:1.5">Vertretung in der Schicht – ${subs.map(esc).join(' · ')}</div>` : (mine.length ? '' : '<div class="muted" style="font-size:12.5px">Keine Engpass-Qualifikation.</div>'));
     }
     function update(el) {
       const Sx = S(); if (!Sx) return;
@@ -1188,7 +1383,7 @@
           const stepTxt = (s) => s.k === 'walk' ? 'Weg zu ' + where(s.to) : s.k === 'drive' ? 'Fahrt zu ' + where(s.to) : s.k === 'toForklift' ? 'zum Stapler' : s.k === 'attend' ? (tk.type === 'assembly' ? 'Montieren' : 'Prüfen') : s.k === 'hold' ? 'Warten (KMG)' : s.k === 'wait' ? 'Bereit (Zyklusende)' : (ACT[s.act] || s.label || 'Arbeit');
           const steps = (tk.steps || []).map((x, k) => `<span class="pe-step${k < tk.si ? ' done' : k === tk.si ? ' cur' : ''}">${k < tk.si ? icon('check', 11) : ''}${esc(stepTxt(x))}</span>`).join('<span class="pe-step-ar">›</span>');
           body.task.innerHTML = `<div class="pe-box" style="--c:${c}">
-            <div class="pe-box-h"><span class="pe-tchip" style="--c:${c}"><i></i>${esc(taskLabel(tk.type))}</span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(tk.label || '')}</span><small>${tk.assignedT != null ? 'seit ' + esc(U.fmtClock(tk.assignedT)) : ''}</small></div>
+            <div class="pe-box-h"><span class="pe-tchip" style="--c:${c}"><i></i><span>${esc(taskLabel(tk.type))}</span></span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(tk.label || '')}</span><small>${tk.assignedT != null ? 'seit ' + esc(U.fmtClock(tk.assignedT)) : ''}</small></div>
             <div class="row">${tk.machineId ? `<button class="link" data-sel="machine|${esc(tk.machineId)}">${esc(mLabel(tk.machineId))}</button>` : ''}${tk.orderId ? `<span class="faint">·</span><button class="link" data-sel="order|${esc(tk.orderId)}">${esc(tk.orderId)}${tk.seq != null ? ' AG ' + tk.seq : ''}</button>` : ''}<span class="spacer"></span><span class="muted" style="font-size:11.5px" data-live="rem"></span></div>
             <div class="pe-steps">${steps}</div>
           </div>`;
@@ -1196,16 +1391,16 @@
       }
       const remEl = body.task.querySelector('[data-live="rem"]');
       if (remEl) setText(remEl, p.workRem > 0 ? 'Arbeitsschritt noch ' + U.fmtDur(p.workRem) : p.state === 'walking' || p.state === 'driving' ? 'unterwegs' : '');
-      // Kennzahlen heute
+      // Kennzahlen heute (Engine)
       const u = p.utilToday || 0;
       setText(body.util, p.dutySec > 0 ? U.fmtPct(u) : '–');
       setHTML(body.ubar, `<i style="width:${(u * 100).toFixed(1)}%;background:${u >= 0.85 ? 'var(--st-wait)' : 'var(--st-run)'}"></i>`);
       setHTML(body.work, p.workSec > 0 ? esc(U.fmtDur(p.workSec)) : '–');
       setText(body.duty, p.dutySec > 0 ? 'von ' + U.fmtDur(p.dutySec) + ' im Dienst' : 'heute noch nicht im Dienst');
       setText(body.tasks, U.fmtNum(p.tasksToday || 0));
-      // Verlauf
+      // Verlauf – dunkelgrün = Arbeitszeit der Engine, daher steht in der Legende dieselbe Zahl wie in der Kachel
       const win = window0(now);
-      const bsig = Math.floor(now / 30) + '|' + segs.length;
+      const bsig = Math.floor(now / 30) + '|' + segs.length + '|' + Math.floor((p.workSec || 0) / 60);
       if (sig.band !== bsig) {
         sig.band = bsig;
         const end = Math.min(win.b, Math.max(now, win.a));
@@ -1213,16 +1408,18 @@
         const wkend = Math.floor(now / DAY) % 7 >= 5;
         if (!win.started) body.band.innerHTML = `<div class="muted" style="font-size:12.5px">${wkend ? 'Wochenende – heute keine Schicht.' : `${esc(def.name)} beginnt ${esc(U.fmtClock(win.a))} – noch kein Verlauf für heute.`}</div>`;
         else {
-          const tot = {};
-          for (const s of tl) tot[s.seg] = (tot[s.seg] || 0) + (s.t1 - s.t0);
+          const tot = totals(tl);
           const ax = [];
           for (let h = Math.ceil(win.a / 3600) * 3600; h <= win.b; h += 3600) if ((h - win.a) % 7200 === 0 || win.b - win.a <= 6 * 3600) ax.push(h);
           const X = (t) => ((t - win.a) / Math.max(1, win.b - win.a) * 100).toFixed(2);
           const nowX = now < win.b ? `<div style="position:absolute;top:-2px;bottom:-2px;left:${X(now)}%;border-left:2px solid var(--accent)"></div>` : '';
-          body.band.innerHTML = `<div class="pe-band"><div style="position:relative">${bandSvg(tl, win.a, win.b)}${nowX}</div>
+          const lg = [`<span class="main" style="--c:${SEG.work.c}"><i></i>Arbeitszeit <b>${esc(p.workSec > 0 ? U.fmtDur(p.workSec) : '–')}</b></span>`]
+            .concat(['standby', 'walking', 'idle', 'break'].filter(k => (tot[k] || 0) >= 30).map(k => `<span style="--c:${SEG[k].c}"><i></i>${esc(SEG[k].label)} <b>${esc(U.fmtDur(tot[k]))}</b></span>`));
+          if (tot.fork >= 30) lg.splice(1, 0, `<span style="--c:${SEG.driving.c}"><i></i>davon Stapler <b>${esc(U.fmtDur(tot.fork))}</b></span>`);
+          body.band.innerHTML = `<div class="pe-band-d"><div style="position:relative">${bandSvg(tl, win.a, win.b)}${nowX}</div>
             <div class="pe-band-ax"><span style="left:0">${esc(U.fmtClock(win.a))}</span>${ax.filter(h => h > win.a + 1800 && h < win.b - 1800).map(h => `<span style="left:${X(h)}%">${esc(U.fmtClock(h))}</span>`).join('')}<span style="left:100%">${esc(U.fmtClock(win.b))}</span></div>
-            <div class="pe-band-lg">${SEG_ORDER.filter(k => tot[k] >= 30).map(k => `<span style="--c:${SEG[k].c}"><i></i>${esc(SEG[k].label)} <b>${esc(U.fmtDur(tot[k]))}</b></span>`).join('')}</div>
-            <div class="pe-band-note">Dunkelgrün zählt als Arbeitszeit (Auslastung), hellgrün = steht an der Maschine bereit (wartet auf Zyklusende). Aufgezeichnet aus den Live-Daten.</div></div>`;
+            <div class="pe-band-lg">${lg.join('')}</div>
+            <div class="pe-band-note">Dunkelgrün = Arbeitszeit wie in der Kachel oben (Arbeitsschritte, Staplerfahrten, begleitete Bearbeitung). Hellgrün = an der Maschine, aber ohne Arbeitsschritt (wartet auf Zyklusende oder Messmaschine) – zählt nicht zur Auslastung.</div></div>`;
         }
         const rec = recentTasks(id, 8);
         body.recent.innerHTML = rec.length ? `<div class="pe-tl-list">${rec.map(r => `<div class="pe-tli${r.active ? ' on' : ''}" style="--c:${TASK_C[r.type] || 'var(--st-idle)'}">
@@ -1241,5 +1438,5 @@
   });
 
   WF.people = { whereOf, qualified: (personId, task) => { const pp = P().people.find(x => x.id === personId); return !!(pp && task && qualified(pp, task)); },
-    coverage, bottlenecks, timeline, recentTasks };
+    coverage, bottlenecks, timeline, recentTasks, workCheck };
 })();

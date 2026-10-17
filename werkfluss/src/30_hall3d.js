@@ -25,7 +25,9 @@
   // ================================================================== CSS
   css(`
 .h3-root{position:absolute;inset:0;overflow:hidden;background:var(--bg);-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;contain:layout paint}
-.h3-cv{position:absolute;inset:0;display:block;width:100%;height:100%;outline:none;touch-action:none}
+.h3-cv{position:absolute;inset:0;display:block;width:100%;height:100%;outline:none;touch-action:none;animation:h3fade .9s ease-out both}
+@keyframes h3fade{from{opacity:0}}
+@media (prefers-reduced-motion:reduce){.h3-cv{animation:none}}
 .h3-vig{position:absolute;inset:0;pointer-events:none;background:radial-gradient(130% 105% at 50% 46%,transparent 58%,rgba(5,9,18,.34) 100%)}
 .h3-root.hov .h3-cv{cursor:pointer}
 .h3-root.drag .h3-cv{cursor:grabbing}
@@ -138,8 +140,8 @@
 .h3-labels{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden;contain:strict}
 .h3-lb{--c:var(--st-idle);position:absolute;left:0;top:0;pointer-events:auto;cursor:pointer;white-space:nowrap;background:color-mix(in srgb,var(--bg) 84%,transparent);border:1px solid color-mix(in srgb,var(--c) 45%,var(--line2));border-radius:8px;padding:3px 7px 3px 6px;font:500 11.5px/1.25 var(--f-ui);color:var(--text);box-shadow:0 4px 14px rgba(0,0,0,.42);transition:opacity .18s;will-change:transform}
 .h3-lb::after{content:"";position:absolute;left:50%;top:100%;width:1px;height:9px;background:linear-gradient(color-mix(in srgb,var(--c) 85%,transparent),transparent)}
-.h3-lb[data-p="b"]::after{top:auto;bottom:100%;background:linear-gradient(transparent,color-mix(in srgb,var(--c) 85%,transparent))}
-.h3-lb[data-p="s"]::after{display:none}
+.h3-lb[data-pl="b"]::after{top:auto;bottom:100%;background:linear-gradient(transparent,color-mix(in srgb,var(--c) 85%,transparent))}
+.h3-lb[data-pl="s"]::after{display:none}
 .h3-lb.off{opacity:0 !important;pointer-events:none !important}
 .h3-lb .r1{display:flex;align-items:center;gap:6px}
 .h3-lb .d{width:7px;height:7px;border-radius:50%;background:var(--c);flex:none;box-shadow:0 0 6px var(--c)}
@@ -713,7 +715,7 @@
       chain: std(0x3a3f45, 0.5, 0.8),
       screenFrame: std(0x101418, 0.3, 0.2),
       winGlass: std(0xa9c1d6, 0.06, 0.1, { emissive: 0xbfd7ef, emissiveIntensity: 0.55, envMapIntensity: 1.2 }),
-      glass: std(0x0c141c, 0.04, 0.0, { transparent: true, opacity: 0.5, depthWrite: false, envMapIntensity: 1.8 }),
+      glass: std(0x14202a, 0.04, 0.0, { transparent: true, opacity: 0.3, depthWrite: false, envMapIntensity: 1.6 }),
       glassRoom: std(0xb8ccd8, 0.03, 0.05, { transparent: true, opacity: 0.12, depthWrite: false, envMapIntensity: 1.5, side: THREE.DoubleSide }),
       screen: basic(0xffffff, { map: texHMI(0) }),
       screen2: basic(0xffffff, { map: texHMI(1) }),
@@ -1133,16 +1135,17 @@
     const headM = new THREE.MeshBasicMaterial({ color: 0xfff3dc, toneMapped: false }), tailM = new THREE.MeshBasicMaterial({ color: 0xb8241c, toneMapped: false });
     const vanM = std2(0x7d8a94, 0.32, 0.25);
     for (const m of [cabM, boxM, ribM, winM, vanM]) m.userData.batch = true;
+    let bb = b;   // aktueller Builder (Lkw direkt in die Halle, Kastenwagen in eine eigene, gedrehte Gruppe)
     const wheel = (x, z, r, w, side) => {
       const x0 = side < 0 ? x - w : x;
-      b.cylX(M.rubber, r, w, x0, r, z, 22);
-      b.cylX(M.alu, r * 0.56, 0.02, side < 0 ? x0 - 0.01 : x0 + w - 0.01, r, z, 18);
-      b.cylX(M.darker, r * 0.2, 0.03, side < 0 ? x0 - 0.02 : x0 + w - 0.01, r, z, 10);
+      bb.cylX(M.rubber, r, w, x0, r, z, 22);
+      bb.cylX(M.alu, r * 0.56, 0.02, side < 0 ? x0 - 0.01 : x0 + w - 0.01, r, z, 18);
+      bb.cylX(M.darker, r * 0.2, 0.03, side < 0 ? x0 - 0.02 : x0 + w - 0.01, r, z, 10);
     };
     const glassSlope = (cx, w, z1, y1, z2, y2, y0, zc) => {   // dünne Scheibe parallel zur Schräge (Profil in z/y)
       const dz = z2 - z1, dy = y2 - y1, l = Math.hypot(dz, dy), nz = dy / l * 0.025, ny = -dz / l * 0.025;
       const key = ['gl', z1, y1, z2, y2].map(v => typeof v === 'number' ? v.toFixed(2) : v).join('_');
-      b.side(winM, key, [[z1, y1], [z2, y2], [z2 + nz, y2 + ny], [z1 + nz, y1 + ny]], w, cx, y0, zc);
+      bb.side(winM, key, [[z1, y1], [z2, y2], [z2 + nz, y2 + ny], [z1 + nz, y1 + ny]], w, cx, y0, zc);
     };
     // ---- Koffer-Lkw (7,5 t), Heck an der Versandrampe
     const dv = door('D-VS');
@@ -1178,24 +1181,29 @@
       b.box(M.accent, cw + 0.01, 0.1, 2.02, cx, 1.62, zc + 1.0);
       b.rbox(cabM, 1.9, 0.35, 1.2, 0.15, cx, 2.94, zc + 0.6);                              // Dachspoiler
     }
-    // ---- Kastenwagen (Härterei-Abholung), seitlich vor dem Tor Fremdbearbeitung
+    // ---- Kastenwagen (Härterei-Abholung), längs vor der Fassade neben dem Tor Fremdbearbeitung
     const de = door('D-EXT');
     if (de) {
-      const cx = de.x + de.w / 2 + 1.6, z0 = HD + 1.2, W = 2.0;
-      b.add(gPlaneY(), M.blob, xf(cx, -0.02, z0 + 2.95, 0, 0, 0, W + 0.9, 1, 6.6));
-      b.side(vanM, 'van', [[0, 0], [5.95, 0], [6.0, 0.5, 0.08], [5.7, 0.9, 0.2], [4.55, 1.98, 0.32], [4.1, 2.16, 0.2], [0, 2.16, 0.1]], W, cx, 0.36, z0, 0, 0.03);
-      b.side(M.darker, 'vanb', [[0, 0], [6.02, 0], [6.02, 0.3], [0, 0.3]], W + 0.02, cx, 0.24, z0);
+      const vg = new THREE.Group(), vb = new Builder(); bb = vb;
+      const cx = 0, z0 = 0, W = 2.0;
+      vb.add(gPlaneY(), M.blob, xf(cx, 0.03, z0 + 2.95, 0, 0, 0, W + 0.9, 1, 6.6));
+      vb.side(vanM, 'van', [[0, 0], [5.95, 0], [6.0, 0.5, 0.08], [5.7, 0.9, 0.2], [4.55, 1.98, 0.32], [4.1, 2.16, 0.2], [0, 2.16, 0.1]], W, cx, 0.36, z0, 0, 0.03);
+      vb.side(M.darker, 'vanb', [[0, 0], [6.02, 0], [6.02, 0.3], [0, 0.3]], W + 0.02, cx, 0.24, z0);
       glassSlope(cx, W - 0.18, 5.62, 0.98, 4.6, 1.93, 0.36, z0);
       for (const sx of [-1, 1]) {
-        b.box(winM, 0.02, 0.58, 0.85, cx + sx * (W / 2 + 0.004), 1.12, z0 + 4.55);
-        b.box(M.darker, 0.02, 0.02, 3.4, cx + sx * (W / 2 + 0.004), 0.95, z0 + 2.3);
-        b.box(headM, 0.26, 0.1, 0.03, cx + sx * 0.7, 0.84, z0 + 6.02);
-        b.box(tailM, 0.1, 0.36, 0.03, cx + sx * 0.88, 1.0, z0 - 0.02);
-        b.box(M.black, 0.05, 0.22, 0.12, cx + sx * 1.1, 1.3, z0 + 4.6);
+        vb.box(winM, 0.02, 0.58, 0.85, cx + sx * (W / 2 + 0.004), 1.12, z0 + 4.55);
+        vb.box(M.darker, 0.02, 0.02, 3.4, cx + sx * (W / 2 + 0.004), 0.95, z0 + 2.3);
+        vb.box(headM, 0.26, 0.1, 0.03, cx + sx * 0.7, 0.84, z0 + 6.02);
+        vb.box(tailM, 0.1, 0.36, 0.03, cx + sx * 0.88, 1.0, z0 - 0.02);
+        vb.box(M.black, 0.05, 0.22, 0.12, cx + sx * 1.1, 1.3, z0 + 4.6);
         wheel(cx + sx * 0.77, z0 + 1.15, 0.34, 0.24, sx); wheel(cx + sx * 0.77, z0 + 4.95, 0.34, 0.24, sx);
       }
-      b.box(M.darker, 0.02, 1.75, 0.02, cx, 0.42, z0 - 0.012);
-      b.box(M.darker, W - 0.1, 0.18, 0.08, cx, 0.3, z0 + 6.0); b.box(M.orange, W + 0.01, 0.1, 4.4, cx, 1.42, z0 + 2.2);
+      vb.box(M.darker, 0.02, 1.75, 0.02, cx, 0.42, z0 - 0.012);
+      vb.box(M.darker, W - 0.1, 0.18, 0.08, cx, 0.3, z0 + 6.0); vb.box(M.orange, W + 0.01, 0.1, 4.4, cx, 1.42, z0 + 2.2);
+      vb.build(vg);
+      vg.position.set(de.x - 0.9, -0.04, HD + 2.6); vg.rotation.y = -PI / 2;
+      R.scene.add(vg);
+      bb = b;
     }
   }
   function std2(c, r, m) { return new THREE.MeshStandardMaterial({ color: c, roughness: r == null ? 0.6 : r, metalness: m || 0 }); }
@@ -1231,6 +1239,7 @@
   /** Schaltschrank mit Kühlgerät; Front zeigt nach ry */
   function elCab(b, x, z, w, h, d, ry, o) {
     o = o || {};
+    if (!ry && z < 0) ry = PI;   // Schaltschrank hinter der Maschine: Türen zeigen nach außen
     b.add(gRBox(w, h, d, 0.025, 0.01), o.mat || M.paint, xf(x, 0.1, z, 0, ry, 0));
     b.add(gRBox(w + 0.04, 0.1, d + 0.04, 0.02), M.dark, xf(x, 0, z, 0, ry, 0));
     const f = (lx, ly, lz) => { const [ox, oz] = rotXZ(lx, lz, ry); return [x + ox, ly, z + oz]; };
@@ -1239,6 +1248,19 @@
     for (let i = 0; i < doors; i++) { const p = f(-w / 2 + (i + 0.82) * w / doors, 0, d / 2 + 0.02); b.add(gBoxC(), M.darker, xf(p[0], 0.1 + h * 0.55, p[2], 0, ry, 0, 0.03, 0.16, 0.03)); }
     let p = f(-w / 2 + 0.16, 0, d / 2 + 0.004); b.add(gBoxC(), M.yellow, xf(p[0], 0.1 + h - 0.22, p[2], 0, ry, 0, 0.1, 0.09, 0.004));
     if (o.cool !== false) { p = f(o.coolX != null ? o.coolX : w * 0.18, 0, d / 2 + 0.06); b.add(gRBox(0.42, 0.55, 0.12, 0.02), M.paintW, xf(p[0], 0.1 + h - 0.85, p[2], 0, ry, 0)); for (let i = 0; i < 5; i++) { p = f(o.coolX != null ? o.coolX : w * 0.18, 0, d / 2 + 0.122); b.add(gBoxC(), M.darker, xf(p[0], 0.1 + h - 0.78 + i * 0.075, p[2], 0, ry, 0, 0.32, 0.02, 0.004)); } }
+  }
+  /** Rückwand-Details (Fläche bei z, Blick nach -z): Paneelfugen, Griffe, Lüftungsgitter, Warnschild */
+  function backDetail(b, x0, x1, y0, y1, z) {
+    const W = x1 - x0, n = Math.max(2, Math.round(W / 1.0)), pw = W / n, ph = y1 - y0;
+    for (let i = 1; i < n; i++) b.box(M.darker, 0.012, ph, 0.006, x0 + i * pw, y0, z);
+    b.box(M.darker, W - 0.1, 0.012, 0.006, (x0 + x1) / 2, y0 + ph * 0.6, z);
+    for (let i = 0; i < n; i++) b.box(M.darker, 0.025, 0.14, 0.03, x0 + (i + 0.84) * pw, y0 + ph * 0.32, z - 0.012);
+    for (const k of n > 3 ? [0, n - 2] : [0]) {
+      const vx = x0 + (k + 0.5) * pw, vy = y0 + ph * 0.7;
+      b.box(M.darker, Math.min(0.5, pw * 0.6), 0.28, 0.008, vx, vy, z - 0.001);
+      for (let i = 0; i < 4; i++) b.box(M.mid, Math.min(0.46, pw * 0.56), 0.016, 0.01, vx, vy + 0.04 + i * 0.06, z - 0.005);
+    }
+    b.box(M.yellow, 0.1, 0.09, 0.004, x0 + pw * 1.3, y0 + ph * 0.78, z - 0.001);
   }
   /** Kühlmittel-/Hydraulikaggregat: Tank mit Pumpe und Filter */
   function coolTank(b, x, z, w, d, h, ry) {
@@ -1317,6 +1339,20 @@
     b.box(inn, iw, 0.015, idp, cx, h - t - 0.03, ic);
     b.tilt(M.steelDark, iw, 0.03, idp * 0.7, cx, wy0 - 0.22, ic + idp * 0.1, 0, 0.32);
     b.box(M.steelDark, iw, 0.03, idp, cx, pl + 0.02, ic);
+    // Rückseite: Servicepaneele mit Fugen und Griffen, Lüftungsgitter, Warnschild; auf dem Dach ein Ölnebelabscheider
+    { const n = Math.max(2, Math.round(W / 0.95)), pw = W / n, bz = zb - 0.003, ph = h - pl - 0.2;
+      for (let i = 1; i < n; i++) b.box(M.darker, 0.012, ph, 0.006, x0 + i * pw, pl + 0.06, bz);
+      b.box(M.darker, W - 0.12, 0.012, 0.006, cx, pl + ph * 0.62, bz);
+      for (let i = 0; i < n; i++) b.box(M.darker, 0.025, 0.14, 0.03, x0 + (i + 0.84) * pw, pl + ph * 0.36, zb - 0.015);
+      const vx = x0 + pw * 0.5, vy = pl + ph * 0.74;
+      b.box(M.darker, Math.min(0.5, pw * 0.6), 0.3, 0.008, vx, vy, zb - 0.004);
+      for (let i = 0; i < 5; i++) b.box(M.mid, Math.min(0.46, pw * 0.56), 0.016, 0.01, vx, vy + 0.035 + i * 0.055, zb - 0.008);
+      b.box(M.yellow, 0.1, 0.09, 0.004, x0 + pw * (n > 2 ? 1.5 : 1.3), pl + ph * 0.8, zb - 0.004);
+      if (o.mist !== false && zi - zb > 0.55) {
+        const mx = x1 - Math.min(0.5, W * 0.2), mz = zb + Math.min(0.32, (zi - zb) / 2);
+        b.cyl(Pm, 0.19, 0.38, mx, h - 0.01, mz, 20); b.cyl(M.dark, 0.2, 0.05, mx, h + 0.37, mz, 20); b.cyl(M.darker, 0.07, 0.06, mx, h + 0.42, mz, 12);
+        b.box(M.darker, 0.12, 0.12, 0.3, mx - 0.28, h - 0.01, mz); b.box(M.darker, 0.2, 0.06, 0.06, mx - 0.18, h + 0.08, mz);
+      } }
     // Akzentleiste + Typenschild-Fläche
     b.box(M.accent, W - 0.2, 0.045, 0.012, cx, Math.min(h - r - 0.08, yEnd - 0.06), zf + 0.004);
     b.box(M.black, 0.42, 0.11, 0.008, x0 + 0.38, Math.min(h - r - 0.2, yEnd - 0.2), zf + 0.004);
@@ -1517,6 +1553,7 @@
     b.box(P, 7.6, 2.0, 0.06, 0.45, 0.78, -1.28); b.box(P, 7.6, 0.06, 1.0, 0.45, 2.75, -0.8);
     b.box(P, 0.06, 2.0, 2.0, 4.22, 0.78, -0.3); b.box(M.glass, 0.012, 0.9, 1.3, 4.25, 1.4, -0.2);
     b.box(M.accent, 7.5, 0.05, 0.012, 0.45, 2.55, -1.245);
+    backDetail(b, -2.6, 4.2, 0.85, 2.72, -1.313);
     // Schiebetüren vorne (drei Felder, mittleres beweglich)
     for (const x of [-1.7, 2.6]) { b.box(P, 2.3, 0.1, 0.05, x, 0.78, 0.62); b.box(P, 2.3, 0.12, 0.05, x, 2.42, 0.62); b.box(P, 0.08, 1.6, 0.05, x - 1.11, 0.88, 0.62); b.box(P, 0.08, 1.6, 0.05, x + 1.11, 0.88, 0.62); b.box(M.glass, 2.14, 1.52, 0.012, x, 0.9, 0.63); }
     b.box(M.steelDark, 7.6, 0.05, 0.06, 0.45, 2.56, 0.64); b.box(P, 7.6, 0.2, 0.06, 0.45, 2.55, 0.64);
@@ -2059,7 +2096,7 @@
     // ---------- Fremdbearbeitung: Hinweisschild
     const ex = ST.EXT.footprint;
     b.box(M.dark, 0.06, 1.6, 0.06, ex.x + 0.25, 0, ex.z + 0.25);
-    const exs = mesh(new THREE.PlaneGeometry(1.25, 0.42), new THREE.MeshStandardMaterial({ map: texSign('Härterei', 'Abholung 07:00 / 13:00', '#ff9d3d'), roughness: 0.5 }), ex.x + 0.9, 1.65, ex.z + 0.29);
+    const exs = mesh(new THREE.PlaneGeometry(1.25, 0.42), new THREE.MeshStandardMaterial({ map: texSign('Härterei', 'Übergabe an Spedition', '#ff9d3d'), roughness: 0.5 }), ex.x + 0.9, 1.65, ex.z + 0.29);
     sc.add(exs);
     // ---------- Versand: Packtisch, Wickelmaschine, Regal
     b.box(M.wood, 1.6, 0.05, 0.8, 61.9, 0.85, 26.0); b.box(M.dark, 1.5, 0.85, 0.7, 61.9, 0, 26.0);
@@ -2718,10 +2755,10 @@
   // ================================================================== Kamera
   const PRESETS = [
     { id: 'uebersicht', label: 'Übersicht', short: 'Übersicht', icon: 'grid', t: [32, 0, 20.5], r: 86, phi: 46, th: 18 },
-    { id: 'dreherei', label: 'Dreherei / Sonderbearbeitung', short: 'Dreherei', icon: 'factory', t: [29.5, 0, 16.5], r: 46, phi: 52, th: 12 },
-    { id: 'fraeserei', label: 'Fräserei / Schleiferei', short: 'Fräserei', icon: 'factory', t: [27, 0, 26.5], r: 40, phi: 50, th: 194 },
-    { id: 'logistik', label: 'Logistik & Lager', short: 'Logistik', icon: 'box', t: [22, 0, 5.5], r: 44, phi: 50, th: 6 },
-    { id: 'messraum', label: 'Messraum & Versand', short: 'Messraum', icon: 'target', t: [53, 0, 30.5], r: 34, phi: 50, th: 30 },
+    { id: 'dreherei', label: 'Dreherei / Sonderbearbeitung', short: 'Dreherei', icon: 'factory', t: [29.5, 0, 16.5], r: 46, phi: 52, th: 12, zone: ['M01', 'M02', 'M03', 'M04', 'M07', 'M08'] },
+    { id: 'fraeserei', label: 'Fräserei / Schleiferei', short: 'Fräserei', icon: 'factory', t: [27, 0, 27.5], r: 38, phi: 43, th: 194, zone: ['M05', 'M06', 'M09', 'M10', 'M11'] },
+    { id: 'logistik', label: 'Logistik & Lager', short: 'Logistik', icon: 'box', t: [22, 0, 5.5], r: 44, phi: 50, th: 6, zone: [] },
+    { id: 'messraum', label: 'Messraum & Versand', short: 'Messraum', icon: 'target', t: [53, 0, 30.5], r: 34, phi: 50, th: 30, zone: ['QS', 'M13', 'M11'] },
   ];
   function camState() {
     const c = R.camera.position, t = R.controls.target;
@@ -2730,6 +2767,7 @@
     return { tx: t.x, ty: t.y, tz: t.z, r, phi, th };
   }
   function goCam(dst, dur) {
+    R.introPending = false;
     const src = camState();
     const th = src.th + angD(src.th, dst.th);
     const d = Math.hypot(dst.tx - src.tx, dst.tz - src.tz) + Math.abs(dst.r - src.r) * 0.5 + Math.abs(angD(src.th, dst.th)) * 20;
@@ -2756,11 +2794,12 @@
     // Hochformat (Telefon, Tablet hochkant): Halle gedreht, damit die lange Seite in die Höhe läuft
     const asp = R.w / R.h;
     if (asp < 0.95 && p.id === 'uebersicht') { dst.th = 74 * DEG; dst.phi = 50 * DEG; dst.r = asp < 0.7 ? 112 : 112 - (asp - 0.7) * 60; dst.tx = 33; dst.tz = 21; }
-    if (instant) { setCam(dst); R.controls.update(); } else goCam(dst);
+    if (instant) { R.introPending = false; R.tween = null; setCam(dst); R.controls.update(); } else goCam(dst);
     markPresets(); renderSelBar();
   }
   function markPresets() {
     const p = PRESETS.find(x => x.id === R.preset);
+    R.zone = p && p.zone ? p.zone : null;
     if (R.ui.preLbl) R.ui.preLbl.textContent = p ? p.short : 'Freie Ansicht';
     if (R.root) R.root.querySelectorAll('[data-p]').forEach(b => { b.classList.toggle('on', b.dataset.p === R.preset); b.setAttribute('aria-checked', String(b.dataset.p === R.preset)); });
   }
@@ -2793,7 +2832,7 @@
     if (!R.ok || e.ctrlKey) return;
     e.preventDefault(); e.stopPropagation();
     hideHint();
-    R.tween = null; if (R.preset) { R.preset = null; markPresets(); }
+    R.tween = null; R.introPending = false; if (R.preset) { R.preset = null; markPresets(); }
     const r = R.root.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
     const dy = e.deltaMode === 1 ? e.deltaY * 18 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
     const f = Math.exp(clamp(dy, -240, 240) * 0.0016);
@@ -2869,7 +2908,7 @@
       computeUiRects();
     });
     ui.sel = el('div', { class: 'h3-ov h3-sel h3-glass', hidden: true });
-    ui.hint = el('div', { class: 'h3-ov h3-hint', html: '<b>Ziehen</b> drehen · <b>Rechte Maustaste</b> verschieben · <b>Mausrad</b> zoomen · <b>Klick</b> Details' });
+    ui.hint = el('div', { class: 'h3-ov h3-hint', html: '<b>Ziehen</b> drehen · <b>Rechte Maustaste</b> verschieben · <b>Mausrad</b> zoomen · <b>Klick</b> Details · <b>Doppelklick</b> heranholen' });
     root.append(ui.labels, ui.status, ui.mapbox, ui.tb, ui.sel, ui.hint, ui.mbar, ui.sheet, ui.tip);
     for (const n of [ui.status, ui.mapbox, ui.tb, ui.sel, ui.mbar, ui.sheet]) n.addEventListener('pointerdown', (e) => e.stopPropagation());
     root.addEventListener('pointerdown', () => closeMenus());
@@ -3094,6 +3133,7 @@
     _all.sort((a, b) => b.p - a.p || a.dist - b.dist);
     const pxPerM = H / (Math.tan(cam.fov * DEG / 2) * 2);
     const crowd = R.mobile ? 1 : 0;
+    const zone = R.preset ? R.zone : null;
     const sizeOf = (l, lv) => {
       if (l.route) { if (!l.measured) { l.w = l.el.offsetWidth; l.h = l.el.offsetHeight; l.measured = true; } return l; }
       let sz = l.sizes[lv];
@@ -3101,14 +3141,23 @@
       return sz;
     };
     const free = (x0, y0, x1, y1) => { if (x0 < 4 || y0 < 4 || x1 > W - 4 || y1 > H - 4) return false; for (const r of _rects) if (x0 < r[2] && x1 > r[0] && y0 < r[3] && y1 > r[1]) return false; return true; };
+    const underUi = (x, y) => { for (const r of R.uiRects) if (x > r[0] && x < r[2] && y > r[1] && y < r[3]) return true; return false; };
     for (const l of _all) {
       let ok = l.vis, x0 = 0, y0 = 0, x1 = 0, y1 = 0;
       if (ok && l.route) {
-        const sz = sizeOf(l, 0); x0 = l.sx - 12; y0 = l.sy + 12; x1 = x0 + sz.w; y1 = y0 + sz.h; ok = free(x0, y0, x1, y1);
+        const sz = sizeOf(l, 0);
+        // unten rechts vom Stationsnummer-Punkt; bei Kollision oben, unten links, oben links
+        for (let k = 0; k < 4; k++) {
+          x0 = k === 0 || k === 1 ? l.sx - 12 : l.sx + 12 - sz.w; y0 = k === 0 || k === 2 ? l.sy + 12 : l.sy - 12 - sz.h;
+          x1 = x0 + sz.w; y1 = y0 + sz.h; ok = free(x0, y0, x1, y1); if (ok) break;
+        }
+      } else if (ok && underUi(l.sx, l.sy)) {
+        ok = false;   // Ankerpunkt liegt unter einem Bedienfeld: kein verwaistes Etikett daneben
       } else if (ok) {
         const ppm = pxPerM / l.dist;
         let want = ppm > 34 ? 2 : ppm > 12.5 ? 1 : 0;
         if (crowd) want = Math.min(want, 1);
+        if (zone && l.mo && zone.indexOf(l.mo.id) < 0 && l.p < 90) want = 0;   // Bereichsansicht: Maschinen außerhalb nur als Kurzetikett
         if (l.p >= 90) want = Math.max(want, R.mobile ? 1 : 2);
         ok = false;
         let side = 'a';
@@ -3126,7 +3175,7 @@
           if (lv === 0) break;
         }
         if (l.el.dataset.l !== String(l.level)) l.el.dataset.l = String(l.level);
-        if (ok && l.el.dataset.p !== side) l.el.dataset.p = side;
+        if (ok && l.el.dataset.pl !== side) l.el.dataset.pl = side;
       }
       if (ok) {
         _rects.push([x0 - 4, y0 - 4, x1 + 4, y1 + 4]);
@@ -3304,8 +3353,19 @@
         WF.app.select(hit.kind, hit.id);
       } else if (WF.app.selected) WF.app.closeDrawer();
     });
+    // Doppelklick: Maschine heranholen, sonst den angeklickten Hallenpunkt in die Bildmitte holen (Abstand bleibt)
+    cv.addEventListener('dblclick', (e) => {
+      const r = R.root.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top, hit = pickAt(x, y);
+      if (hit && hit.kind === 'machine') { focusStation(hit.id); return; }
+      NDC.set(x / R.w * 2 - 1, -(y / R.h) * 2 + 1); RAY.setFromCamera(NDC, R.camera);
+      const o = RAY.ray.origin, dv = RAY.ray.direction; if (dv.y > -0.05) return;
+      const k = -o.y / dv.y, cs = camState();
+      R.preset = null; markPresets(); R.follow = null;
+      goCam({ tx: clamp(o.x + dv.x * k, 0, WF.profile.hall.w), ty: 0, tz: clamp(o.z + dv.z * k, 0, WF.profile.hall.d), r: Math.min(cs.r, 34), phi: cs.phi, th: cs.th }, 0.8);
+    });
     R.root.addEventListener('wheel', onWheel, { passive: false, capture: true });
-    R.controls.addEventListener('start', () => { R.tween = null; if (R.preset) { R.preset = null; markPresets(); } });
+    R.controls.addEventListener('change', () => { R.hoverDirty = true; });
+    R.controls.addEventListener('start', () => { R.tween = null; R.introPending = false; if (R.preset) { R.preset = null; markPresets(); } });
   }
   function storeClick(id) {
     const S = WF.sim.state;
@@ -3546,14 +3606,23 @@
   }
 
   // ================================================================== Pro Bild: Interpolation & Animation
+  /** Pausenplätze im Leitstand: rund um den Pausentisch, danach ein zweiter Ring (die Engine vergibt nur 6 Plätze) */
+  const BREAK_SLOTS = (() => {
+    const out = [], cx = 59.5, cz = 5.5;
+    for (let k = 0; k < 8; k++) { const a = k * TAU / 8 + PI / 8; out.push({ x: cx + Math.sin(a) * 1.02, z: cz + Math.cos(a) * 1.02 }); }
+    for (let k = 0; k < 14; k++) { const a = k * TAU / 14; const x = cx + Math.sin(a) * 1.85, z = cz + Math.cos(a) * 1.85; if (z > 4.2 && z < 7.6 && x > 57.4 && x < 62.2) out.push({ x, z }); }
+    return out;
+  })();
   function sample(S) {
+    let bi = 0;
     for (const id in R.people) {
       const pe = R.people[id], p = S.people[id];
       const vis = !!p && p.state !== 'offShift' && !p.vehicle;
       if (vis && !pe.vis) { pe.x = p.pos.x; pe.z = p.pos.z; pe.th = pe.h = p.heading || 0; }
       pe.vis = vis;
       if (!p) continue;
-      pe.x0 = pe.x; pe.z0 = pe.z; pe.x1 = p.pos.x; pe.z1 = p.pos.z;
+      const brk = p.state === 'break' && !p.route && BREAK_SLOTS.length ? BREAK_SLOTS[bi++ % BREAK_SLOTS.length] : null;
+      pe.x0 = pe.x; pe.z0 = pe.z; pe.x1 = brk ? brk.x : p.pos.x; pe.z1 = brk ? brk.z : p.pos.z;
       if (Math.hypot(pe.x1 - pe.x, pe.z1 - pe.z) > 40) { pe.x = pe.x0 = pe.x1; pe.z = pe.z0 = pe.z1; }
       const mv = Math.hypot(pe.x1 - pe.x0, pe.z1 - pe.z0);
       pe.moving = mv > 0.02 && (p.state === 'walking' || !!p.route);
@@ -3619,11 +3688,14 @@
     }
   }
 
+  const _CS = { tx: 0, ty: 0, tz: 0, r: 1, phi: 1, th: 0 };
   function frame(dt) {
     if (!R.ok || !R.visible) return;
     const S = WF.sim && WF.sim.state; if (!S || !S.machines) return;
     dt = Math.min(dt || 0.016, 0.1);
     R.time += dt;
+    // Einflug beim ersten Öffnen: erst nach den ersten Bildern starten (Shader-Kompilierung würde sonst den Anfang verschlucken)
+    if (R.introPending && ++R.introN > 3) { R.introPending = false; goCam(R.introDst, 2.2); }
     const t = R.time, app = WF.app;
     // Simulationszeit für die Interpolation (Engine rechnet in 1-s-Schritten)
     if (S.t !== R.lastT) {
@@ -3638,14 +3710,14 @@
     const lt = R.lightT == null ? 1 : R.lightT;
     if (Math.abs((R.lightK == null ? 1 : R.lightK) - lt) > 0.002) { R.lightK = damp(R.lightK == null ? 1 : R.lightK, lt, 1.6, dt); R.sun.intensity = 1.22 * R.lightK; R.hemi.intensity = 0.5 * (0.35 + 0.65 * R.lightK); R.fill.intensity = 0.3 * R.lightK;
       const night = Math.max(0, Math.min(1, (1 - R.lightK) / 0.58));
-      M.winGlass.emissiveIntensity = 0.55 - 0.45 * night;
       if (R.envMats) for (const m of R.envMats) m.envMapIntensity = m.userData.envBase * (1 - 0.6 * night);
       if (R.poolMat) { R.poolMat.opacity = 0.5 * night; R.pools.visible = night > 0.02; } }
 
     // Kamera: Fahrt, Folgen, Steuerung
     if (R.tween) {
-      const tw = R.tween; tw.t += dt / tw.dur; const k = easeIO(Math.min(1, tw.t)), s = tw.src, d = tw.dst;
-      setCam({ tx: s.tx + (d.tx - s.tx) * k, ty: s.ty + (d.ty - s.ty) * k, tz: s.tz + (d.tz - s.tz) * k, r: s.r + (d.r - s.r) * k, phi: s.phi + (d.phi - s.phi) * k, th: s.th + (d.th - s.th) * k });
+      const tw = R.tween; tw.t += dt / tw.dur; const k = easeIO(Math.min(1, tw.t)), s = tw.src, d = tw.dst, c = _CS;
+      c.tx = s.tx + (d.tx - s.tx) * k; c.ty = s.ty + (d.ty - s.ty) * k; c.tz = s.tz + (d.tz - s.tz) * k; c.r = s.r + (d.r - s.r) * k; c.phi = s.phi + (d.phi - s.phi) * k; c.th = s.th + (d.th - s.th) * k;
+      setCam(c); R.hoverDirty = true;
       if (tw.t >= 1) R.tween = null;
     } else if (R.follow) {
       const ps = R.follow.kind === 'person' ? S.people[R.follow.id] : null;
@@ -3733,7 +3805,7 @@
     if (R.selBox.visible) R.selBox.material.opacity = 0.65 + 0.35 * Math.sin(t * 3.2);
     // Flussnetz nur in der Übersicht: aus der Nähe würden die Bögen als breite Lichtbänder vor der Kamera stehen
     { const cd = R.camera.position.distanceTo(R.controls.target), k = Math.max(0, Math.min(1, (cd - 34) / 26));
-      R.netK = k; R.netMat.uniforms.uOp.value = 0.3 * k * (R.route && R.route.id ? 0.3 : 1); R.netGroup.visible = k > 0.02; }
+      R.netK = k; R.netMat.uniforms.uOp.value = 0.21 * k * (R.route && R.route.id ? 0.3 : 1); R.netGroup.visible = k > 0.02; }
     netPulses(dt);
     pulses(dt, t);
     // Hover (Raycast höchstens jedes zweite Bild)
@@ -3920,6 +3992,10 @@
     R.root.classList.toggle('narrow', w - (R.drawerW || 0) < 1060);
     computeUiRects();
     for (const id in R.lb) R.lb[id].sizes = {};
+    // Wechsel Hoch-/Querformat oder Telefon/Desktop: aktive Kamera-Voreinstellung neu einpassen
+    const fmt = (mob ? 'm' : 'd') + (w / h < 0.95 ? 'p' : 'l');
+    if (R.fmt && fmt !== R.fmt && R.preset && !R.tween && !R.introPending) preset(R.preset, true);
+    R.fmt = fmt;
   }
 
   // ================================================================== Aufbau / Lebenszyklus
@@ -4024,6 +4100,14 @@
     R.visible = true;
     if (!R.ok) return;
     resize(true);
+    if (!R.introDone) {
+      R.introDone = true;
+      const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (!reduce && !R.pending && !WF.app.selected && R.preset === 'uebersicht') {
+        const d = camState(); R.introDst = d; R.introN = 0; R.introPending = true;
+        setCam({ tx: d.tx, ty: d.ty, tz: d.tz, r: d.r * 1.42, phi: Math.max(0.3, d.phi - 0.2), th: d.th + 0.5 }); R.controls.update();
+      }
+    }
     R.lastT = -1;
     if (R.pending) { const p = R.pending; R.pending = null; if (p.fn === 'station') focusStation(p.id); else focusOrder(p.id); }
     R.shadowDirty = true;
