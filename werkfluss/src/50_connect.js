@@ -1384,7 +1384,7 @@
     else if (st.type === 'washer') { l1 = `${MODE_DE[sg.mode] || sg.mode} · ${U.fmtNum(sg.bathTempC)} °C · ${sg.cycle && sg.cycle !== '–' ? sg.cycle : 'bereit'}`; l2 = `${prog} · Zähler ${U.fmtNum(sg.partCounter)}`; }
     else if (st.type === 'assembly') { l1 = `${sg.terminalStep && sg.terminalStep !== '–' ? 'Montage ' + sg.terminalStep : 'kein Montageschritt aktiv'}`; l2 = `${prog} · Zähler ${U.fmtNum(sg.partCounter)}`; }
     else {
-      l1 = `${MODE_DE[sg.mode] || sg.mode} · ${U.fmtNum(sg.spindleRpm)} 1/min · Last ${U.fmtNum(sg.spindleLoadPct)} %`;
+      l1 = sg.spindleRpm > 0 ? `${MODE_DE[sg.mode] || sg.mode} · ${U.fmtNum(sg.spindleRpm)} 1/min · Last ${U.fmtNum(sg.spindleLoadPct)} %` : `${MODE_DE[sg.mode] || sg.mode} · Spindel steht`;
       l2 = `${prog}${sg.program && sg.program !== '–' ? ' · Zähler ' + U.fmtNum(sg.partCounter) : ''}${lv >= 3 && sg.toolInSpindleName ? ' · ' + sg.toolInSpindleName : ''}`;
     }
     if (sg.alarm) l1 = `Alarm ${sg.alarm}`;
@@ -1426,15 +1426,25 @@
     const groups = gatewayGroups();
     flowRefs = { gw: {}, chips: {}, srv: null };
     if (W < 560) { host.innerHTML = flowMobile(groups); bindFlowRefs(host); return; }
-    host.innerHTML = flowSvg(Math.max(560, W), groups);
+    // verfügbare Höhe: Karte daneben (gleiche Rasterzeile) – Diagramm füllt sie ohne Leerband
+    let availH = 0;
+    const card = host.closest('.card'), row = host.closest('.cn-rowA');
+    if (card && row && getComputedStyle(row).gridTemplateColumns.split(' ').length > 1) {
+      const other = [...row.children].find(c => c !== card);
+      if (other) availH = other.offsetHeight - (card.offsetHeight - host.clientHeight) - 24;
+    }
+    host.innerHTML = flowSvg(Math.max(560, W), groups, availH);
     bindFlowRefs(host);
   }
   function bindFlowRefs(host) {
     host.querySelectorAll('[data-fk]').forEach(e => { flowRefs[e.dataset.fk] = e; });
     host.querySelectorAll('[data-chip]').forEach(e => { flowRefs.chips[e.dataset.chip] = e.querySelector('[data-dot]') || e; });
   }
-  function flowSvg(W, groups) {
-    const rowH = 32, chipH = 25, gapG = 16, boxH = 78, pad = 2;
+  function flowSvg(W, groups, availH) {
+    const nRows = groups.reduce((a, g) => a + g.ids.length, 0);
+    const natural = nRows * 32 + (groups.length - 1) * 16 + 4;
+    const extra = Math.max(0, (availH || 0) - natural);
+    const rowH = Math.min(38, 32 + extra * 0.75 / Math.max(1, nRows)), chipH = 25, gapG = Math.min(28, 16 + extra * 0.25 / Math.max(1, groups.length - 1)), boxH = 78, pad = 2;
     let y = pad; const rows = [];
     for (const g of groups) {
       const inner = g.ids.length * rowH - (rowH - chipH);

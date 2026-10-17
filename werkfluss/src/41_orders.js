@@ -608,7 +608,7 @@
     .or-kpis > .or-k-risk{grid-column:span 4}
   }
   @media (max-width:760px){
-    .or-kpis{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;margin:0 -16px;padding:0 16px;scroll-padding:0 16px}
+    .or-kpis{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;margin:0 -18px;padding:0 18px 2px;scroll-padding:0 18px}
     .or-kpis::-webkit-scrollbar{display:none}
     .or-kpis > .kpi{flex:0 0 44%;scroll-snap-align:start}
     .or-kpis > .or-k-risk{flex-basis:80%}

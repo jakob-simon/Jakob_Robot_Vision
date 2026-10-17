@@ -1372,7 +1372,7 @@
     if (!n) { a.md.push('Diese Benachrichtigung ist nicht mehr vorhanden.'); return done(a); }
     const sev = (WF.SEV[n.sev] || WF.SEV.info).label;
     const st = n.status === 'resolved' ? 'erledigt' + (n.resolveNote ? ' – ' + n.resolveNote : '') : n.status === 'ack' ? 'quittiert' + (n.ackBy ? ' von ' + n.ackBy : '') : 'offen';
-    a.md.push(`**${n.title}**`, `${sev} · ${n.role} · ${tc(n.t)} · ${st}`, '', n.body || '');
+    a.md.push(`**${n.title}**`, `~ ${sev} · ${n.role} · ${tc(n.t)} · ${st}`, '', n.body || '');
     const key = String(n.key || ''), kind = key.split(':')[0];
     const ent = n.entity;
     let sub = null;
@@ -2053,6 +2053,7 @@
   .ai-md code{font:500 12px/1 var(--f-mono);background:var(--bg2);border:1px solid var(--line);border-radius:4px;padding:1px 4px}
   .ai-md hr{border:0;border-top:1px solid var(--line);margin:10px 0}
   .ai-md p.ai-note{font-size:11.5px;line-height:1.5;color:var(--faint);margin:10px 0 0}
+  .ai-md p + p.ai-note, .ai-md h4 + p.ai-note{margin-top:-4px;margin-bottom:8px}
   .ai-md .ai-cursor{display:inline-block;width:7px;height:14px;margin-left:2px;vertical-align:-2px;border-radius:1px;background:var(--accent);animation:aiCaret 1s steps(2,start) infinite}
   .ai-ent{--c:var(--info);display:inline-flex;align-items:center;gap:4px;height:19px;padding:0 5px 0 4px;margin:0 1px;border-radius:5px;vertical-align:1px;
     border:1px solid color-mix(in srgb,var(--c) 22%,transparent);background:color-mix(in srgb,var(--c) 9%,transparent);color:var(--text);font:500 11.3px/1 var(--f-mono);letter-spacing:-.01em;cursor:pointer;white-space:nowrap;transition:background-color .15s ease,border-color .15s ease}
