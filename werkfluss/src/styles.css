@@ -245,7 +245,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.8px; }
 .notif .n-a { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 
 /* ------------------------------------------------------------ Toasts & Modal */
-#toasts { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: max(16px, env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 8px; z-index: 70; pointer-events: none; }
+#toasts { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); transition: right .22s ease; bottom: max(16px, env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 8px; z-index: 70; pointer-events: none; }
 .toast { --c: var(--info); pointer-events: auto; min-width: 260px; max-width: min(380px, calc(100vw - 32px)); background: var(--card2); border: 1px solid var(--line2); border-radius: 10px; padding: 10px 12px; box-shadow: var(--shadow), inset 3px 0 0 var(--c); font-size: 13px; animation: toastIn .25s ease; cursor: pointer; }
 .toast .tt { font-weight: 600; }
 .toast .tb { color: var(--text2); font-size: 12.5px; margin-top: 2px; }
@@ -340,4 +340,11 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.8px; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* Toasts nicht über Detailbereich oder Copilot legen */
+@media (min-width: 901px) {
+  body.drawer-open #toasts { right: calc(min(480px, 100%) + 16px); }
+  body.ai-open #toasts { right: calc(min(440px, 100%) + 16px); }
+  body.ai-open.ai-beside.drawer-open #toasts { right: calc(min(480px, 100%) + min(440px, 100%) + 16px); }
 }

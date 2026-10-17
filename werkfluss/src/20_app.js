@@ -190,13 +190,16 @@
     try { spec.render(drawerBody); } catch (e) { console.error('[detail render]', e); drawerBody.append(el('div', { class: 'empty', text: 'Fehler: ' + e.message })); }
     d.classList.add('open');
     d.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('drawer-open');
   }
   /** Drawer ausblenden, Auswahl (z. B. hervorgehobener Auftrag in der Halle) aber behalten. */
   app.hideDrawer = () => {
     const d = drawer(); d.classList.remove('open'); d.setAttribute('aria-hidden', 'true'); drawerSpec = null;
+    document.body.classList.remove('drawer-open');
   };
   app.closeDrawer = () => {
     const d = drawer(); d.classList.remove('open'); d.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('drawer-open');
     drawerSpec = null; app.selected = null; WF.bus.emit('select', { kind: null, id: null });
   };
   app.refreshDrawer = () => { if (app.selected) openDetail(app.selected.kind, app.selected.id); };

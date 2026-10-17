@@ -226,12 +226,19 @@
   function placeCard() {
     if (!card || card.classList.contains('center')) return;
     const f = freeArea();
-    if (!f.docked || window.innerWidth < 700) { card.style.left = ''; card.style.width = ''; card.style.transform = ''; return; }
-    const w = Math.min(560, f.right - f.left - 32);
-    card.style.width = Math.max(300, w) + 'px';
-    card.style.left = (f.left + (f.right - f.left) / 2) + 'px';
+    if (window.innerWidth < 700) { card.style.left = ''; card.style.width = ''; card.style.transform = ''; return; }
+    // Karte immer im freien Bereich zwischen Navigation und Detail-/Copilot-Panel halten
+    const avail = f.right - f.left - 32;
+    const w = Math.max(300, Math.min(f.docked ? 540 : 600, avail));
+    // In der Halle rechtsbündig, damit Hallenplan und Statuspanel links sichtbar bleiben
+    const hall = WF.app && WF.app.current && WF.app.current.id === 'halle';
+    const x = hall && avail > w + 40 ? f.right - 16 - w : f.left + 16 + (avail - w) / 2;
+    card.style.width = w + 'px';
+    card.style.transform = 'none';
+    card.style.left = Math.round(x) + 'px';
   }
   const AUTO_MS = 14000;
+  let placeTimer = null;
 
   function clearAuto() { if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; } }
   function render() {
@@ -262,6 +269,8 @@
     document.body.append(card);
     placeCard();
     setTimeout(placeCard, 380);
+    // Drawer/Copilot öffnen oft erst nach dem Schritt (Animation) – Position nachführen
+    clearInterval(placeTimer); placeTimer = setInterval(placeCard, 450);
     scheduleAuto();
   }
   function scheduleAuto() {
@@ -297,7 +306,7 @@
     setTimeout(() => placeRing(step.ring), 450);
   }
   function stop() {
-    clearAuto(); clearTimers();
+    clearAuto(); clearTimers(); clearInterval(placeTimer); placeTimer = null;
     if (card) card.remove(); card = null;
     if (ring) ring.remove(); ring = null;
     idx = -1; ctxs = {};

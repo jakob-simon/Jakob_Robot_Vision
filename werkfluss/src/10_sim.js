@@ -156,6 +156,7 @@
   let SH = [], WORKWIN = [], NIDX = {}, FC = null, cur = null;
   let WALK = 1.3, FORK = 2.0, PLAN_AT = 2;
   let DAY_START = 6 * 3600, DAY_END = 22 * 3600;   // frühester Schichtbeginn / spätestes Schichtende (aus profile.shifts)
+  let DAYCAP = 14.5 * 3600, WARM = false;          // Schichtzeit ohne Pausen je Werktag; true während init vorrechnet
   let MA = [], PA = [], AA = [];   // Arrays der Maschinen/Personen/AGVs (schnelle Schleifen)
   let CV = 0, INB = null;          // Behälter-Version (Cache-Invalidierung) und Cache für inboundQty
   let PV = 0;                      // Plan-Version: steigt bei jeder Änderung, die die Prognose verschiebt (Cache-Invalidierung)
@@ -359,6 +360,7 @@
     }
     WORKWIN = buildWorkWindows();
     DAY_START = Math.min(...SH.map(x => x.start)); DAY_END = Math.max(...SH.map(x => x.end));
+    DAYCAP = SH.reduce((a, sh) => a + sh.wins.reduce((b, x) => b + x[1] - x[0], 0), 0) || 14.5 * 3600;
     const t0 = P.sim.startT != null ? P.sim.startT : 6 * 3600;
 
     const fresh = {
@@ -419,7 +421,8 @@
     ev('reset', 'info', { kind: 'plant', id: 'werk' }, 'Simulation gestartet – ' + P.company.name + ', ' + (cur ? cur.sh.name : 'keine Schicht'), null);
 
     const until = P.sim.warmupUntilT != null ? P.sim.warmupUntilT : t0;
-    while (S.t < until) step();
+    WARM = true;                       // Vorrechnen: reine Anzeige-Kennzahl S.kpi erst am Ende (liest die Simulation nie)
+    try { while (S.t < until) step(); } finally { WARM = false; }
     S.kpi = kpis();
     WF.bus.emit('sim:reset', { t: S.t });
     return S;
@@ -849,7 +852,7 @@
     if (open >= cfg.openMax) return;
     let why = null;
     if (open < cfg.openMin) why = `nur ${open} offene Aufträge`;
-    else { const bd = occupancy().backlogDays; if (bd < cfg.backlogMinDays) why = `Arbeitsvorrat nur ${nm(bd, 1)} Tage`; }
+    else if (S.t % 300 === 0) { const bd = occupancy().backlogDays; if (bd < cfg.backlogMinDays) why = `Arbeitsvorrat nur ${nm(bd, 1)} Tage`; }
     if (why) releaseIntake(why);
   }
   /** Schichtbeginn (Mo–Fr): 1–2 Aufträge aus dem Auftragsvorrat freigeben, solange der Arbeitsvorrat unter backlogMaxDays liegt */
@@ -2216,7 +2219,7 @@
           action: idx ? 'index' : 'replace', edge: x.tl.edge || 1, edges: x.tl.edges || 1 });
     }
     // Meldung nur neu formulieren, wenn sich Inhalt oder Zeitpunkt (Minute) geändert hat
-    const sig = nc.action + nc.group.map(x => x.spec.type + x.rem + (x.bundled ? 'b' : '') + (x.manual ? 'm' : '')).join() + '|' + nc.afterPart + '|' + Math.round((nc.etaT || 0) / 60) + '|' + (nc.waitFromT || 0) + '|' + (nc.staffNote || '') + '|' + nc.later.map(x => x.spec.type + x.afterPart).join();
+    const sig = nc.action + nc.group.map(x => x.spec.type + x.rem + (x.bundled ? 'b' : '') + (x.manual ? 'm' : '')).join() + '|' + nc.afterPart + '|' + Math.round((nc.etaT || 0) / 60) + '|' + (nc.waitFromT || 0) + (nc.waiting ? 'w' : '') + '|' + (nc.staffNote || '') + '|' + nc.later.map(x => x.spec.type + x.afterPart).join();
     if (m.toolSig === sig && hasOpen('tool:' + m.id)) return;
     m.toolSig = sig;
     const types = [...new Set(nc.group.map(x => x.spec.type).concat(nc.later.map(x => x.spec.type)))];
@@ -2245,10 +2248,10 @@
       return `In der Pause ${hh(nc.staffWin[0])}–${hh(nc.staffWin[1])} ist niemand mit Werkzeugwechsel-Qualifikation verfügbar – ${pre != null ? 'vor der Pause wechseln (Teilegrenze ca. ' + hh(pre) + ')' : 'Wechsel direkt nach der Pause (ca. ' + hh(nc.staffWin[1]) + ') als erste Aufgabe'} oder Pausenablösung einplanen (Bestand ${stockTxt}).`;
     }
     if (nc.staffReason === 'handover' && cur) return `Schichtwechsel ${hh(cur.end)}: die nächste Schicht kann ab ca. ${tclock(next)} wechseln – vor Schichtende vorbeugend wechseln oder bei der Übergabe als erste Aufgabe ansagen (Bestand ${stockTxt}).`;
-    const standSec = Math.max(0, next - Math.max(S.t, stopT));
-    if (cur && S.t < cur.end) return `Nach Schichtende ${hh(cur.end)} ist bis ${tclock(next)} niemand mehr verfügbar – vor Schichtende vorbeugend wechseln, sonst steht ${m.id} ab ca. ${tclock(stopT)} rund ${U.fmtDur(standSec)} (Bestand ${stockTxt}).`;
+    const standSec = Math.max(0, next - stopT);   // gesamter Stillstand (stabil, solange sich der Plan nicht ändert)
+    if (cur && S.t < cur.end) return `Nach Schichtende ${hh(cur.end)} ist bis ${tclock(next)} niemand mehr verfügbar – vor Schichtende vorbeugend wechseln, sonst steht ${m.id} ab ca. ${tclock(stopT)} rund ${U.fmtDur(standSec)} still (Bestand ${stockTxt}).`;
     const gT = lastNotifT('ghost:' + m.id);
-    return `${m.id} steht ${nc.waiting ? 'seit' : 'ab ca.'} ${tclock(stopT)} bis Schichtbeginn ${tclock(next)} (noch ca. ${U.fmtDur(standSec)}) – bis dahin ist niemand verfügbar${gT != null && S.t - gT < DAY ? '; Hinweis kam um ' + tclock(gT) + ' (Geisterschicht-Check)' : ''}. Zu Schichtbeginn zuerst wechseln (Bestand ${stockTxt}).`;
+    return `${m.id} steht ${nc.waiting ? 'seit' : 'ab ca.'} ${tclock(stopT)} bis Schichtbeginn ${tclock(next)} (Stillstand ca. ${U.fmtDur(standSec)}) – bis dahin ist niemand verfügbar${gT != null && S.t - gT < DAY ? '; Hinweis kam um ' + tclock(gT) + ' (Geisterschicht-Check)' : ''}. Zu Schichtbeginn zuerst wechseln (Bestand ${stockTxt}).`;
   }
   function ensureToolTask(m, urgent) {
     let tk = S.tasks[m.tasks.tc];
@@ -3252,7 +3255,7 @@
     }
     if (S.t % 300 === 0) lateCheck();
     if (S.t % 60 === 0) {
-      S.kpi = kpis();
+      if (!WARM) S.kpi = kpis();
       for (const id in S.people) { const p = S.people[id]; p.utilToday = p.dutySec > 0 ? Math.min(1, p.workSec / p.dutySec) : 0; }
       for (const id in S.transports) { const t = S.transports[id]; if (t.status === 'done' && S.t - t.doneT > 6 * 3600) delete S.transports[id]; }
       intakeTick();
@@ -3630,7 +3633,8 @@
   function orderAdvice(orderId) {
     const o = S.orders[orderId]; if (!o) return null;
     const open = { label: 'Auftrag öffnen', action: { type: 'select', kind: 'order', id: o.id } };
-    if (o.status === 'fertig') return { orderId: o.id, cause: 'Auftrag fertig', text: `${o.id} ist fertig (${o.shippedQty}/${o.qty} Stk).`, action: null, actions: [open], alternatives: [], sideEffects: [], whatIf: null };
+    if (o.status === 'fertig') return { orderId: o.id, risk: riskOf(o, o.doneT), lateSec: o.doneT - o.due, eta: o.doneT, due: o.due, cause: 'Auftrag fertig', causeKind: 'done', bottleneckStation: null,
+      text: `${o.id} ist fertig (${o.shippedQty}/${o.qty} Stk).`, action: null, actionLabel: null, actions: [open], alternatives: [], sideEffects: [], whatIf: null };
     const fc = forecast(), f = fc.orders[o.id] || {}, eta = f.eta != null ? f.eta : null;
     const lateSec = eta != null ? eta - o.due : null, risk = riskOf(o, eta);
     // Ursache: Rohmaterial fehlt im 1. Arbeitsgang, längster Abschnitt in der Fremdbearbeitung, sonst Engpass-Arbeitsgang
@@ -3755,83 +3759,7 @@
     return WCC;
   }
   /** Schichtzeit (ohne Pausen) eines Werktags in Sekunden – Maßstab für „Vorrat in Tagen“ */
-  const dayCapSec = () => SH.reduce((a, sh) => a + sh.wins.reduce((b, x) => b + x[1] - x[0], 0), 0) || 14.5 * 3600;
-  /** Belegung: Maschinen mit eingeplantem Auftrag und Arbeitsvorrat in Schichttagen (Mittel der Bearbeitungsmaschinen) */
-  function occupancy() {
-    const wc = workContent(), cap = dayCapSec(), byMachine = {};
-    let withWork = 0, withBacklog = 0, sum = 0, nM = 0, max = 0, maxId = null;
-    for (let j = 0; j < MA.length; j++) {
-      const m = MA[j], d = Math.round(wc.w[m.id] / cap * 100) / 100;
-      byMachine[m.id] = d;
-      if (m.op) withWork++;
-      if (wc.w[m.id] > 0) withBacklog++;
-      if (m.kind === 'machine') { sum += d; nM++; if (d > max) { max = d; maxId = m.id; } }
-    }
-    return { machinesWithWork: withWork, machinesWithBacklog: withBacklog, total: MA.length, backlogDays: nM ? Math.round(sum / nM * 100) / 100 : 0,
-      backlogDaysMax: max, backlogMaxMachine: maxId, byMachine };
-  }
-  /** Engpass – eine Definition für alle Ansichten: unter den Stationen, die laut Prognose den Durchlauf gefährdeter
-      (spät/knapp) Aufträge begrenzen, die mit dem größten Arbeitsvorrat; sonst die mit dem größten Arbeitsvorrat. */
-  function bottleneck() {
-    const fc = forecast(), wc = workContent().w;
-    const limits = {}, risky = {};
-    for (const id in fc.orders) {
-      const f = fc.orders[id], o = S.orders[id];
-      if (!o || f.done || o.status === 'fertig' || !f.bottleneckStation) continue;
-      const sid = f.bottleneckStation;
-      (limits[sid] || (limits[sid] = [])).push(o);
-      const rk = riskOf(o, f.eta);
-      if (rk === 'spät' || rk === 'knapp') (risky[sid] || (risky[sid] = [])).push({ o, rk });
-    }
-    let best = null;
-    const pick = (ids) => { for (const sid of ids) if (S.machines[sid] && wc[sid] > 0 && (best == null || wc[sid] > wc[best])) best = sid; };
-    pick(Object.keys(risky));
-    const atRisk = best != null;
-    if (!atRisk) pick(MA.map(m => m.id));
-    if (best == null) return null;
-    const lim = (limits[best] || []).slice().sort((a, b) => a.due - b.due || (a.id < b.id ? -1 : 1));
-    const late = (risky[best] || []).slice().sort((a, b) => (a.rk === 'spät' ? 0 : 1) - (b.rk === 'spät' ? 0 : 1) || a.o.due - b.o.due);
-    const h = wc[best] / 3600, hTxt = U.fmtNum(h, h < 10 ? 1 : 0) + ' h';
-    const tag = (x) => x.o.id + (x.rk === 'spät' ? ' (verspätet)' : ' (knapp)');
-    let what;
-    if (late.length) what = 'begrenzt ' + late.slice(0, 3).map(tag).join(', ') + (late.length > 3 ? ` u. ${late.length - 3} weitere` : '');
-    else if (lim.length) what = 'begrenzt ' + lim.slice(0, 3).map(o => o.id).join(', ') + (lim.length > 3 ? ` u. ${lim.length - 3} weitere` : '') + ' (im Plan)';
-    else what = 'größter Arbeitsvorrat im Werk';
-    return { stationId: best, short: ST[best].short || best, name: ST[best].name, workSec: Math.round(wc[best]), workDays: Math.round(wc[best] / dayCapSec() * 100) / 100,
-      atRisk, orders: lim.map(o => o.id), late: late.map(x => x.o.id), why: `Arbeitsvorrat ${hTxt} · ${what}` };
-  }
-
-  /** Terminrisiko – eine Definition für Auftragsliste, KI und Engpass: spät (Prognose nach Termin bzw. fertig mit
-      Fehlmenge), knapp (< 4 h Puffer), ok, unbekannt (keine Prognose) */
-  function riskOf(o, eta) {
-    if (eta == null) return 'unbekannt';
-    const slack = o.due - eta;
-    if (o.status === 'fertig') return slack < 0 || o.shippedQty < o.qty ? 'spät' : 'ok';
-    return slack < 0 ? 'spät' : slack < 4 * 3600 ? 'knapp' : 'ok';
-  }
-  /** Arbeitsvorrat je Station in Sekunden: Rüsten + Bearbeitung (inkl. Einlegen, Werkzeugwechsel-Zuschlag) + Rest des
-      laufenden Teils bzw. der Störung – für alle offenen Arbeitsgänge (auch solche, deren Teile noch beim Vorgänger sind) */
-  let WCC = null;
-  function workContent() {
-    if (WCC && WCC.t === S.t && WCC.v === PV) return WCC;
-    const w = {}, n = {};
-    for (let j = 0; j < MA.length; j++) { w[MA[j].id] = 0; n[MA[j].id] = 0; }
-    for (const oid in S.orders) {
-      const o = S.orders[oid]; if (o.status === 'fertig') continue;
-      for (let i = 0; i < o.routing.length; i++) {
-        const m = S.machines[o.routing[i].station];
-        if (!m || o.ops[i].complete) continue;
-        const active = !!(m.op && m.op.oid === oid && m.op.idx === i);
-        const x = workFor(m, o, i, active);
-        if (!active && x.n <= 0) continue;
-        w[m.id] += x.setup + x.run + x.partRem; n[m.id]++;
-      }
-    }
-    WCC = { t: S.t, v: PV, w, n };
-    return WCC;
-  }
-  /** Schichtzeit (ohne Pausen) eines Werktags in Sekunden – Maßstab für „Vorrat in Tagen“ */
-  const dayCapSec = () => SH.reduce((a, sh) => a + sh.wins.reduce((b, x) => b + x[1] - x[0], 0), 0) || 14.5 * 3600;
+  const dayCapSec = () => DAYCAP;
   /** Belegung: Maschinen mit eingeplantem Auftrag und Arbeitsvorrat in Schichttagen (Mittel der Bearbeitungsmaschinen) */
   function occupancy() {
     const wc = workContent(), cap = dayCapSec(), byMachine = {};

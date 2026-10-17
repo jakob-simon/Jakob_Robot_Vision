@@ -2136,7 +2136,18 @@ function reviewPhase() {
           const eil = (nn.actions || []).find((a) => a.action && a.action.type === 'setPriority');
           lateChecked++; R();
           if (eil && !(nn.whatIf && nn.whatIf.recommend && !nn.whatIf.newlyLate.length)) fail('review', `${nn.key} offers 'Als Eilauftrag' although the what-if says ${short(nn.whatIf)}`, 'lateeil');
-          if (!eil && !/Überstunden|Teillieferung|Eilauftrag/.test(nn.suggestion || '')) fail('review', `${nn.key}: recommendation without alternative („${(nn.suggestion || '').slice(0, 80)}“)`, 'latealt');
+          if (!eil && !/Überstunden|Teillieferung|Eilauftrag|Expressdurchlauf|Copilot/.test(nn.suggestion || '')) fail('review', `${nn.key}: recommendation without alternative („${(nn.suggestion || '').slice(0, 80)}“)`, 'latealt');
+          if (/verlagern/.test(nn.suggestion || '') && !(nn.actions || []).some((a) => a.action && a.action.type === 'moveOp')) fail('review', `${nn.key} says 'verlagern' without a moveOp action („${nn.suggestion.slice(0, 90)}“)`, 'latemove');
+        }
+        // eine Empfehlungsquelle: orderAdvice
+        for (const id of Object.keys(st().orders)) {
+          const a = SIM.orderAdvice(id); if (!a) continue;
+          R();
+          if (typeof a.text !== 'string' || !a.text || !Array.isArray(a.alternatives) || !Array.isArray(a.sideEffects) || !Array.isArray(a.actions)) { fail('review', `orderAdvice('${id}') malformed: ${short(a)}`, 'advshape'); continue; }
+          const hasMove = a.alternatives.some((x) => x.kind === 'moveOp');
+          if (/verlagern/.test(a.text) && !hasMove) fail('review', `orderAdvice('${id}') says 'verlagern' although no alternative machine exists: „${a.text.slice(0, 100)}“`, 'advmove');
+          if (a.action && a.action.type === 'setPriority' && !(a.whatIf && a.whatIf.recommend && !a.whatIf.newlyLate.length && !a.whatIf.laterLate.length)) fail('review', `orderAdvice('${id}') offers Eilauftrag against its what-if ${short(a.whatIf)}`, 'adveil');
+          if (a.action && a.action.type === 'moveOp' && !a.alternatives.some((x) => x.kind === 'moveOp' && x.ok && x.action && x.action.stationId === a.action.stationId)) fail('review', `orderAdvice('${id}') moveOp action without a confirmed alternative`, 'advmv2');
         }
       }
       note('review', `what-if: ${n} orders evaluated read-only at Mo 08:40; ${lateChecked} 'Termin gefährdet' samples checked (Eilauftrag only when no other order becomes late)`);
