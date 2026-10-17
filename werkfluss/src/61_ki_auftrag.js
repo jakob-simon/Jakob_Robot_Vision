@@ -60,6 +60,8 @@
     return U.fmtDur(Math.round(sec / 60) * 60);
   }
   const fH = (h) => nf(h, h < 10 ? 2 : 1) + ' h';
+  /** Werkstoff-/Normbezeichnungen nicht am Bindestrich umbrechen */
+  const nw = (t) => String(t || '').split(' ').map(w => /-/.test(w) ? `<span style="white-space:nowrap">${esc(w)}</span>` : esc(w)).join(' ');
 
   // ------------------------------------------------------------------ Arbeitszeitkalender (Nachbau der Engine-Regeln)
   // Engine-intern (10_sim.js addWork/nextWorkStart/nextDayWindow) – nicht öffentlich; identisch aus profile.shifts nachgebaut.
@@ -547,11 +549,11 @@
           { kind: 'fit', text: 'Ø45 k6', detail: 'Lagersitz, geschliffen Ra 0,4 · Bezug A', critical: true, pos: [64, 88] },
           { kind: 'fit', text: 'Ø40 k6', detail: 'Lagersitz, geschliffen Ra 0,4 · Bezug B', critical: true, pos: [208, 88] },
           { kind: 'fit', text: 'Ø35 h6', detail: 'Antriebszapfen, Ra 0,8', critical: true, pos: [238, 89] },
-          { kind: 'runout', text: '0,01 A-B', detail: 'Rundlauf Zapfen zu den Lagersitzen', critical: true, pos: [222, 107] },
+          { kind: 'runout', text: '0,01 A-B', detail: 'Rundlauf Zapfen zu den Lagersitzen', critical: true, pos: [216.6, 105.2] },
           { kind: 'hardness', text: '55+3 HRC', detail: 'Lagersitze induktiv gehärtet, Rht 1,5+1 mm', critical: true, pos: [58, 100.5] },
           { kind: 'keyway', text: 'Nut 10 P9 × 40', detail: 'Passfedernut DIN 6885-A, Restmaß 30 −0,2', critical: false, pos: [242, 60] },
           { kind: 'thread', text: 'DIN 332-DS M10', detail: 'Zentrierbohrung mit Gewinde', critical: false, pos: [262, 76] },
-          { kind: 'runout', text: '0,02 A-B', detail: 'Planlauf Flanschfläche', critical: false, pos: [30, 27] },
+          { kind: 'runout', text: '0,02 A-B', detail: 'Planlauf Flanschfläche', critical: false, pos: [49.6, 26.8] },
           { kind: 'tol', text: 'ISO 2768-mK', detail: 'Allgemeintoleranzen, Kanten ISO 13715', critical: false },
         ],
         routing: [
@@ -612,12 +614,12 @@
         raw: { materialId: 'MAT-ALBL', text: 'Lagerblock AlMgSi1 160×120×80 → 8 Platten 120×80×17 je Block (Säge)', perPart: 0.125, unit: 'Stk' },
         features: [
           { kind: 'fit', text: 'Ø30 H7', detail: 'Zentrierbohrung, Ra 0,8', critical: true, pos: [91, 67.5] },
-          { kind: 'perp', text: 'Ø0,02 A', detail: 'Bohrung senkrecht zur Auflagefläche', critical: true, pos: [128, 111] },
+          { kind: 'perp', text: 'Ø0,02 A', detail: 'Bohrung senkrecht zur Auflagefläche', critical: true, pos: [136.6, 115.8] },
           { kind: 'flat', text: '0,02', detail: 'Ebenheit der Auflagefläche A', critical: true, pos: [10, 150] },
-          { kind: 'coating', text: 'Eloxal E6/EV1', detail: 'natur 10–15 µm, Passung Ø30 abdecken', critical: true, pos: [178, 135] },
+          { kind: 'coating', text: 'Eloxal E6/EV1', detail: 'natur 10–15 µm, Passung Ø30 abdecken', critical: true, pos: [171.6, 131.4] },
           { kind: 'thread', text: '4× M10 durch', detail: 'Teilung 90 × 55', critical: false, pos: [136, 95] },
           { kind: 'hole', text: '2× Ø10 durch', detail: 'Abstand 64', critical: false, pos: [59, 67.5] },
-          { kind: 'parallel', text: '0,02 A', detail: 'Parallelität Oberseite zur Auflage', critical: false, pos: [176, 117] },
+          { kind: 'parallel', text: '0,02 A', detail: 'Parallelität Oberseite zur Auflage', critical: false, pos: [175.6, 113.2] },
         ],
         routing: [
           { op: 'Sägen (Platten aus Lagerblock)', station: 'M01', setupMin: 10, cycleMin: 1.2, transferBatch: 24, firstPiece: false,
@@ -723,23 +725,28 @@
   // ------------------------------------------------------------------ Material: Bestand, Reservierungen, Bedarf
   /** Bedarf offener Aufträge an diesem Material (erster Arbeitsgang, noch nicht entnommen) */
   let ignoreOid = null;   // eingelasteter Auftrag dieses Angebots – zählt bei der eigenen Neuberechnung nicht als Fremdbelegung
+  /** offener Materialbedarf eines Auftrags (erster Arbeitsgang, noch nicht entnommen) */
+  function needOf(o, matId, mag) {
+    const st = S(), r0 = o.routing[0];
+    if (!r0 || !r0.material || r0.material.id !== matId || o.status === 'fertig') return 0;
+    const left = WF.sim.partsLeft(o.id, r0.seq); if (!(left > 0)) return 0;
+    const sn = STN(r0.station) || {};
+    let amount = left * r0.material.perPart;
+    if (sn.type === 'saw') { /* Säge entnimmt je Teil */ }
+    else if (sn.barMagazineM) { const m = st.machines[r0.station]; if (m && m.barMat === matId && mag && !mag[m.id]) { amount -= m.barStockM || 0; mag[m.id] = 1; } }
+    else {
+      let issued = 0;
+      for (const cid in st.containers) { const c = st.containers[cid]; if (c.orderId === o.id && c.idx === 0 && c.kind === 'raw' && (c.state === 'ready' || c.state === 'transit' || c.state === 'input')) issued += c.qty; }
+      amount -= issued * r0.material.perPart;
+    }
+    return Math.max(0, amount);
+  }
   function reservedOf(matId) {
     const st = S(), list = []; let total = 0; const mag = {};
     for (const id in st.orders) {
-      const o = st.orders[id]; if (o.status === 'fertig' || id === ignoreOid) continue;
-      const r0 = o.routing[0]; if (!r0 || !r0.material || r0.material.id !== matId) continue;
-      const left = WF.sim.partsLeft(o.id, r0.seq); if (!(left > 0)) continue;
-      const sn = STN(r0.station) || {};
-      let amount = left * r0.material.perPart;
-      if (sn.type === 'saw') { /* Säge entnimmt je Teil */ }
-      else if (sn.barMagazineM) { const m = st.machines[r0.station]; if (m && m.barMat === matId && !mag[m.id]) { amount -= m.barStockM || 0; mag[m.id] = 1; } }
-      else {
-        let issued = 0;
-        for (const cid in st.containers) { const c = st.containers[cid]; if (c.orderId === o.id && c.idx === 0 && c.kind === 'raw' && (c.state === 'ready' || c.state === 'transit' || c.state === 'input')) issued += c.qty; }
-        amount -= issued * r0.material.perPart;
-      }
-      amount = Math.max(0, amount);
-      if (amount > 1e-6) { total += amount; list.push({ id: o.id, amount }); }
+      if (id === ignoreOid) continue;
+      const amount = needOf(st.orders[id], matId, mag);
+      if (amount > 1e-6) { total += amount; list.push({ id, amount }); }
     }
     return { total, list };
   }
@@ -747,7 +754,9 @@
   function matInfo(q, qty, s0, fc) {
     const id = q.raw && q.raw.materialId; const mt = matOf(id);
     if (!mt) return { none: true, ok: true };
-    const st = S(), now = st.t, perPart = q.raw.perPart || 0, need = qty * perPart;
+    const st = S(), now = st.t, perPart = q.raw.perPart || 0;
+    // bereits eingelastet: nur noch der offene Rest dieses Auftrags (Entnahmen sind schon im Bestand verbucht)
+    const need = ignoreOid && st.orders[ignoreOid] ? needOf(st.orders[ignoreOid], id, {}) : qty * perPart;
     const res = reservedOf(id);
     const startOf = (oid) => {
       const o = st.orders[oid], f = fc && fc.orders[oid]; if (!o || !f || !f.ops) return -Infinity;
@@ -758,8 +767,12 @@
     const resBefore = before.reduce((a, x) => a + x.amount, 0);
     const free = mt.onHand - resBefore;
     const open = (st.purchases || []).filter(p => p.materialId === id && p.status === 'bestellt').sort((a, b) => a.etaT - b.etaT);
-    let readyT = null, needsOrder = false;
-    const ok = free + 1e-9 >= need;
+    let readyT = null, needsOrder = false, viaOrder = null;
+    // Bestellungen, die vor dem geplanten Start eintreffen, zählen als verfügbar
+    const early = open.filter(p => s0 != null && p.etaT <= s0);
+    const freeAtStart = free + early.reduce((a, p) => a + p.qty, 0);
+    const ok = freeAtStart + 1e-9 >= need;
+    if (ok && free + 1e-9 < need) viaOrder = early[early.length - 1] || null;
     if (!ok) {
       let cover = Math.max(0, free);
       for (const p of open) { cover += p.qty; if (cover + 1e-9 >= need) { readyT = p.etaT; break; } }
@@ -770,7 +783,7 @@
     const dec = mt.unit === 'm' ? 1 : 0;
     const suggest = Math.max(mt.reorderQty, Math.ceil(Math.max(0, mt.min - afterQ)));
     const shortParts = ok ? 0 : Math.ceil((need - Math.max(0, free)) / Math.max(1e-9, perPart));
-    return { id, mt, perPart, need, res, before, resBefore, free, open, ok, readyT, needsOrder, after: afterQ, laterList: after, laterShort, belowMin: afterQ < mt.min, suggest, dec, shortParts };
+    return { id, mt, perPart, need, res, before, resBefore, free, freeAtStart, viaOrder, open, ok, readyT, needsOrder, after: afterQ, laterList: after, laterShort, belowMin: afterQ < mt.min, suggest, dec, shortParts };
   }
   const qtyU = (v, mt) => nf(v, mt && mt.unit === 'm' ? (v < 1 ? (Math.round(v * 1000) % 10 ? 3 : 2) : v < 10 ? 2 : 1) : (Math.round(v * 1000) % 1000 ? (Math.round(v * 1000) % 10 ? 3 : 2) : 0)) + ' ' + (mt ? mt.unit : '');
 
@@ -1205,6 +1218,13 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-ai[data-s="checking"] i{animation:kaBlink 1.1s ease-in-out infinite}
   .ka-grid{display:grid;gap:16px;grid-template-columns:minmax(420px,.86fr) minmax(0,1.14fr);align-items:start}
   .ka-subh{display:flex;align-items:center;gap:10px;padding:10px 14px 0;border-top:1px solid var(--line)}
+  @media (min-width:700px) and (max-width:1240px){
+    .ka-srcgrid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(250px,1fr)}
+    .ka-srcB{border-left:1px solid var(--line);display:flex;flex-direction:column}
+    .ka-srcB .ka-subh{border-top:0;padding-top:14px}
+    .ka-srcB .ka-form{grid-template-columns:minmax(0,1fr)}
+    .ka-srcB .ka-go{margin-top:auto}
+  }
   .ka-subh h3{margin:0;font:600 13px/1.2 var(--f-ui)}.ka-subh .muted{font-size:12px;margin-left:auto}
   @media (max-width:1240px){.ka-grid{grid-template-columns:minmax(0,1fr)}}
   .ka-left,.ka-right{display:flex;flex-direction:column;gap:14px;min-width:0}
@@ -1219,8 +1239,6 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-ex .th{display:block;border-radius:4px;overflow:hidden;aspect-ratio:2.35/1;box-shadow:0 0 0 1px var(--line)}
   .ka-ex .th svg{display:block;width:100%;height:100%}
   .ka-ex b{display:block;font-size:12px;font-weight:600;color:var(--text);padding:0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:16px}
-  .ka-zbtn{position:absolute;top:8px;right:8px;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;border:1px solid color-mix(in srgb,var(--bg) 30%,transparent);background:color-mix(in srgb,var(--panel) 82%,transparent);color:var(--text2);cursor:pointer;backdrop-filter:blur(3px);opacity:.88;transition:opacity .15s,color .15s}
-  .ka-zbtn:hover{opacity:1;color:var(--text)}
   @media (min-width:1241px){.ka-left.stick{position:sticky;top:0}}
   .ka-ex small{display:block;font-size:10.5px;line-height:1.25;color:var(--muted);padding:0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ka-ex.up .th{display:grid;place-items:center;align-content:center;gap:2px;background:var(--bg);border:1px dashed var(--line2);box-shadow:none;color:var(--muted)}
@@ -1375,6 +1393,14 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   .ka-altb em{font-style:normal;color:var(--muted)}
   .ka-free{font-size:11.5px;color:var(--muted);white-space:nowrap}
   .ka-free.w{color:color-mix(in srgb,var(--st-wait) 85%,white)}
+  .ka-chain{display:flex;align-items:center;flex-wrap:wrap;gap:6px 4px;padding:10px 14px;border-bottom:1px solid var(--line);background:linear-gradient(90deg,color-mix(in srgb,var(--mat) 5%,transparent),transparent 70%)}
+  .ka-cc{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px 0 8px;border-radius:7px;background:var(--bg2);border:1px solid var(--line2);font-size:11.5px;color:var(--text2);white-space:nowrap}
+  .ka-cc i{width:7px;height:7px;border-radius:50%;background:var(--c,var(--st-idle))}
+  .ka-cc b{font:600 11.5px/1 var(--f-mono);color:var(--text)}
+  .ka-cc small{font-size:11px;color:var(--muted)}
+  .ka-cc.ext{border-color:color-mix(in srgb,var(--mat) 45%,transparent);background:color-mix(in srgb,var(--mat) 9%,transparent);color:color-mix(in srgb,var(--mat) 85%,white)}
+  .ka-cc.ext b{color:color-mix(in srgb,var(--mat) 90%,white);font-family:var(--f-ui)}
+  .ka-ca{display:inline-grid;place-items:center;color:var(--mat);opacity:.9}
   .ka-ops-f{display:flex;gap:6px 18px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line);background:var(--bg2);font-size:12px;color:var(--muted)}
   .ka-ops-f b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
   .ka-legend{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted)}
@@ -1623,9 +1649,12 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     if (!quote || !S()) { calc = null; return null; }
     ignoreOid = placed && S().orders[placed.id] && placed.key === quoteKey() ? placed.id : null;
     const qty = ui.qty, prio = ui.prio;
-    const sch = schedule(quote, qty, prio);
+    // zwei Durchgänge: Gleichstände entscheidet die Engine nach dem Termin, der tatsächlich eingetragen wird
+    let sch = schedule(quote, qty, prio);
+    const due1 = chosenDue({ sch, zus: zusageOf(sch), wunsch: dueT() });
+    if (Math.abs(due1 - sch.myDue) > 60) sch = schedule(quote, qty, prio, { due: due1 });
     const mat = sch.mat;
-    const schAlt = prio === 'normal' ? schedule(quote, qty, 'eil') : null;
+    const schAlt = prio === 'normal' ? schedule(quote, qty, 'eil', { due: due1 }) : null;
     const pr = price(quote, qty, prio, ui.zus);
     const zus = zusageOf(sch);
     const wunsch = dueT();
@@ -1634,7 +1663,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
       return [r.orig.station].concat(r.alts.map(a => a.station)).map(sid => {
         if (sid === r.station) return { sid, eta: sch.eta, dCost: 0 };
         const q2 = withStation(k, sid);
-        return { sid, eta: schedule(q2, qty, prio).eta, dCost: price(q2, qty, prio, ui.zus).machSum - pr.machSum };
+        return { sid, eta: schedule(q2, qty, prio, { due: sch.myDue }).eta, dCost: price(q2, qty, prio, ui.zus).machSum - pr.machSum };
       });
     });
     const fc = WF.sim.forecast(120);
@@ -1672,7 +1701,8 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
         act: mt.onOrder ? null : { label: `${qtyU(m.suggest, mt)} nachbestellen`, act: 'reorder' } });
       else if (m.belowMin) H.push({ sev: 'warn', ic: 'box', t: 'Bestand fällt unter Mindestbestand', p: `${mt.name}: nach diesem Auftrag und den Reservierungen${resTxt} noch ${qtyU(Math.max(0, m.after), mt)} (Mindestbestand ${qtyU(mt.min, mt)})${mt.onOrder ? ' – bestellt: ' + qtyU(mt.onOrder, mt) : ''}.`,
         act: mt.onOrder ? null : { label: `${qtyU(Math.max(mt.reorderQty, m.suggest), mt)} nachbestellen`, act: 'reorder' } });
-      else H.push({ sev: 'ok', ic: 'box', t: 'Material aus dem Lager', p: `${qtyU(m.need, mt)} ${mt.name} frei verfügbar – danach ${qtyU(m.after, mt)} (Mindestbestand ${qtyU(mt.min, mt)}).` });
+      else H.push({ sev: 'ok', ic: 'box', t: m.viaOrder ? 'Material kommt rechtzeitig' : 'Material aus dem Lager', p: m.viaOrder ? `Bestellung ${m.viaOrder.qty ? qtyU(m.viaOrder.qty, mt) + ' ' : ''}${mt.name} trifft ${fRel(m.viaOrder.etaT)} ein – vor dem Start dieses Auftrags.` : `${qtyU(m.need, mt)} ${mt.name} frei verfügbar – danach ${qtyU(m.after, mt)} (Mindestbestand ${qtyU(mt.min, mt)}).` });
+      if (m.ok && m.viaOrder && m.belowMin && !m.laterShort) H.push({ sev: 'info', ic: 'box', t: 'Bestand danach unter Mindestbestand', p: `${mt.name}: nach diesem Auftrag ${qtyU(Math.max(0, m.after), mt)} (Mindestbestand ${qtyU(mt.min, mt)}).` });
     } else if (q.raw && !q.raw.materialId) H.push({ sev: 'info', ic: 'box', t: 'Rohteil nicht im Lager', p: `${q.raw.text} – Beistellung durch den Kunden oder Beschaffung klären${q.raw.costPerPart ? ` (geschätzt ${eur(q.raw.costPerPart)} je Teil)` : ''}.` });
     for (const s of sch.steps) {
       if (s.kind !== 'machine' || s.wait < 2 * 3600) continue;
@@ -1728,12 +1758,12 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
         <div class="ka-left">
           <section class="card" data-r="srcCard">
             <div class="ka-card-h"><h3>Zeichnung</h3><span class="muted" data-r="srcHint">Beispiel wählen oder eigene Zeichnung ablegen</span><button type="button" class="btn sm ghost" data-act="zoom" data-r="zoomBtn" title="Zeichnung vergrößern">${icon('search', 14)} Vergrößern</button></div>
-            <div class="card-b">
+            <div class="ka-srcgrid"><div class="card-b ka-srcA">
               <div class="ka-exs" data-r="exs"></div>
               <div class="ka-stage" data-r="stage"></div>
               <div class="ka-sinfo" data-r="sinfo"></div>
               <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" data-r="file" hidden>
-            </div>
+            </div><div class="ka-srcB">
             <div class="ka-subh"><h3>Anfrage</h3><span class="muted">auch nach der Analyse änderbar</span></div>
             <div class="ka-form">
               <label class="field">Kunde<input class="input" data-r="cust" list="ka-cust" maxlength="60" autocomplete="off" data-focus="cust"></label>
@@ -1743,6 +1773,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
               <div class="field">Priorität<div class="seg ka-seg" data-r="prio"><button type="button" data-act="prio" data-v="normal">Normal</button><button type="button" data-act="prio" data-v="eil">Eilauftrag</button></div></div>
             </div>
             <div class="ka-go" data-r="go"></div>
+            </div></div>
           </section>
           <section class="card ka-recent" data-r="recent" hidden></section>
         </div>
@@ -1751,6 +1782,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
           <section class="card" data-r="empty"></section>
           <section class="card ka-flow" data-r="flow" hidden></section>
           <section class="card" data-r="wait" hidden></section>
+          <section class="card" data-r="err" hidden></section>
           <section class="card ka-sec" data-r="sPart" hidden></section>
           <section class="card ka-sec" data-r="sRoute" hidden></section>
           <section class="card ka-sec" data-r="sCalc" hidden></section>
@@ -1862,16 +1894,17 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     const exMode = s.kind === 'example' && live;
     const useLive = s.kind === 'upload' ? live : exMode && ui.mode === 'live';
     let hint;
-    if (busy) hint = run.live ? 'Claude liest die Zeichnung – Antworten mit Bild dauern meist 20–60 s.' : 'Auswertung läuft …';
+    if (busy) hint = run.live ? 'Antworten mit Bild dauern meist 20–60 s' : 'Auswertung läuft …';
     else if (s.kind === 'upload' && !ui.upload) hint = 'Zuerst eine Zeichnung ablegen oder auswählen.';
-    else if (s.kind === 'upload' && !live) hint = 'Eigene Zeichnungen wertet Claude aus – diese Demo läuft gerade ohne Claude-Verbindung.';
-    else if (useLive) hint = ai.img ? 'Claude liest die Zeichnung als Bild; Preis und Termin rechnet werkfluss aus der Live-Belegung.' : 'Claude erhält den Zeichnungsinhalt als Text (Bilder sind hier nicht freigegeben); Preis und Termin rechnet werkfluss live.';
-    else hint = 'Vorberechnete Auswertung der Beispielzeichnung; Preis, Material und Termin rechnet werkfluss live aus der aktuellen Belegung.';
+    else if (s.kind === 'upload' && !live) hint = 'Eigene Zeichnungen liest Claude – hier ohne Claude-Verbindung';
+    else if (useLive) hint = ai.img ? 'Claude liest die Zeichnung · Preis und Termin rechnet werkfluss live' : 'Claude liest den Zeichnungstext · Preis und Termin rechnet werkfluss live';
+    else hint = 'Vorberechnete Auswertung · Preis, Material und Termin live aus der Belegung';
     put(R.go, `${exMode ? `<div class="ka-mode"><span>Auswertung</span><div class="seg"><button type="button" data-act="mode" data-v="live" class="${ui.mode === 'live' ? 'on' : ''}">${icon('sparkles', 12)} Claude live</button><button type="button" data-act="mode" data-v="demo" class="${ui.mode === 'demo' ? 'on' : ''}">Vorberechnet</button></div></div>` : ''}
       <div class="ka-gorow">${busy
         ? `<button type="button" class="btn primary ka-gobtn" disabled><span class="spin"></span>Analysiere …</button>${run.live ? `<button type="button" class="btn ka-gobtn" style="flex:0 0 auto" data-act="stop">Abbrechen</button>` : ''}`
         : `<button type="button" class="btn primary ka-gobtn" data-act="go">${icon('sparkles', 17)}${quote ? 'Erneut analysieren' : 'Analysieren'}</button>`}</div>
       <div class="ka-gohint">${icon('info', 14)}<span>${esc(hint)}</span></div>`);
+    updateStick();
   }
   function renderAI() {
     const n = R.ai; if (!n) return;
@@ -1911,12 +1944,15 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     return q;
   }
   async function claudeAnalyze(src, myRun) {
-    const withImage = !!ai.img;
+    let withImage = !!ai.img;
     let images = null;
     if (withImage) {
-      if (src.kind === 'example') images = [await svgToPng(exById(src.id).draw(' width="1600" height="1131"'), 1600)];
+      if (src.kind === 'example') {
+        // Beispiel als PNG; gelingt das in einer Sandbox nicht, bekommt Claude den Zeichnungsinhalt als Text
+        try { images = [await svgToPng(exById(src.id).draw(' width="1600" height="1131"'), 1600)]; } catch (e) { images = null; withImage = false; }
+      }
       else {
-        const lim = ai.img; const f = ui.upload.file;
+        const lim = ai.img, f = ui.upload.file;
         if (lim.mediaTypes && lim.mediaTypes.length && !lim.mediaTypes.includes(f.type)) throw { code: 'image_rejected', message: 'type' };
         images = [await shrinkImage(f, lim.maxInputBytes)];
       }
@@ -1924,9 +1960,8 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     const prompt = promptFor(src, ui.qty, withImage);
     const opts = { modelTier: 'default', signal: myRun.ctl.signal, onText: (x) => { myRun.chars = (x && x.text ? x.text.length : 0); } };
     if (images) opts.images = images;
-    const fn = typeof ai.sampler.json === 'function' ? ai.sampler.json : null;
-    if (!fn) throw { code: 'capability_removed', message: 'json' };
-    return await fn(prompt, opts);
+    if (typeof ai.sampler.json !== 'function') throw { code: 'capability_removed', message: 'json' };
+    return await ai.sampler.json(prompt, opts);
   }
   async function analyze(opt = {}) {
     if (run && !run.done && !run.error) return;
@@ -2027,11 +2062,11 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   function updateStick() {
     const left = root && root.querySelector('.ka-left'); if (!left) return;
     const view = root.closest('.view') || root;
-    left.classList.toggle('stick', left.offsetHeight + 8 <= view.clientHeight - 36);
+    left.classList.toggle('stick', left.offsetHeight <= view.clientHeight - 30);
   }
   function renderOut(reveal) {
     if (!root) return;
-    if (!run) { vis(R.wait, false);
+    if (!run) { vis(R.wait, false); vis(R.err, false);
       put(R.empty, ui.notice ? noticeHtml(ui.notice) : emptyHtml()); vis(R.empty, true);
       ['flow', 'sPart', 'sRoute', 'sCalc', 'sTermin', 'sHints', 'foot'].forEach(k => vis(R[k], false));
       renderBanner(); return;
@@ -2040,12 +2075,13 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     const waiting = run.stage === 0 && !run.error && !run.done;
     if (waiting) put(R.wait, waitHtml());
     vis(R.wait, waiting, true);
+    vis(R.empty, false);
     if (run.error) {
-      put(R.empty, errorHtml()); vis(R.empty, true, true);
+      put(R.err, errorHtml()); vis(R.err, true, true);
       ['sPart', 'sRoute', 'sCalc', 'sTermin', 'sHints', 'foot'].forEach(k => vis(R[k], false));
       return;
     }
-    vis(R.empty, false);
+    vis(R.err, false);
     if (quote && !calc) recalc();
     renderSections(reveal);
   }
@@ -2093,7 +2129,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
           <div class="ka-pname">${esc(p.name)}</div>
           <div class="ka-psub"><span class="mono">${esc(p.drawing)}</span>${p.customer ? ' · ' + esc(p.customer) : ''}</div>
           <div class="ka-facts">
-            <div class="ka-fact"><div class="l">Werkstoff</div><div class="v">${esc(p.material)}</div></div>
+            <div class="ka-fact"><div class="l">Werkstoff</div><div class="v">${nw(p.material)}</div></div>
             <div class="ka-fact"><div class="l">Abmessung · Masse</div><div class="v">${esc(p.dims || '–')}</div><div class="s"><span${est}>${nf(p.weightKg, p.weightKg < 0.1 ? 3 : p.weightKg < 10 ? 2 : 1)} kg</span> je Teil</div></div>
             <div class="ka-fact full"><div class="l">Rohteil</div><div class="v">${esc(q.raw.text)}</div><div class="s">${q.raw.materialId ? `<span class="mono">${esc(q.raw.materialId)}</span> · ` : ''}${m && !m.none ? esc(m.mt.name) + ' · ' + esc(m.mt.supplier) : ''}</div></div>
             <div class="ka-fact full"><div class="l">Materialbedarf</div><div class="v">${matTxt}</div><div class="s">${matSub}</div>${stock}</div>
@@ -2145,7 +2181,13 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     const ship = `<div class="ka-op"><span class="seq">${(q.routing.length + 1) * 10}</span><div style="min-width:0"><div class="hd"><b>Versand</b><span class="ka-mc" style="--c:var(--st-run);cursor:default"><i></i><span class="id">VERSAND</span>Fertigteillager</span></div><div class="why">Ablage im Fertigteillager, Lieferschein – Abholung im Lieferfenster Mo–Fr 06:00–20:00</div></div>
       <div class="ka-nums nums"><div></div><div></div><div>${esc(fDay(sch.eta).replace(' (Folgewoche)', ''))}<small>versandbereit</small></div></div></div>`;
     const legend = est ? `<span class="ka-legend"><span class="ka-est">Wert</span> = von Claude geschätzt</span>` : `<span class="ka-legend">nur Arbeitsplätze und Werkzeugtypen dieses Werks</span>`;
+    const chain = q.routing.map(r => {
+      if (r.station === 'EXT') return `<span class="ka-cc ext" title="${esc((r.ext && r.ext.partner) || '')}">${icon('truck', 12)}<b>Extern</b><small>${esc(((r.ext && r.ext.process) || r.op).split(/[ ,]/)[0])}</small></span>`;
+      const sn = STN(r.station);
+      return `<span class="ka-cc" style="--c:${stColor(r.station)}" title="${esc(sn.name + ' · jetzt: ' + stLabel(r.station))}"><i></i><b>${r.station}</b><small>${esc(sn.short)}</small></span>`;
+    }).concat([`<span class="ka-cc" style="--c:var(--st-run)"><i></i><b>Versand</b></span>`]).join(`<span class="ka-ca">${icon('arrowRight', 12)}</span>`);
     return `<div class="ka-sh"><span class="n">2</span><h3>Arbeitsplan</h3><span class="m">${legend}</span></div>
+      <div class="ka-chain" aria-label="Materialfluss">${chain}</div>
       <div class="ka-oph"><span>AG</span><span>Arbeitsgang · Arbeitsplatz · Werkzeuge</span><span class="ka-nums nums"><span>Rüsten</span><span>Stückzeit</span><span>Los</span></span></div>
       ${rows}${ship}
       <div class="ka-ops-f"><span>Σ Rüsten <b>${fH(sumSetup / 60)}</b></span><span>Σ Bearbeitung <b>${fH(sumRun / 60)}</b></span><span>Durchlauf bis versandbereit <b>${fDurL(sch.eta - sch.now)}</b></span></div>`;
@@ -2394,8 +2436,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   }
   function errorHtml() {
     const e = run.error, ex = run.src && run.src.kind === 'example';
-    return `<div class="ka-note" style="--c:var(--st-fault)"><span class="ic">${icon('alert', 20)}</span><div><h3>Auswertung nicht möglich</h3><p>${esc(e.msg)}${e.code && !AI_MSG[e.code] ? '' : ''}</p>
-      ${e.raw ? `<p class="muted" style="font-family:var(--f-mono);font-size:11.5px;max-height:80px;overflow:auto">${esc(e.raw)}</p>` : ''}
+    return `<div class="ka-note" style="--c:var(--st-fault)"><span class="ic">${icon('alert', 20)}</span><div><h3>Auswertung nicht möglich</h3><p>${esc(e.msg)}${ex ? ' Die Beispielzeichnung lässt sich auch mit der vorberechneten Auswertung zeigen.' : ''}</p>
       <div class="row">${AI_HIDE[e.code] ? '' : `<button type="button" class="btn sm primary" data-act="go">${icon('refresh', 14)} Erneut versuchen</button>`}${ex ? `<button type="button" class="btn sm" data-act="demo">Vorberechnete Auswertung verwenden</button>` : EXAMPLES.map(x => `<button type="button" class="btn sm" data-act="ex" data-id="${x.id}">${esc(x.title)}</button>`).join('')}</div></div></div>`;
   }
 
@@ -2556,7 +2597,6 @@ Erstellt mit werkfluss KI-Auftrag · ${WF.sim.clock()}`;
     if (t === R.dueDay) { ui.dueDay = t.value === '' ? null : Number(t.value); R.dueTime.disabled = ui.dueDay == null; if (quote) { recalc(); renderSections(); } }
     else if (t === R.dueTime) { ui.dueTime = t.value; if (quote) { recalc(); renderSections(); } }
     else if (t === R.qty) { const n = Math.round(Number(t.value)); if (n >= 1) setQty(n, true); t.value = String(ui.qty); }
-    else if (t.dataset && t.dataset.alt != null) selectAlt(Number(t.dataset.alt), t.value);
   }
   function onInput(e) {
     const t = e.target;

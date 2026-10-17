@@ -67,57 +67,76 @@
 .h3-map text{font:600 2.2px var(--f-mono);fill:#e5ebf5;pointer-events:none;letter-spacing:.02em;paint-order:stroke;stroke:rgba(11,17,32,.55);stroke-width:.35px}
 .h3-map text.z{font:600 1.55px var(--f-ui);fill:#8796b0;letter-spacing:.06em}
 
-/* ---------- Ansicht/Ebenen (oben rechts) */
-.h3-ctl{right:14px;top:14px;width:222px;padding:10px 8px 10px}
-.h3-ctl .h3-eb{padding:2px 6px 8px}
-.h3-pre{display:flex;flex-direction:column;gap:1px;margin-bottom:10px}
-.h3-pre button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:0;background:transparent;color:var(--text2);padding:6px 7px;border-radius:7px;font-size:12.5px;font-weight:500;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* ---------- Werkzeugleiste oben rechts: Ansicht, Ebenen, Legende */
+.h3-tb{right:14px;top:14px;display:flex;align-items:center;gap:4px;padding:4px;border-radius:11px}
+.h3-tsep{width:1px;height:20px;background:color-mix(in srgb,var(--line2) 80%,transparent);margin:0 3px;flex:none}
+.h3-ddw{position:relative}
+.h3-dd{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 9px 0 9px;border-radius:8px;border:0;background:transparent;color:var(--text);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.h3-dd .ico{color:var(--muted);flex:none}
+.h3-dd .ico:last-child{transform:rotate(90deg);transition:transform .18s;color:var(--faint)}
+.h3-dd.icn .ico:last-child{transform:none;color:var(--muted)}
+.h3-dd:hover,.h3-dd.on{background:color-mix(in srgb,var(--raise) 70%,transparent)}
+.h3-dd.on .ico:last-child{transform:rotate(-90deg)}
+.h3-dd.icn.on .ico:last-child{transform:none;color:var(--accent)}
+.h3-menu,.h3-pop{position:absolute;top:calc(100% + 8px);z-index:8;padding:10px 8px}
+.h3-menu{left:-4px;width:248px}
+.h3-pop{right:-4px;width:300px;padding:12px 12px 10px}
+.h3-menu .h3-eb,.h3-sheet .h3-eb{padding:2px 6px 8px}
+.h3-pop .h3-eb{padding:0 0 7px}
+.h3-pop .h3-eb~.h3-eb{padding-top:10px;margin-top:9px;border-top:1px solid color-mix(in srgb,var(--line2) 60%,transparent)}
+.h3-pre{display:flex;flex-direction:column;gap:1px}
+.h3-pre button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:0;background:transparent;color:var(--text2);padding:7px 8px;border-radius:7px;font-size:12.5px;font-weight:500;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .h3-pre button .ico{color:var(--faint);flex:none}
 .h3-pre button span{overflow:hidden;text-overflow:ellipsis}
 .h3-pre button:hover{background:color-mix(in srgb,var(--raise) 55%,transparent);color:var(--text)}
 .h3-pre button.on{background:var(--raise);color:var(--text);box-shadow:inset 2px 0 0 var(--accent)}
 .h3-pre button.on .ico{color:var(--accent)}
-.h3-lay{display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:0 2px}
-.h3-chip{--c:var(--accent);display:flex;align-items:center;gap:6px;padding:5px 8px 5px 7px;border-radius:8px;font-size:11.5px;font-weight:600;border:1px solid var(--line2);background:transparent;color:var(--muted);cursor:pointer;white-space:nowrap;min-width:0;overflow:hidden}
+.h3-lay{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:0 4px 2px}
+.h3-chip{--c:var(--accent);display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px 0 9px;border-radius:8px;font-size:12px;font-weight:600;border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer;white-space:nowrap;min-width:0;overflow:hidden}
 .h3-chip i{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--c);flex:none;box-sizing:border-box}
-.h3-chip:hover{color:var(--text)}
-.h3-chip.on{color:var(--text);border-color:color-mix(in srgb,var(--c) 50%,transparent);background:color-mix(in srgb,var(--c) 12%,transparent)}
+.h3-chip:hover{color:var(--text);background:color-mix(in srgb,var(--raise) 45%,transparent)}
+.h3-chip.on{color:var(--text);border-color:color-mix(in srgb,var(--c) 42%,transparent);background:color-mix(in srgb,var(--c) 11%,transparent)}
 .h3-chip.on i{background:var(--c);box-shadow:0 0 6px var(--c)}
+.h3-root.narrow .h3-tb .h3-chip span,.h3-root.narrow .h3-tb .h3-dd.icn span{display:none}
+.h3-root.narrow .h3-tb .h3-chip{padding:0 9px}
 
-/* ---------- Legende (unten links) */
-.h3-legh{display:flex;align-items:center;justify-content:space-between;width:100%;border:0;background:transparent;padding:12px 6px 7px;cursor:pointer;color:var(--muted);font:inherit}
-.h3-legh:hover .h3-eb{color:var(--text2)}
-.h3-legh .ico{transform:rotate(90deg);transition:transform .18s;color:var(--faint)}
-.h3-ctl.legoff .h3-legh .ico{transform:none}
-.h3-leg{display:grid;grid-template-columns:1fr 1fr;gap:4px 8px;padding:0 6px 3px;font-size:11px;color:var(--text2)}
-.h3-ctl.legoff .h3-leg{display:none}
-.h3-leg .full{grid-column:1/-1}
-.h3-leg hr{grid-column:1/-1;border:0;border-top:1px solid color-mix(in srgb,var(--line2) 60%,transparent);margin:3px 0}
-.h3-lg{display:inline-flex;align-items:center;gap:6px;line-height:17px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* ---------- Legende */
+.h3-leg{display:grid;grid-template-columns:1fr 1fr;gap:5px 10px;font-size:11.5px;color:var(--text2)}
+.h3-lg{display:inline-flex;align-items:center;gap:7px;line-height:17px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .h3-lg i{width:9px;height:9px;border-radius:3px;background:var(--c);flex:none}
 .h3-lg i.ln{width:16px;height:3px;border-radius:2px;box-shadow:0 0 6px var(--c)}
-.h3-lg i.pt{width:7px;height:7px;border-radius:50%;box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 22%,transparent),0 0 8px var(--c)}
+.h3-lg i.pt{width:7px;height:7px;border-radius:50%;margin:0 1px;box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 22%,transparent),0 0 8px var(--c)}
 .h3-lg i.rg{width:10px;height:10px;border-radius:50%;background:transparent;border:2px solid var(--c)}
-.h3-lsep{width:1px;height:16px;background:color-mix(in srgb,var(--line2) 80%,transparent)}
-.h3-vests{display:inline-flex;gap:3px;align-items:center}
-.h3-vests i{width:8px;height:11px;border-radius:3px 3px 2px 2px;background:var(--c);flex:none}
+.h3-lg i.vest{width:8px;height:11px;border-radius:3px 3px 2px 2px}
+.h3-sleg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px 8px;margin-top:10px;font-size:11px;color:var(--muted)}
+.h3-sleg span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.h3-sleg i{width:8px;height:8px;border-radius:50%;background:var(--c);flex:none;box-shadow:0 0 5px color-mix(in srgb,var(--c) 70%,transparent)}
+.h3-sheet{left:8px;right:8px;bottom:62px;padding:12px 10px;max-height:calc(100% - 150px);overflow:auto}
+.h3-sheet .h3-leg{padding:0 4px}
+.h3-sheet .h3-eb~.h3-eb{padding-top:10px}
+.h3-sheet .h3-pre{display:grid;grid-template-columns:1fr 1fr}
 
 /* ---------- Auswahl-Leiste, Hinweis */
 .h3-sel{left:50%;bottom:14px;transform:translateX(-50%);padding:6px 6px 6px 12px;display:flex;align-items:center;gap:10px;font-size:12.5px;max-width:calc(100% - 28px)}
 .h3-sel .k{color:var(--muted);white-space:nowrap;font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600}
-.h3-sel .nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.h3-sel .nm{font-weight:600;white-space:nowrap;flex:none}
 .h3-sel .ac{color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:300px}
 .h3-sel .btn.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-.h3-root:not(.nomap) .h3-sel{left:calc(50% + 151px);max-width:calc(100% - 330px)}
-.h3-hint{left:50%;top:14px;transform:translateX(-50%);font-size:11px;color:var(--muted);padding:7px 11px;border-radius:9px;background:color-mix(in srgb,var(--panel) 72%,transparent);border:1px solid color-mix(in srgb,var(--line2) 55%,transparent);transition:opacity .6s;pointer-events:none;white-space:nowrap}
+.h3-sel{left:calc((100% - var(--dw, 0px)) / 2)}
+.h3-root:not(.nomap) .h3-sel{left:calc((100% - var(--dw, 0px)) / 2 + 151px);max-width:calc(100% - 330px - var(--dw, 0px))}
+.h3-tb{transition:right .22s ease}
+.h3-root .h3-tb{right:calc(14px + var(--dw, 0px))}
+.h3-hint{left:50%;bottom:14px;transform:translateX(-50%);font-size:11px;color:var(--muted);padding:7px 11px;border-radius:9px;background:color-mix(in srgb,var(--panel) 72%,transparent);border:1px solid color-mix(in srgb,var(--line2) 55%,transparent);transition:opacity .6s;pointer-events:none;white-space:nowrap}
 .h3-hint.gone{opacity:0}
+.h3-root:not(.nomap) .h3-hint{left:calc((100% - var(--dw, 0px)) / 2 + 151px)}
+.h3-root.selon .h3-hint{opacity:0}
 .h3-hint b{color:var(--text2);font-weight:600}
 
 /* ---------- Etiketten */
 .h3-labels{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden;contain:strict}
 .h3-lb{--c:var(--st-idle);position:absolute;left:0;top:0;pointer-events:auto;cursor:pointer;white-space:nowrap;background:color-mix(in srgb,var(--bg) 84%,transparent);border:1px solid color-mix(in srgb,var(--c) 45%,var(--line2));border-radius:8px;padding:3px 7px 3px 6px;font:500 11.5px/1.25 var(--f-ui);color:var(--text);box-shadow:0 4px 14px rgba(0,0,0,.42);transition:opacity .18s;will-change:transform}
 .h3-lb::after{content:"";position:absolute;left:50%;top:100%;width:1px;height:9px;background:linear-gradient(color-mix(in srgb,var(--c) 85%,transparent),transparent)}
-.h3-lb.off{opacity:0;pointer-events:none}
+.h3-lb.off{opacity:0 !important;pointer-events:none !important}
 .h3-lb .r1{display:flex;align-items:center;gap:6px}
 .h3-lb .d{width:7px;height:7px;border-radius:50%;background:var(--c);flex:none;box-shadow:0 0 6px var(--c)}
 .h3-lb b{font:600 12.5px/1 var(--f-cond);letter-spacing:.03em}
@@ -189,10 +208,7 @@
 .h3-root.m .h3-mline .w{color:var(--st-wait)}
 .h3-root.m .h3-mline .f{color:var(--st-fault)}
 .h3-root.m .h3-clock{font-size:18px}
-.h3-root.m .h3-ctl,.h3-root.m .h3-hint{display:none}
-.h3-root.m .h3-ctl.open{display:block;left:8px;right:8px;top:auto;bottom:62px;width:auto;max-width:none;max-height:calc(100% - 150px);overflow:auto}
-.h3-root.m .h3-pre{display:grid;grid-template-columns:1fr 1fr}
-.h3-root.short .h3-ctl{max-height:calc(100% - 28px);overflow:auto}
+.h3-root.m .h3-tb,.h3-root.m .h3-hint,.h3-root.m .h3-sleg{display:none}
 .h3-root.m .h3-lay{grid-template-columns:1fr 1fr}
 .h3-root.m .h3-mbar{display:flex}
 .h3-root.m .h3-sel{bottom:62px}
@@ -395,14 +411,30 @@
       const curve = v.length > 2 ? new THREE.CatmullRomCurve3(v, false, 'catmullrom', 0.08) : new THREE.LineCurve3(v[0], v[1]);
       return this.add(new THREE.TubeGeometry(curve, Math.max(4, (v.length - 1) * 8), r, seg || 8, false), mat, new THREE.Matrix4());
     }
-    build(parent, shadow = true) {
-      const out = [];
+    /** batchMat: gemeinsames Material für alle einfachen Lacke/Metalle (Farbe, Rauheit, Metallgrad je Ecke) → wenige Draw-Calls */
+    build(parent, shadow = true, batchMat) {
+      const out = [], bl = [];
       for (const [mat, list] of this.map) {
+        if (mat.userData.batch) { for (const it of list) bl.push([it[0], it[1], mat]); continue; }
         const mesh = new THREE.Mesh(mergeGeos(list), mat);
         const tr = mat.transparent || mat.isMeshBasicMaterial || mat.userData.noShadow;
         mesh.castShadow = shadow && !tr; mesh.receiveShadow = !mat.isMeshBasicMaterial;
         mesh.matrixAutoUpdate = false; mesh.updateMatrix();
         if (mat.transparent) mesh.renderOrder = 1;
+        parent.add(mesh); out.push(mesh);
+      }
+      if (bl.length) {
+        const geo = mergeGeos(bl.map(x => [x[0], x[1]]));
+        const n = geo.attributes.position.count, col = new Float32Array(n * 3), pbr = new Float32Array(n * 2);
+        let o = 0;
+        for (const [g, , mat] of bl) {
+          const c = g.index ? g.index.count : g.attributes.position.count, cr = mat.color.r, cg = mat.color.g, cb = mat.color.b, r = mat.roughness, m = mat.metalness;
+          for (let i = 0; i < c; i++) { const j = o + i; col[j * 3] = cr; col[j * 3 + 1] = cg; col[j * 3 + 2] = cb; pbr[j * 2] = r; pbr[j * 2 + 1] = m; }
+          o += c;
+        }
+        geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.setAttribute('pbr', new THREE.BufferAttribute(pbr, 2));
+        const mesh = new THREE.Mesh(geo, batchMat || M.batch);
+        mesh.castShadow = shadow; mesh.receiveShadow = true; mesh.matrixAutoUpdate = false; mesh.updateMatrix();
         parent.add(mesh); out.push(mesh);
       }
       this.map.clear();
@@ -678,8 +710,23 @@
       ledG: basic(0x34d399), ledB: basic(0x3cc6f2), ledR: basic(0xf87171), ledY: basic(0xfbbf24),
     };
     M.lens.color.setRGB(2.4, 2.4, 2.25);
+    for (const k in M) { const m = M[k]; if (m && m.isMeshStandardMaterial && !m.map && !m.transparent && !m.vertexColors && m.emissive && m.emissive.getHex() === 0) m.userData.batch = true; }
+    M.batch = batchMaterial();
     M.ledG.color.multiplyScalar(1.6); M.ledB.color.multiplyScalar(1.6);
     for (const k of ['glass', 'glassRoom', 'wrap']) M[k].userData.noShadow = true;
+  }
+
+  /** Ein Material für viele Teile: Grundfarbe, Rauheit und Metallgrad kommen je Ecke aus der Geometrie */
+  function batchMaterial() {
+    const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 1, emissive: 0x000000 });
+    m.onBeforeCompile = (sh) => {
+      sh.vertexShader = 'attribute vec2 pbr;\nvarying vec2 vPbr;\n' + sh.vertexShader.replace('#include <uv_vertex>', '#include <uv_vertex>\n vPbr = pbr;');
+      sh.fragmentShader = 'varying vec2 vPbr;\n' + sh.fragmentShader
+        .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vPbr.x;')
+        .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vPbr.y;');
+    };
+    m.customProgramCacheKey = () => 'h3batch';
+    return m;
   }
 
   // ================================================================== Szene, Licht, Umgebung
@@ -1760,9 +1807,10 @@
       mPaint: (MODERN[st.type] ? M.paintW : M.paint).clone(),
       prog: 0, p0: 0, p1: 0, v: null, state: null, glowI: 0, spin: 0, hl: 0 };
     if (!world) { mo.group.position.set(mo.cx, 0, mo.cz); mo.group.rotation.y = ry; }
+    mo.mBatch = batchMaterial();
     const b = new Builder();
     (TB[st.type] || TB.mill3)(mo, b);
-    b.build(mo.group);
+    b.build(mo.group, true, mo.mBatch);
     R.scene.add(mo.group);
     mo.group.updateMatrixWorld(true);
     // Zustandsrahmen am Boden
@@ -2229,7 +2277,7 @@
     return g;
   }
   function buildFlow() {
-    R.flowMats = { loaded: flowMaterial('#ff9d3d', 0), approach: flowMaterial('#ffb36b', 1), route: flowMaterial('#e5ebf5', 2) };
+    R.flowMats = { loaded: flowMaterial('#ff9d3d', 0), approach: flowMaterial('#ffb36b', 1), route: flowMaterial('#3cc6f2', 0) };
     R.flowLines = new Map();
     R.flowGroup = new THREE.Group(); R.scene.add(R.flowGroup);
     // Zielmarker (Ring am Abgabeplatz)
@@ -2468,7 +2516,7 @@
       const path = U.path(P.graph, fromNode, b.st.dockNode);
       const pts = path.points.map(p => ({ x: p.x, z: p.z }));
       if (pts.length < 2) continue;
-      const m = new THREE.Mesh(ribbon(pts, 0.4, 0.05), R.flowMats.route); m.renderOrder = 2; m.frustumCulled = false; r.group.add(m);
+      const m = new THREE.Mesh(ribbon(pts, 0.5, 0.05), R.flowMats.route); m.renderOrder = 2; m.frustumCulled = false; r.group.add(m);
     }
     if (chain.some(c => c.st.id === 'EXT')) {
       const we = P.stationById.WE.dock;
@@ -2483,7 +2531,7 @@
       g.fillStyle = col; g.font = FONT(700, 62); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(String(n + 1), 64, 68);
       const disc = new THREE.Mesh(cache('rdisc2', () => { const gg = new THREE.CircleGeometry(0.8, 32).rotateX(-PI / 2); gg.userData.shared = true; return gg; }), new THREE.MeshBasicMaterial({ map: tex(t), transparent: true, depthWrite: false, toneMapped: false }));
       disc.material.userData.own = true; disc.position.set(c.x, 0.07, c.z); disc.renderOrder = 3; r.group.add(disc);
-      const lbEl = el('div', { class: 'h3-lb rt', style: { '--rc': col } });
+      const lbEl = el('div', { class: 'h3-lb rt off', style: { '--rc': col } });
       const cnt = c.op.target ? ` · ${fmtN(c.op.good)}/${fmtN(c.op.target)}` : '';
       lbEl.innerHTML = `<div class="r1"><span class="n">${n + 1}</span><span class="o">AG ${c.op.seq} · ${esc(c.op.op || c.op.stationName || '')}</span></div><div class="s">${esc(c.op.stationName || c.st.short)} · ${esc(c.op.stateLabel || '')}${cnt}</div>`;
       R.ui.labels.append(lbEl);
@@ -2503,11 +2551,11 @@
 
   // ================================================================== Kamera
   const PRESETS = [
-    { id: 'uebersicht', label: 'Übersicht', icon: 'grid', t: [32, 0, 20.5], r: 86, phi: 46, th: 18 },
-    { id: 'dreherei', label: 'Dreherei / Sonderbearbeitung', icon: 'factory', t: [29.5, 0, 16.5], r: 46, phi: 52, th: 12 },
-    { id: 'fraeserei', label: 'Fräserei / Schleiferei', icon: 'factory', t: [27, 0, 26.5], r: 40, phi: 50, th: 194 },
-    { id: 'logistik', label: 'Logistik & Lager', icon: 'box', t: [22, 0, 5.5], r: 44, phi: 50, th: 6 },
-    { id: 'messraum', label: 'Messraum & Versand', icon: 'target', t: [53, 0, 30.5], r: 34, phi: 50, th: 30 },
+    { id: 'uebersicht', label: 'Übersicht', short: 'Übersicht', icon: 'grid', t: [32, 0, 20.5], r: 86, phi: 46, th: 18 },
+    { id: 'dreherei', label: 'Dreherei / Sonderbearbeitung', short: 'Dreherei', icon: 'factory', t: [29.5, 0, 16.5], r: 46, phi: 52, th: 12 },
+    { id: 'fraeserei', label: 'Fräserei / Schleiferei', short: 'Fräserei', icon: 'factory', t: [27, 0, 26.5], r: 40, phi: 50, th: 194 },
+    { id: 'logistik', label: 'Logistik & Lager', short: 'Logistik', icon: 'box', t: [22, 0, 5.5], r: 44, phi: 50, th: 6 },
+    { id: 'messraum', label: 'Messraum & Versand', short: 'Messraum', icon: 'target', t: [53, 0, 30.5], r: 34, phi: 50, th: 30 },
   ];
   function camState() {
     const c = R.camera.position, t = R.controls.target;
@@ -2528,6 +2576,14 @@
     R.camera.lookAt(R.controls.target);
   }
   const mobK = () => (R.mobile ? (R.w / R.h < 0.75 ? 1.75 : 1.35) : (R.w / R.h < 1.25 ? 1.2 : 1));
+  /** Faktor für den Kameraabstand, wenn der Detail-Drawer rechts einen Teil der Fläche verdeckt */
+  function drawerK() {
+    if (R.mobile) return 1;
+    const dr = document.getElementById('drawer'), dw = dr && dr.classList.contains('open') ? dr.getBoundingClientRect().width : 0;
+    if (dw !== (R.drawerW || 0)) { R.drawerW = dw; R.root.style.setProperty('--dw', dw + 'px'); R.root.classList.toggle('narrow', R.w - dw < 1060); }
+    const vis = clamp((R.w - dw) / R.w, 0.35, 1), asp = (R.w - dw) / R.h;
+    return Math.pow(1 / vis, 0.8) * (asp < 1.3 ? 1.12 : 1);
+  }
   function preset(id, instant) {
     const p = PRESETS.find(x => x.id === id) || PRESETS[0];
     R.preset = p.id; R.follow = null;
@@ -2535,14 +2591,18 @@
     if (instant) { setCam(dst); R.controls.update(); } else goCam(dst);
     markPresets(); renderSelBar();
   }
-  function markPresets() { if (R.ui.pre) R.ui.pre.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.p === R.preset)); }
+  function markPresets() {
+    const p = PRESETS.find(x => x.id === R.preset);
+    if (R.ui.preLbl) R.ui.preLbl.textContent = p ? p.short : 'Freie Ansicht';
+    if (R.root) R.root.querySelectorAll('[data-p]').forEach(b => { b.classList.toggle('on', b.dataset.p === R.preset); b.setAttribute('aria-checked', String(b.dataset.p === R.preset)); });
+  }
   function focusStation(id) {
     if (!R.ok) { R.pending = { fn: 'station', id }; return; }
     const st = WF.profile.stationById[id]; if (!st || !st.footprint) return;
     const f = st.footprint, sz = Math.max(f.w, f.d);
     const th = st.facing === 'N' ? 192 : st.facing === 'W' ? -62 : st.id === 'QS' ? 24 : 16;
     R.preset = null; markPresets(); R.follow = null;
-    goCam({ tx: f.x + f.w / 2, ty: 0.6, tz: f.z + f.d / 2, r: clamp(sz * 2.2 + 11, 17, 40) * mobK(), phi: 54 * DEG, th: th * DEG });
+    goCam({ tx: f.x + f.w / 2, ty: 0.6, tz: f.z + f.d / 2, r: clamp(sz * 2.2 + 11, 17, 40) * mobK() * Math.min(1.3, drawerK()), phi: 54 * DEG, th: th * DEG });
     R.flash = { id, t: 0 };
   }
   function focusOrder(id) {
@@ -2553,7 +2613,7 @@
     for (const s of steps) { x0 = Math.min(x0, s.x); x1 = Math.max(x1, s.x); z0 = Math.min(z0, s.z); z1 = Math.max(z1, s.z); }
     const span = Math.max(x1 - x0, (z1 - z0) * 1.6, 12);
     R.preset = null; markPresets();
-    goCam({ tx: (x0 + x1) / 2, ty: 0, tz: (z0 + z1) / 2 + 1, r: clamp(span * 1.3 + 14, 26, 96) * mobK(), phi: 48 * DEG, th: 14 * DEG });
+    goCam({ tx: (x0 + x1) / 2, ty: 0, tz: (z0 + z1) / 2 + 1, r: clamp(span * 1.25 + 12, 26, 96) * mobK() * drawerK(), phi: 48 * DEG, th: 14 * DEG });
   }
   function clampTarget() {
     const t = R.controls.target, P = WF.profile.hall;
@@ -2582,63 +2642,84 @@
 
   // ================================================================== Overlays (DOM): Status + Hallenplan, Ansicht/Ebenen, Legende, Auswahl
   const SHORT_STATE = { running: 'Produktion', setup: 'Rüsten', firstPiece: 'Erstteil', toolchange: 'Wkz-Wechsel', waitTool: 'Wartet', waitOperator: 'Wartet', starved: 'Wartet', blocked: 'Ausgang voll', fault: 'Störung', idle: 'Bereit' };
+  function legendHtml() {
+    const sw = (cv, t, cls, ttl) => `<span class="h3-lg"${ttl ? ` title="${esc(ttl)}"` : ''}><i class="${cls || ''}" style="--c:${cv}"></i>${esc(t)}</span>`;
+    return `<div class="h3-eb">Maschinenzustand</div><div class="h3-leg">${sw('var(--st-run)', 'Produktion')}${sw('var(--st-setup)', 'Rüsten / Erstteilprüfung')}${sw('var(--st-tool)', 'Werkzeugwechsel')}${sw('var(--st-wait)', 'Wartet / Ausgang voll', '', 'Wartet auf Material, Werkzeug oder Bediener bzw. Ausgangspuffer voll')}${sw('var(--st-fault)', 'Störung')}${sw('var(--st-idle)', 'Bereit (kein Auftrag)')}</div>
+      <div class="h3-eb">Flüsse</div><div class="h3-leg">${sw('var(--mat)', 'Transport unterwegs', 'ln', 'Weg vom Fahrzeug über die Abholung zum Ziel')}${sw('var(--mat)', 'Abholung offen', 'rg', 'Behälter steht bereit, Transport noch nicht vergeben')}${sw('var(--info)', 'Maschinendaten → Server', 'pt', 'Signale der angebundenen Maschinen laufen über die Kabeltrasse zum MES-Server')}${sw('var(--info)', 'Meldung an Person', 'rg', 'Benachrichtigung erreicht die zuständige Rolle')}${sw('var(--st-run)', 'Teil fertig', 'rg', 'Kurzer Puls am Ausgang, wenn ein Teil fertig wird')}${sw('#5fb6e6', 'Tablet (ohne Anbindung)', '', 'Maschine ohne Datenschnittstelle – Rückmeldung per Tablet')}</div>
+      <div class="h3-eb">Personen</div><div class="h3-leg">${Object.values(ROLES).map(r => sw(r.vest, r.label, 'vest')).join('')}</div>`;
+  }
   function buildOverlays(root) {
     const ui = R.ui, P = WF.profile;
     ui.labels = el('div', { class: 'h3-labels' });
     ui.tip = el('div', { class: 'h3-tip h3-glass', role: 'tooltip' });
     ui.status = el('div', { class: 'h3-ov h3-status h3-glass', 'aria-live': 'polite' });
-    const c = WF.app.company ? WF.app.company() : { name: P.company.name };
+    const sdot = (k, t) => `<span title="${esc(WF.STATE[k] ? WF.STATE[k].label : t)}"><i style="--c:${WF.STATE[k].color}"></i>${esc(t)}</span>`;
     ui.status.innerHTML = `<div class="h3-st-h"><span class="h3-live" data-k="live"><i></i>Live</span><span class="h3-ttl" data-k="ttl">${esc(P.company.site || 'Halle')}</span><span class="h3-clock" data-k="clock">–</span></div>
       <div class="h3-shift" data-k="shift">–</div>
       <div class="h3-mline" data-k="mline"></div>
       <div class="h3-kv">
         <div title="Maschinen im Zustand Produktion"><span class="l">In Produktion</span><b data-k="run">–</b><span class="s" data-k="runS">–</span></div>
-        <div title="Personen in der Halle (ohne Schichtende)"><span class="l">Im Dienst</span><b data-k="ppl">–</b><span class="s" data-k="pplS">–</span></div>
+        <div title="Personen in der Halle (ohne Feierabend)"><span class="l">Im Dienst</span><b data-k="ppl">–</b><span class="s" data-k="pplS">–</span></div>
         <div title="Offene Transportaufträge (AGV und Stapler)"><span class="l">Transporte</span><b data-k="tr">–</b><span class="s" data-k="trS">–</span></div>
       </div>
-`;
-    void c;
+      <div class="h3-sleg">${sdot('running', 'Produktion')}${sdot('setup', 'Rüsten')}${sdot('toolchange', 'Werkzeug')}${sdot('starved', 'Wartet')}${sdot('fault', 'Störung')}${sdot('idle', 'Bereit')}</div>`;
     ui.st = {}; ui.status.querySelectorAll('[data-k]').forEach(n => ui.st[n.dataset.k] = n);
     ui.mapbox = el('div', { class: 'h3-ov h3-mapbox h3-glass' });
     ui.mapbox.innerHTML = '<div class="h3-maph"><span class="h3-eb">Hallenplan</span><span>Klick: Maschine · Ziehen: Ausschnitt</span></div><div class="h3-map"></div>';
     buildMinimap(ui.mapbox.querySelector('.h3-map'));
-    ui.ctl = el('div', { class: 'h3-ov h3-ctl h3-glass' });
-    ui.ctl.innerHTML = `<div class="h3-eb">Ansicht</div><div class="h3-pre">${PRESETS.map(p => `<button data-p="${p.id}" title="${esc(p.label)}">${icon(p.icon, 15)}<span>${esc(p.label)}</span></button>`).join('')}</div>
-      <div class="h3-eb">Ebenen</div><div class="h3-lay">
-        <button class="h3-chip" data-l="flow" style="--c:var(--mat)" title="Aktive Transporte: Weg vom Fahrzeug zum Ziel"><i></i>Materialfluss</button>
-        <button class="h3-chip" data-l="data" style="--c:var(--info)" title="Maschinendaten zum MES-Server, Meldungen an Personen"><i></i>Datenfluss</button>
-        <button class="h3-chip" data-l="people" style="--c:var(--st-run)" title="Personen ein-/ausblenden"><i></i>Personen</button>
-        <button class="h3-chip" data-l="labels" style="--c:var(--text2)" title="Maschinen-Beschriftungen"><i></i>Beschriftung</button></div>`;
-    ui.pre = ui.ctl.querySelector('.h3-pre');
-    ui.pre.querySelectorAll('button').forEach(b => b.onclick = () => { preset(b.dataset.p); closeSheets(); });
-    ui.ctl.querySelectorAll('[data-l]').forEach(b => b.onclick = () => { R.layers[b.dataset.l] = !R.layers[b.dataset.l]; store.set('layers', R.layers); applyLayers(); });
-    const sw = (cv, t, cls, ttl) => `<span class="h3-lg"${ttl ? ` title="${esc(ttl)}"` : ''}><i class="${cls || ''}" style="--c:${cv}"></i>${esc(t)}</span>`;
-    const legOff = store.get('legOff', false);
-    ui.ctl.classList.toggle('legoff', !!legOff);
-    ui.ctl.insertAdjacentHTML('beforeend', `<button class="h3-legh" data-leg aria-expanded="${!legOff}"><span class="h3-eb">Legende</span>${icon('chevron', 14)}</button>
-      <div class="h3-leg">${sw('var(--st-run)', 'Produktion')}${sw('var(--st-setup)', 'Rüsten / Erstteil')}${sw('var(--st-tool)', 'Werkzeugwechsel')}${sw('var(--st-wait)', 'Wartet', '', 'Wartet auf Material, Werkzeug, Bediener oder Ausgang voll')}${sw('var(--st-fault)', 'Störung')}${sw('var(--st-idle)', 'Bereit', '', 'Kein Auftrag eingeplant')}
-      <hr>${sw('var(--mat)', 'Transport', 'ln', 'Aktiver Transport: Weg vom Fahrzeug zum Ziel')}${sw('var(--mat)', 'Abholung offen', 'rg', 'Behälter wartet auf Abholung')}${sw('var(--info)', 'Maschinendaten', 'pt', 'Signale der Maschine zum MES-Server')}${sw('var(--info)', 'Meldung', 'rg', 'Benachrichtigung an eine Person')}
-      <hr><span class="h3-lg full" title="${esc(Object.values(ROLES).map(r => r.label).join(' · '))}"><span class="h3-vests">${Object.values(ROLES).map(r => `<i title="${esc(r.label)}" style="--c:${r.vest}"></i>`).join('')}</span>Warnweste = Rolle</span></div>`);
-    ui.ctl.querySelector('[data-leg]').onclick = (e) => { const off = !ui.ctl.classList.contains('legoff'); ui.ctl.classList.toggle('legoff', off); e.currentTarget.setAttribute('aria-expanded', String(!off)); store.set('legOff', off); computeUiRects(); for (const id in R.lb) R.lb[id].sizes = {}; };
-    ui.sel = el('div', { class: 'h3-ov h3-sel h3-glass', hidden: true });
-    ui.hint = el('div', { class: 'h3-ov h3-hint', html: '<b>Ziehen</b> drehen · <b>Rechte Maustaste</b> verschieben · <b>Mausrad</b> zoomen · <b>Klick</b> Details' });
+    // Werkzeugleiste oben rechts: Ansicht (Kamera-Voreinstellungen), Ebenen, Legende
+    ui.tb = el('div', { class: 'h3-ov h3-tb h3-glass', role: 'toolbar', 'aria-label': 'Ansicht und Ebenen' });
+    const chips = `<button class="h3-chip" data-l="flow" style="--c:var(--mat)" title="Materialfluss: aktive Transporte vom Fahrzeug zum Ziel"><i></i><span>Materialfluss</span></button>
+        <button class="h3-chip" data-l="data" style="--c:var(--info)" title="Datenfluss: Maschinendaten zum MES-Server, Meldungen an Personen"><i></i><span>Datenfluss</span></button>
+        <button class="h3-chip" data-l="people" style="--c:var(--st-run)" title="Personen ein-/ausblenden"><i></i><span>Personen</span></button>
+        <button class="h3-chip" data-l="labels" style="--c:var(--text2)" title="Maschinen-Beschriftungen ein-/ausblenden"><i></i><span>Beschriftung</span></button>`;
+    const presetBtns = PRESETS.map(p => `<button data-p="${p.id}" role="menuitemradio">${icon(p.icon, 15)}<span>${esc(p.label)}</span></button>`).join('');
+    ui.tb.innerHTML = `<div class="h3-ddw"><button class="h3-dd" data-dd="pre" aria-haspopup="menu" aria-expanded="false" title="Kameraansicht wählen">${icon('camera', 15)}<span data-k="pre">Übersicht</span>${icon('chevron', 13)}</button>
+        <div class="h3-menu h3-glass" role="menu" hidden><div class="h3-eb">Ansicht</div><div class="h3-pre">${presetBtns}</div></div></div>
+      <span class="h3-tsep"></span>${chips}<span class="h3-tsep"></span>
+      <div class="h3-ddw"><button class="h3-dd icn" data-dd="leg" aria-haspopup="dialog" aria-expanded="false" title="Legende">${icon('info', 15)}<span>Legende</span></button>
+        <div class="h3-pop h3-glass" hidden>${legendHtml()}</div></div>`;
+    ui.pre = ui.tb.querySelector('.h3-pre');
+    ui.preLbl = ui.tb.querySelector('[data-k="pre"]');
+    ui.pre.querySelectorAll('button').forEach(b => b.onclick = () => { preset(b.dataset.p); closeMenus(); });
+    ui.tb.querySelectorAll('[data-l]').forEach(b => b.onclick = () => toggleLayer(b.dataset.l));
+    ui.tb.querySelectorAll('[data-dd]').forEach(b => b.onclick = (e) => { e.stopPropagation(); const pop = b.nextElementSibling, open = pop.hidden; closeMenus(); pop.hidden = !open; b.setAttribute('aria-expanded', String(open)); b.classList.toggle('on', open); computeUiRects(); });
+    // Mobil: eine Leiste unten, Inhalte als Blatt
     ui.mbar = el('div', { class: 'h3-ov h3-mbar h3-glass' });
-    ui.mbar.innerHTML = `<button data-s="ctl">${icon('layers', 15)}Ansicht & Ebenen</button><button data-s="reset">${icon('grid', 15)}Übersicht</button>`;
+    ui.mbar.innerHTML = `<button data-s="pre">${icon('camera', 15)}Ansicht</button><button data-s="lay">${icon('layers', 15)}Ebenen</button><button data-s="leg">${icon('info', 15)}Legende</button><button data-s="reset" title="Übersicht">${icon('grid', 15)}</button>`;
+    ui.sheet = el('div', { class: 'h3-ov h3-sheet h3-glass', hidden: true });
     ui.mbar.querySelectorAll('button').forEach(b => b.onclick = () => {
       const s = b.dataset.s;
-      if (s === 'reset') { preset('uebersicht'); closeSheets(); return; }
-      const tgt = ui.ctl, open = !tgt.classList.contains('open');
-      closeSheets(); tgt.classList.toggle('open', open); b.classList.toggle('on', open);
+      if (s === 'reset') { preset('uebersicht'); closeMenus(); return; }
+      const open = ui.sheet.hidden || ui.sheet.dataset.s !== s;
+      closeMenus();
+      if (!open) return;
+      ui.sheet.dataset.s = s; ui.sheet.hidden = false; b.classList.add('on');
+      if (s === 'pre') { ui.sheet.innerHTML = `<div class="h3-eb">Ansicht</div><div class="h3-pre">${presetBtns}</div>`; ui.sheet.querySelectorAll('[data-p]').forEach(x => x.onclick = () => { preset(x.dataset.p); closeMenus(); }); markPresets(); }
+      else if (s === 'lay') { ui.sheet.innerHTML = `<div class="h3-eb">Ebenen</div><div class="h3-lay">${chips}</div>`; ui.sheet.querySelectorAll('[data-l]').forEach(x => x.onclick = () => toggleLayer(x.dataset.l)); applyLayers(); }
+      else ui.sheet.innerHTML = legendHtml();
       computeUiRects();
     });
-    root.append(ui.labels, ui.status, ui.mapbox, ui.ctl, ui.sel, ui.hint, ui.mbar, ui.tip);
-    for (const n of [ui.status, ui.mapbox, ui.ctl, ui.sel, ui.mbar]) n.addEventListener('pointerdown', (e) => e.stopPropagation());
+    ui.sel = el('div', { class: 'h3-ov h3-sel h3-glass', hidden: true });
+    ui.hint = el('div', { class: 'h3-ov h3-hint', html: '<b>Ziehen</b> drehen · <b>Rechte Maustaste</b> verschieben · <b>Mausrad</b> zoomen · <b>Klick</b> Details' });
+    root.append(ui.labels, ui.status, ui.mapbox, ui.tb, ui.sel, ui.hint, ui.mbar, ui.sheet, ui.tip);
+    for (const n of [ui.status, ui.mapbox, ui.tb, ui.sel, ui.mbar, ui.sheet]) n.addEventListener('pointerdown', (e) => e.stopPropagation());
+    root.addEventListener('pointerdown', () => closeMenus());
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && R.visible) closeMenus(); });
     applyLayers(); markPresets();
   }
-  function closeSheets() { const ui = R.ui; if (!ui.ctl) return; ui.ctl.classList.remove('open'); ui.mbar.querySelectorAll('button').forEach(b => b.classList.remove('on')); }
+  function toggleLayer(k) { R.layers[k] = !R.layers[k]; store.set('layers', R.layers); applyLayers(); }
+  function closeMenus() {
+    const ui = R.ui; if (!ui.tb) return;
+    ui.tb.querySelectorAll('[data-dd]').forEach(b => { const pop = b.nextElementSibling; if (!pop.hidden) { pop.hidden = true; } b.setAttribute('aria-expanded', 'false'); b.classList.remove('on'); });
+    if (ui.sheet && !ui.sheet.hidden) ui.sheet.hidden = true;
+    ui.mbar.querySelectorAll('button').forEach(b => b.classList.remove('on'));
+    computeUiRects();
+  }
+  const closeSheets = closeMenus;
   function applyLayers() {
     const L = R.layers;
-    R.ui.ctl.querySelectorAll('[data-l]').forEach(b => b.classList.toggle('on', !!L[b.dataset.l]));
+    R.root.querySelectorAll('[data-l]').forEach(b => { if (b.classList.contains('h3-chip')) { b.classList.toggle('on', !!L[b.dataset.l]); b.setAttribute('aria-pressed', String(!!L[b.dataset.l])); } });
     if (R.flowGroup) R.flowGroup.visible = L.flow;
     if (R.C) R.C.wait.visible = L.flow;
     if (R.pulse) R.pulse.pts.visible = L.data;
@@ -2650,11 +2731,12 @@
   function computeUiRects() {
     if (!R.root) return;
     const rr = R.root.getBoundingClientRect(), out = [];
-    for (const n of [R.ui.status, R.ui.mapbox, R.ui.ctl, R.ui.sel, R.ui.mbar, R.ui.hint]) {
+    for (const n of [R.ui.status, R.ui.mapbox, R.ui.tb, R.ui.sel, R.ui.mbar, R.ui.hint, R.ui.sheet, ...(R.ui.tb ? R.ui.tb.querySelectorAll('.h3-menu,.h3-pop') : [])]) {
       if (!n || n.hidden || (n === R.ui.hint && n.classList.contains('gone'))) continue;
       const b = n.getBoundingClientRect(); if (!b.width || !b.height) continue;
       out.push([b.left - rr.left - 6, b.top - rr.top - 6, b.right - rr.left + 6, b.bottom - rr.top + 6]);
     }
+    if (R.drawerW) out.push([R.w - R.drawerW - 8, -10, R.w + 10, R.h + 10]);
     R.uiRects = out;
   }
   function renderSelBar() {
@@ -2671,6 +2753,7 @@
       const o = S.orders[R.sel.id];
       html = `<span class="k">Auftrag</span><span class="nm">${esc(R.sel.id)}</span><span class="ac">${esc(o ? o.part.name : '')} · ${R.route.steps.length} Stationen</span><button class="btn sm" data-r>${icon('route', 14)}Route zeigen</button>`;
     }
+    R.root.classList.toggle('selon', !!html);
     if (!html) { if (!ui.sel.hidden) { ui.sel.hidden = true; computeUiRects(); } ui.selSig = ''; return; }
     if (ui.selSig !== html) {
       ui.selSig = html; ui.sel.innerHTML = html;
@@ -3092,6 +3175,8 @@
     if (!R.ok) return;
     const sim = WF.sim, S = sim.state; if (!S || !S.machines) return;
     const ui = R.ui.st, sh = sim.shift(), P = WF.profile;
+    const dr = document.getElementById('drawer'), dw = dr && dr.classList.contains('open') && !R.mobile ? Math.round(dr.getBoundingClientRect().width) : 0;
+    if (dw !== R.drawerW) { R.drawerW = dw; R.root.style.setProperty('--dw', dw + 'px'); R.root.classList.toggle('narrow', R.w - dw < 1060); closeMenus(); setTimeout(computeUiRects, 260); }
     let run = 0, flt = 0, wait = 0;
     for (const id of P.machines) { const st = S.machines[id] ? S.machines[id].state : 'idle'; if (st === 'running') run++; else if (st === 'fault') flt++; else if ((WF.STATE[st] || {}).group === 'wait') wait++; }
     let duty = 0, brk = 0, walk = 0;
@@ -3174,7 +3259,7 @@
     if (idx >= 0) { T.halo.position.set(0, 0.26 + idx * 0.082 + 0.04, 0); T.halo.material.color.set(hex); T.halo.material.opacity = 0.9; T.halo.visible = true; }
     else T.halo.visible = false;
     srgb(hex, mo.glow.mat.uniforms.uColor.value);
-    mo.glowBase = st === 'idle' ? 0.32 : st === 'fault' ? 1.0 : st === 'running' ? 0.8 : 0.9;
+    mo.glowBase = st === 'idle' ? 0.32 : st === 'fault' ? 1.25 : st === 'running' ? 0.8 : 0.95;
     const lightOn = st === 'running' || st === 'setup' || st === 'toolchange' || st === 'firstPiece';
     mo.innerTarget = st === 'running' ? 0.95 : lightOn ? 0.6 : st === 'fault' ? 0.35 : 0.1;
     mo.inner.emissive.setHex(st === 'fault' ? 0xff6a5a : st === 'running' ? 0xfff3df : 0xe4eeff);
@@ -3361,6 +3446,8 @@
       const e = R.follow.kind === 'agv' ? R.agvs[R.follow.id] : ps && ps.vehicle ? R.fork : R.people[R.follow.id];
       if (e && (R.follow.kind === 'agv' || (ps && (ps.vehicle || R.people[R.follow.id].vis)))) { const tg = R.controls.target, nx = damp(tg.x, e.x, 4, dt), nz = damp(tg.z, e.z, 4, dt); R.camera.position.x += nx - tg.x; R.camera.position.z += nz - tg.z; tg.x = nx; tg.z = nz; }
     }
+    const vo = (R.drawerW || 0) / 2;
+    if (Math.abs((R.viewOff || 0) - vo) > 0.5) { R.viewOff = damp(R.viewOff || 0, vo, 7, dt); if (Math.abs(R.viewOff - vo) <= 0.6) R.viewOff = vo; applyViewOffset(); }
     R.controls.update();
     clampTarget();
     const cp = R.camera.position;
@@ -3469,14 +3556,17 @@
     const it = mo.innerTarget != null ? mo.innerTarget : 0.1;
     if (Math.abs(mo.inner.emissiveIntensity - it) > 0.003) mo.inner.emissiveIntensity = damp(mo.inner.emissiveIntensity, it, 4, dt);
     let gi = mo.glowBase || 0.4;
-    if (st === 'fault') gi *= 0.55 + 0.45 * (Math.sin(t * 7) > 0 ? 1 : 0.2);
+    if (st === 'fault') {
+      gi *= 0.55 + 0.45 * (Math.sin(t * 7) > 0 ? 1 : 0.2);
+      if (t - (mo.alarmT || -9) > 1.7 && R.visible) { mo.alarmT = t; const f = mo.st.footprint; ping(mo.cx, 0.05, mo.cz, null, Math.max(f.w, f.d) * 0.42, 0xf87171); }
+    }
     else if ((WF.STATE[st] || {}).group === 'wait') gi *= 0.72 + 0.28 * Math.sin(t * 2.2);
     const hov = R.hover && R.hover.kind === 'machine' && R.hover.id === mo.id, sel = R.selTarget && R.selTarget.kind === 'machine' && R.selTarget.id === mo.id;
     if (hov || sel) gi = Math.min(1.3, gi * 1.35);
     if (R.flash && R.flash.id === mo.id) { R.flash.t += dt; gi += Math.max(0, 1 - R.flash.t / 2.4) * 0.8 * (0.5 + 0.5 * Math.sin(t * 9)); if (R.flash.t > 2.4) R.flash = null; }
     mo.glow.mat.uniforms.uI.value = gi;
     const hl = hov ? 1 : sel ? 0.55 : 0;
-    if (Math.abs(mo.hl - hl) > 0.004) { mo.hl = damp(mo.hl, hl, 10, dt); mo.mPaint.emissive.setRGB(0.06 * mo.hl, 0.11 * mo.hl, 0.16 * mo.hl); }
+    if (Math.abs(mo.hl - hl) > 0.004) { mo.hl = damp(mo.hl, hl, 10, dt); mo.mBatch.emissive.setRGB(0.05 * mo.hl, 0.09 * mo.hl, 0.13 * mo.hl); mo.mPaint.emissive.setRGB(0.05 * mo.hl, 0.09 * mo.hl, 0.13 * mo.hl); }
     if (mo.tower && st === 'fault') { const on = Math.sin(t * 7) > 0; const mm = mo.tower.mats[2]; mm.emissiveIntensity = on ? 2.8 : 0.15; mo.tower.halo.material.opacity = on ? 0.95 : 0.08; }
     if (mo.tablet) { const tb = mo.tablet; tb.flash = Math.max(0, tb.flash - dt * 1.5); tb.mat.color.setHex(0x5fb6e6).multiplyScalar(0.75 + tb.flash * 1.8); }
     const spin = cutting ? 1 : dressing ? 0.4 : 0;
@@ -3592,6 +3682,9 @@
       const s = (0.6 + p.t * 2.2) * (p.s || 1); p.m.scale.set(s, 1, s); p.m.material.opacity = (1 - p.t) * 0.95;
     }
   }
+  function applyViewOffset() {
+    if ((R.viewOff || 0) > 0.5) R.camera.setViewOffset(R.w, R.h, R.viewOff, 0, R.w, R.h); else R.camera.clearViewOffset();
+  }
   function adaptPerf(dt) {
     R.perfAcc += dt; R.perfN++;
     if (R.perfAcc < 2) return;
@@ -3607,13 +3700,14 @@
     R.w = w; R.h = h;
     R.renderer.setPixelRatio(R.dpr);
     R.renderer.setSize(w, h, false);
-    R.camera.aspect = w / h; R.camera.updateProjectionMatrix();
+    R.camera.aspect = w / h; R.camera.updateProjectionMatrix(); applyViewOffset();
     R.pulse.mat.uniforms.uScale.value = h * R.dpr / (2 * Math.tan(R.camera.fov * DEG / 2));
     const mob = w <= 640;
     if (mob !== R.mobile) { R.mobile = mob; R.root.classList.toggle('m', mob); closeSheets(); }
     const short = !mob && h < 640;
     if (short !== R.short) { R.short = short; R.root.classList.toggle('short', short); }
     R.root.classList.toggle('nomap', mob || short);
+    R.root.classList.toggle('narrow', w - (R.drawerW || 0) < 1060);
     computeUiRects();
     for (const id in R.lb) R.lb[id].sizes = {};
   }
