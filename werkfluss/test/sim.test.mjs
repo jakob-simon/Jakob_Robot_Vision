@@ -2077,7 +2077,9 @@ function reviewPhase() {
         if (!(v.lossEurToday > 0)) fail('review', `${mid} waited ${dur(sec)} in the ghost shift but lossEurToday = ${v.lossEurToday}`, 'gloss:' + mid);
       }
       if (waited.length) { R(); if (!(k.oeeShift < 1)) fail('review', `kpis().oeeShift = ${k.oeeShift} although ${waited.map((x) => x[0]).join(', ')} stood in the ghost shift`, 'goeek'); }
-      for (const mid of MACHINE_IDS_LIST) { const m = S0.machines[mid]; if (!m.op && m.state === 'idle' && m.ks.planned > m.ks.run + 1) { R(); fail('review', `${mid} without order shows planned ${m.ks.planned} s > run ${m.ks.run} s in the ghost shift`, 'gidle:' + mid); } }
+      // ohne Auftrag (und nicht autonom) zählt in der Geisterschicht keine geplante Zeit; eine autonome Maschine darf geplante Zeit
+      // aus einem eben abgearbeiteten Behälter haben (Waschanlage mit eingestelltem Programm)
+      for (const mid of MACHINE_IDS_LIST) { const m = S0.machines[mid]; if (!m.op && m.state === 'idle' && m.loading !== 'auto' && m.ks.planned > m.ks.run + 1) { R(); fail('review', `${mid} without order shows planned ${m.ks.planned} s > run ${m.ks.run} s in the ghost shift`, 'gidle:' + mid); } }
       note('review', `ghost shift Mo→Di: ${waited.length ? waited.map(([mid, sec]) => `${mid} stood ${dur(sec)} → shift availability ${U3(SIM.machineView(mid).oeeShift.availability)}`).join(', ') : 'no autonomous machine stood'}; plant oeeShift ${U3(k.oeeShift)} (${ghostSamples} samples)`);
       // Rüst-Texte: Waschanlage/Messraum/Montage ohne „vermessene Werkzeuge“
       for (const e of evs) if (e.type === 'setupStart' && e.entity && ['M11', 'QS', 'M13'].includes(e.entity.id)) { R(); if (/vermessene Werkzeuge/.test(e.msg)) fail('review', `setup text at ${e.entity.id}: „${e.msg}“`, 'setuptxt'); }
@@ -2328,13 +2330,14 @@ function nightPhase() {
         if (tr.kind === 'empty' && (tr.containerId || tr.mode !== 'AGV')) flow.badPhase.push(`${tr.id}: Leergut transport with container/mode ${tr.mode}`);
       }
       if (S0.stations.PUF) flow.pufMax = Math.max(flow.pufMax, S0.stations.PUF.inp.length + S0.stations.PUF.out.length);
-      // ohne Schicht: nicht autonome Maschinen stehen geplant (kein Verlust)
+      // ohne Schicht: nicht autonome Maschinen stehen geplant (kein Verlust) – je Minute, in der die Maschine vorher und nachher
+      // nicht für den unbemannten Lauf bereit war (autonome Maschinen dürfen nachts mit eingestelltem Programm weiterarbeiten)
       if (off && x >= 22 * H + 5 * MIN) {
         for (const mid of MACHINE_IDS_LIST) {
-          const m = S0.machines[mid]; if (m.loading === 'auto' && m.setupDone && m.released) continue;
-          const key = mid + '|' + Math.floor(t / DAY);
-          if (lossNight[key] == null) lossNight[key] = { mid, from: m.kd.lossEur, to: m.kd.lossEur, state: new Set() };
-          lossNight[key].to = m.kd.lossEur; if (m.state !== 'idle' && m.state !== 'fault') lossNight[key].state.add(m.state + ': ' + m.cause.slice(0, 60));
+          const m = S0.machines[mid], ready = m.loading === 'auto' && m.setupDone && m.released, key = mid + '|' + Math.floor(t / DAY);
+          const v = lossNight[key] || (lossNight[key] = { mid, sum: 0, last: m.kd.lossEur, wasReady: ready, state: new Set() });
+          if (!ready && !v.wasReady) { v.sum += Math.max(0, m.kd.lossEur - v.last); if (m.state !== 'idle' && m.state !== 'fault') v.state.add(m.state + ': ' + m.cause.slice(0, 60)); }
+          v.last = m.kd.lossEur; v.wasReady = ready;
         }
       }
       if (!checked2230 && t >= t2230) {
@@ -2357,7 +2360,7 @@ function nightPhase() {
       }
     }
     // Verlust ohne Schicht nur für autonome Maschinen
-    for (const v of Object.values(lossNight)) { R(); if (v.to - v.from > 0.01) fail('night', `${v.mid} accrued ${(v.to - v.from).toFixed(2)} € loss off shift without an unattended run (states: ${[...v.state].slice(0, 2).join('; ')})`, 'nloss:' + v.mid); }
+    for (const v of Object.values(lossNight)) { R(); if (v.sum > 0.01) fail('night', `${v.mid} accrued ${v.sum.toFixed(2)} € loss off shift without an unattended run (states: ${[...v.state].slice(0, 2).join('; ')})`, 'nloss:' + v.mid); }
     // geplante Zeit: Ursachen-Aufteilung = lossEur, plannedStateSec = planned
     const S0 = st();
     for (const mid of MACHINE_IDS_LIST) {

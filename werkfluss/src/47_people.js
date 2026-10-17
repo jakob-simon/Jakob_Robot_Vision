@@ -1312,7 +1312,8 @@
     setHTML(R.kWork, present.length ? `${einsatz}<small>/ ${present.length}</small>` : '–');
     const ws = !present.length ? 'niemand im Dienst' : [`<b>${withTask}</b> mit Aufgabe`, tendN ? `<b>${tendN}</b> ${tendN === 1 ? 'betreut' : 'betreuen'} Maschinen` : '', leadN ? 'Schichtleitung' : '',
       free ? `${free} verfügbar` : '', brk ? `${brk} in der Pause` : ''].filter(Boolean).join(' · ');
-    setHTML(R.kWorkS, ws);
+    const brI = sh.id ? breakInfo(sh, now) : null;
+    setHTML(R.kWorkS, present.length && brk === present.length ? `alle in der Pause${brI && brI.now ? ' bis ' + U.fmtClock(brI.b) : ''}` : ws);
     setAttr(R.kWorkS, 'title', present.length ? 'Im Einsatz: mit Aufgabe, an eigenen laufenden Maschinen (Betreuung) oder in der Schichtleitung. Verfügbar: ohne Aufgabe und ohne laufende Maschine.' : null);
     const tot = present.length || 1;
     setHTML(R.kDist, present.length ? PST_ORDER.filter(k => counts[k]).map(k => `<i class="${pOutline(k) ? 'o' : ''}" style="--c:${pColor(k)};flex:${counts[k] / tot}" title="${esc(k === 'tending' ? 'Betreut Maschinen' : pLabel(k))}: ${counts[k]}"></i>`).join('') : '');

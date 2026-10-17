@@ -377,8 +377,12 @@
     const T = Math.max(tr.top - 6, cr.top + 3), B = Math.min(tr.bottom + 6, limit - 3, window.innerHeight - 3);
     if (!ring) { ring = el('div', { class: 'tour-ring off' }); document.body.append(ring); }
     if (R - L < 40 || B - T < 28) { ring.classList.add('off'); return; }
+    // War der Ring aus (neuer Schritt), springt er an die neue Stelle und blendet ein – kein Gleiten vom alten Ziel
+    const wasOff = ring.classList.contains('off');
+    if (wasOff) ring.style.transition = 'opacity .2s ease';
     Object.assign(ring.style, { left: Math.round(L) + 'px', top: Math.round(T) + 'px', width: Math.round(R - L) + 'px', height: Math.round(B - T) + 'px' });
     ring.classList.remove('off');
+    if (wasOff) { const r0 = ring; requestAnimationFrame(() => requestAnimationFrame(() => { r0.style.transition = ''; })); }
   }
   /** Kurz nach Schrittwechsel/Auswahl jede Frame nachführen (Drawer/Copilot gleiten herein), danach alle 450 ms. */
   function burst(ms) {

@@ -315,8 +315,9 @@
   const SEV_RANK = { info: 0, ok: 0, warn: 1, crit: 2 };
   const toasted = new Map(); // key → höchste getoastete Schwere
   function markExisting() { for (const n of (WF.sim && WF.sim.state && WF.sim.state.notifications) || []) toasted.set(n.key || n.id, SEV_RANK[n.sev] || 0); }
+  let quiet = false; // Neustart: Meldungen des Vorrechnens (06:00–08:40) nicht als Toasts zeigen
   function onNotify(n) {
-    if (!n || n.status !== 'open' || (n.sev !== 'crit' && n.sev !== 'warn')) return;
+    if (quiet || !n || n.status !== 'open' || (n.sev !== 'crit' && n.sev !== 'warn')) return;
     const key = n.key || n.id, rank = SEV_RANK[n.sev] || 0;
     if (toasted.has(key) && toasted.get(key) >= rank) return; // bekannt und nicht schwerer geworden
     toasted.set(key, rank);
@@ -382,7 +383,13 @@
     app.modal({ title: 'Einstellungen', body, actions: [
       { label: 'Simulation neu starten', icon: 'refresh', danger: true, ghost: true, left: true,
         confirm: { html: '<b>Simulation neu starten?</b> Die Schicht beginnt wieder Mo 06:00 (vorgerechnet bis 08:40). Alle Eingriffe dieser Sitzung – Störungen, Bestellungen, KI-Aufträge – werden zurückgesetzt.', label: 'Jetzt neu starten' },
-        onClick: () => { WF.sim.actions && WF.sim.actions.reset ? WF.sim.actions.reset() : WF.sim.init(WF.profile); app.closeDrawer(); app.toast('Simulation neu gestartet (Mo 06:00, vorgerechnet bis 08:40)', 'ok'); } },
+        onClick: () => {
+          quiet = true;
+          try { WF.sim.actions && WF.sim.actions.reset ? WF.sim.actions.reset() : WF.sim.init(WF.profile); } finally { quiet = false; }
+          app.closeDrawer();
+          const box = document.getElementById('toasts'); if (box) box.innerHTML = ''; // Toasts der alten Sitzung
+          app.toast('Simulation neu gestartet (Mo 06:00, vorgerechnet bis 08:40)', 'ok');
+        } },
       { label: 'Abbrechen' },
       { label: 'Speichern', primary: true, onClick: () => {
         const n = body.querySelector('#set-company').value.trim(), s = body.querySelector('#set-site').value.trim();

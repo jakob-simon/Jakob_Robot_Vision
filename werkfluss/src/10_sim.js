@@ -91,7 +91,7 @@
     overrunSec: 600, overrunLastSec: 1200, attendFinishSec: 600, makeupLateSec: 300,
     pickEverySec: 10, switchCheckSec: 30,
     spcReactSec: 300,      // SPC-Trend: nach 5 min gibt Bediener/Einrichter die Korrektur an der Maschine ein
-    batteryLow: 25, batteryFull: 90, batteryAssign: 30, agvDrain: 0.006, agvCharge: 0.05,
+    batteryLow: 25, batteryFull: 90, batteryAssign: 30, agvDrain: 0.006, agvCharge: 0.05, agvLoadedFactor: 0.8,
     basePowerKw: 12,
     eventsMax: 3000, notificationsMax: 400, measMax: 200, transportsKeepSec: DAY, toolsKeep: 150,
     // Werkzeug: Wechselfenster ≤ 10 % der Standzeit; Mitwechseln, wenn der eigene Wechsel in ≤ 30 min käme, höchstens 35 %
@@ -190,7 +190,9 @@
   const teile = (n) => n + (n === 1 ? ' Teil' : ' Teile');
   /** kompakte Empfehlung für Meldungen (Leitstand-Karte zeigt sie wörtlich): „Ursache: … Empfehlung: ….“ ≤ ca. 180 Zeichen */
   const brief = (cause, rec) => { const c = String(cause || '').replace(/[.\s]+$/, ''), r = String(rec || '').replace(/[.\s]+$/, '');
-    const s0 = `Ursache: ${c}. Empfehlung: ${r}.`; return s0.length <= 190 ? s0 : `Ursache: ${trimStr(c, Math.max(50, 186 - r.length - 24))}. Empfehlung: ${trimStr(r, 120)}.`; };
+    const s0 = `Ursache: ${c}. Empfehlung: ${r}.`; if (s0.length <= 190) return s0;
+    const room = 190 - 24, rN = Math.min(r.length, 120), cN = Math.max(40, room - rN);
+    return `Ursache: ${trimStr(c, cN)}. Empfehlung: ${trimStr(r, room - Math.min(cN, c.length))}.`; };
   /** Kurzname für Meldungen: ohne Klammerzusätze („(Beispiel)“, „(Schwesterfirma)“) und Rechtsform */
   const shortName = (s0) => String(s0 || '').replace(/\s*\([^)]*\)/g, '').replace(/\s+(GmbH(\s*&\s*Co\.?\s*KG)?|AG|KG|e\.U\.)$/, '').trim();
   const opBatch = (r) => Math.max(1, r.transferBatch || 10);
@@ -2752,7 +2754,7 @@
   function assign(p, tk) {
     tk.status = 'assigned'; tk.assignee = p.id; tk.assignedT = S.t;
     p.task = tk; p.goal = null; p.atHome = false; p.tasksToday++;
-    if (tk.transportId && S.transports[tk.transportId]) { const tr = S.transports[tk.transportId]; tr.status = 'assigned'; tr.assignee = p.id; }
+    if (tk.transportId && S.transports[tk.transportId]) { const tr = S.transports[tk.transportId]; tr.status = 'assigned'; tr.assignee = p.id; setWait(tr, null, null); }
     if (tk.type === 'forklift' || tk.type === 'bars') S.forklift.reservedBy = p.id;
     startStep(p);
   }
@@ -2830,7 +2832,7 @@
     if (tk.machineId && tk.mkey) { const m = S.machines[tk.machineId]; if (m && m.tasks[tk.mkey] === tk.id) m.tasks[tk.mkey] = null; }
     if (tk.transportId && status === 'cancelled') {
       const tr = S.transports[tk.transportId];
-      if (tr && tr.status !== 'done' && tr.status !== 'toDrop' && tr.status !== 'loaded') { tr.status = 'open'; tr.assignee = null; tr.taskId = null; }
+      if (tr && tr.status !== 'done' && tr.status !== 'toDrop' && tr.status !== 'loaded') { tr.status = 'open'; tr.assignee = null; tr.taskId = null; setWait(tr, 'noDriver', 'wartet auf Logistiker:in (Stapler)'); }
     }
     delete S.tasks[tk.id];
     if (tk.type === 'toolChange' && tk.machineId && status === 'done') planTools(S.machines[tk.machineId]);
@@ -2861,7 +2863,7 @@
       tk.data.note = 'Vermessenes Werkzeug liegt an der Maschine bereit';
     }
     tk.si = 0; tk.status = 'open'; tk.assignee = null; tk.ready = false; tk.workStarted = false;
-    if (tk.transportId && S.transports[tk.transportId]) { const tr = S.transports[tk.transportId]; tr.status = 'open'; tr.assignee = null; }
+    if (tk.transportId && S.transports[tk.transportId]) { const tr = S.transports[tk.transportId]; tr.status = 'open'; tr.assignee = null; setWait(tr, 'noDriver', 'wartet auf Logistiker:in (Stapler)'); }
     p.task = null; p.state = 'idle'; p.workRem = 0; p.idleSince = S.t; p.activity = 'Bereit';
     if (p.vehicle) parkForklift(p);
     if (S.forklift.reservedBy === p.id) S.forklift.reservedBy = null;
@@ -3147,8 +3149,10 @@
   function goCharge(a) { a.state = 'toCharge'; routeTo(a, ST.CHG.dockNode, chargerPos(a)); }
   function agvTick(a) {
     if (a.route) {
-      const arrived = moveEnt(a, a.speed);
-      a.battery = Math.max(0, r6(a.battery - CFG.agvDrain)); a.distToday += a.speed;
+      // mit Last langsamer (Lastfahrt, Personenschutz-Scanner): agvLoadedFactor × speed
+      const v = a.load || a.loadKind === 'empty' ? a.speed * CFG.agvLoadedFactor : a.speed;
+      const arrived = moveEnt(a, v);
+      a.battery = Math.max(0, r6(a.battery - CFG.agvDrain)); a.distToday += v;
       if (!arrived) return;
       a.route = null;
       if (a.state === 'toPickup') { a.state = 'loading'; a.waitRem = CFG.agvHandleSec; }
@@ -3721,7 +3725,12 @@
   function ghostRun(m, tc, fresh, staffEnd, until, caps) {
     const cyc = tc.cyc, chg = 300;
     const st = tc.items.filter(x => x.tl && x.spec.cutMinPerPart > 0).map(x => ({ type: x.spec.type, cut: x.spec.cutMinPerPart, life: x.tl.life,
-      rem: x.remA, at: x.at, full: Math.floor(x.tl.life / x.spec.cutMinPerPart + 1e-9) }));
+      rem: x.remA, at: x.at, full: Math.floor(x.tl.life / x.spec.cutMinPerPart + 1e-9),
+      ins: x.tl.kind === 'insert' && (x.tl.edges || 1) > 1, edge: x.tl.edge || 1, edges: x.tl.edges || 1 }));
+    // Wechsel wie in der Werkstatt: Wendeplatte mit freier Schneide wird gewendet, sonst neues Werkzeug; beim reinen Wenden
+    // (alle fälligen Werkzeuge wendbar) werden nur wendbare Platten mitgenommen (kein Gang zur Werkzeugausgabe)
+    const canIdx = (x) => x.ins && x.edge < x.edges;
+    const renew = (x) => { if (canIdx(x)) x.edge++; else x.edge = 1; x.rem = x.full; };
     const capN = (caps && caps.n) || [], cn = capN.map(x => x.n);
     const bars = caps && caps.bars ? Object.assign({}, caps.bars) : null;
     let t = boundaryT(m), pl = tc.plAfter, changes = [];
@@ -3729,9 +3738,10 @@
       if (pl <= 0) return { stopT: null, done: true, endT: t, changes };
       if (t >= until) return { stopT: null, endT: t, changes };
       let ch = [];
-      if (fresh && k === fresh.k) for (const x of st) if (fresh.types.includes(x.type)) { x.rem = x.full; ch.push(x.type); }
+      if (fresh && k === fresh.k) for (const x of st) if (fresh.types.includes(x.type)) { renew(x); ch.push(x.type); }
       if (t < staffEnd && st.some(x => x.rem <= x.at && pl > x.rem)) {
-        for (const x of st) if (pl > x.rem && (x.rem <= x.at || (Math.max(0, x.rem - x.at) * cyc <= CFG.bundleSec && x.rem * x.cut <= CFG.bundleFrac * x.life))) { x.rem = x.full; ch.push(x.type); }
+        const due = st.filter(x => x.rem <= x.at && pl > x.rem), idxOnly = due.every(canIdx);
+        for (const x of st) if (pl > x.rem && (x.rem <= x.at || ((!idxOnly || canIdx(x)) && Math.max(0, x.rem - x.at) * cyc <= CFG.bundleSec && x.rem * x.cut <= CFG.bundleFrac * x.life))) { renew(x); ch.push(x.type); }
       }
       if (ch.length) { changes.push({ t, types: ch }); t += chg; }
       const lim = st.find(x => x.rem < 1);
@@ -3791,10 +3801,11 @@
       for (const e of stops) if (e.action && actions.length < 3) actions.push({ label: e.actionLabel || `${e.machineId} vorbereiten`, action: e.action });
     } else {
       const anyTool = stops.some(e => e.reason === 'tool');
-      const RW = { tool: 'Standzeit', bars: 'Stangen', material: 'Material', input: 'Teile im Eingang', output: 'Platz im Ausgang', fpi: 'Freigabe', fault: 'Störung' };
+      const RW = { tool: 'Standzeit zu kurz', bars: 'Stangen leer', material: 'Material fehlt', input: 'Teile fehlen', output: 'Ausgang voll', fpi: 'Erstteil offen', fault: 'Störung' };
       const rs = [...new Set(stops.map(e => RW[e.reason] || e.reason))];
-      sugg = brief(`${rs.slice(0, 2).join('/')} reicht nicht bis ${nx}, niemand im Haus`,
-        `${nx} als Erstes ${stops.map(e => (e.recNight || e.machineId).replace(/\s*\([^)]*\)/g, '')).join(', ')}${anyTool ? '; künftig vor Schichtende vorbeugend wenden/wechseln' : ''}`);
+      const cause = `${rs.slice(0, 2).join(', ')} – niemand im Haus bis ${nx}`, first = `${nx} als Erstes ${stops.map(e => (e.recNight || e.machineId).replace(/\s*\([^)]*\)/g, '')).join(', ')}`;
+      const full = `${first}${anyTool ? '; künftig vor Schichtende vorbeugend wenden/wechseln' : ''}`;
+      sugg = brief(cause, `Ursache: ${cause}. Empfehlung: ${full}.`.length <= 190 ? full : first);
     }
     const first = stops[0] || list[0];
     actions.push({ label: 'Maschine öffnen', action: { type: 'select', kind: 'machine', id: first.machineId } });

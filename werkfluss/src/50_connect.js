@@ -270,7 +270,7 @@
   .cn-aside .card-b{display:flex;flex-direction:column;gap:12px}
   /* Assistent unter 1280 px: Zusammenfassung zweispaltig unter dem Inhalt (links Maschine + Stufenwechsel, rechts Details) */
   @media (min-width:761px) and (max-width:1280px){
-    .cn-aside .card-b{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);grid-template-areas:"a d" "l d" "n n";gap:12px 22px;align-items:start}
+    .cn-aside .card-b{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);grid-template-areas:"a d" "l d" "n n";grid-template-rows:auto 1fr auto;gap:12px 22px;align-items:start}
     .cn-aside .cn-asm{grid-area:a}.cn-aside .cn-lvch{grid-area:l}.cn-aside .dl{grid-area:d}.cn-aside .cn-aside-n{grid-area:n}}
   .cn-asm{display:flex;align-items:center;gap:11px}
   .cn-asm .ic{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:var(--card2);border:1px solid var(--line2);color:var(--text2);flex:none}

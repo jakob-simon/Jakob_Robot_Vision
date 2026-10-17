@@ -49,9 +49,9 @@
 .h3-shift b{font-weight:600;color:var(--text2);margin-right:6px}
 .h3-shift.br b{color:var(--st-wait)}
 .h3-kv{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;margin-top:10px;border:1px solid color-mix(in srgb,var(--line2) 70%,transparent);border-radius:9px;background:color-mix(in srgb,var(--bg) 35%,transparent)}
-.h3-kv>div{min-width:0;padding:8px 8px 7px 9px}
+.h3-kv>div{min-width:0;padding:8px 6px 7px 9px}
 .h3-kv>div+div{border-left:1px solid color-mix(in srgb,var(--line2) 60%,transparent)}
-.h3-kv .l{display:block;font:600 var(--fs-2xs)/1.2 var(--f-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.h3-kv .l{display:block;font:600 var(--fs-2xs)/1.2 var(--f-ui);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .h3-kv b{display:block;font:600 var(--fs-2xl)/1 var(--f-cond);font-variant-numeric:tabular-nums;margin-top:5px;white-space:nowrap}
 .h3-kv b small{font-size:var(--fs-md);color:var(--muted);font-weight:500;margin-left:1px}
 .h3-kv .s{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-size:var(--fs-xs);line-height:1.3;min-height:2.6em;color:var(--muted);overflow:hidden;margin-top:3px}
@@ -75,7 +75,7 @@
 .h3-root.nomap .h3-mapbox{display:none}
 
 /* ---------- Werkzeugleiste oben rechts: Ansicht, Ebenen, Legende */
-.h3-tb{right:calc(14px + var(--dw, 0px));top:14px;display:flex;align-items:center;gap:4px;padding:4px;border-radius:11px;transition:right .22s ease}
+.h3-tb{right:calc(14px + var(--dw, 0px));top:14px;display:flex;align-items:center;gap:4px;padding:4px;border-radius:11px}
 .h3-tsep{width:1px;height:20px;background:color-mix(in srgb,var(--line2) 80%,transparent);margin:0 3px;flex:none}
 .h3-ddw{position:relative}
 .h3-dd{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 9px 0 9px;border-radius:8px;border:0;background:transparent;color:var(--text);font-size:var(--fs-sm);font-weight:600;cursor:pointer;white-space:nowrap}
@@ -218,6 +218,8 @@
 .h3-lb.wt .stp{width:13px;height:13px;border-radius:50%;flex:none;background:linear-gradient(var(--bg) 0 0) center/7px 2px no-repeat,var(--mat)}
 .h3-lb.wt .o{font-weight:600;color:var(--text)}
 .h3-lb.wt .s{font-size:var(--fs-xs);color:var(--text2);margin:2px 0 0 20px}
+.h3-lb.wt.c .s{display:none}
+.h3-lb.wt.c{padding:3px 9px 3px 6px}
 
 /* ---------- Tooltip */
 .h3-tip{position:absolute;z-index:6;left:0;top:0;width:340px;max-width:calc(100% - 20px);pointer-events:none;padding:12px 14px 12px;font-size:var(--fs-sm);opacity:0;transition:opacity .12s}
@@ -1029,7 +1031,7 @@
     const P = WF.profile, HW = P.hall.w, HD = P.hall.d;
     const PX = R.mobile ? 28 : 44;
     const marks = texFloorMarks(PX), ao = texFloorAO();
-    const mat = new THREE.MeshStandardMaterial({ color: 0x9a9fa6, map: texConcrete(), roughnessMap: texConcreteRough(), roughness: 0.62, metalness: 0, envMapIntensity: 0.55 });
+    const mat = new THREE.MeshStandardMaterial({ color: 0x8f949b, map: texConcrete(), roughnessMap: texConcreteRough(), roughness: 0.62, metalness: 0, envMapIntensity: 0.55 });
     const uni = { uMarks: { value: marks }, uAO: { value: ao } };
     mat.onBeforeCompile = (sh) => {
       sh.uniforms.uMarks = uni.uMarks; sh.uniforms.uAO = uni.uAO;
@@ -2520,7 +2522,7 @@
       uniforms: { uColor: { value: srgb('#ff9d3d') }, uOp: { value: 0.45 }, uR: { value: 0.05 } },
       vertexShader: 'attribute float aW; uniform float uR; varying float vU; void main(){ vU = uv.x; vec3 p = position + normal * uR * aW; gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0); }',
       fragmentShader: 'uniform vec3 uColor; uniform float uOp; varying float vU; void main(){ float a = smoothstep(0.0, 0.12, vU) * smoothstep(1.0, 0.88, vU); gl_FragColor = vec4(uColor * (0.85 + 0.35 * a), uOp * (0.45 + 0.55 * a) * max(a, 0.18)); }',
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      transparent: true, depthWrite: false,
     });
     // Quelle/Ziel der Bögen: weiche Leuchtpunkte am Boden
     R.netEnds = new THREE.InstancedMesh(gPlaneY(), new THREE.MeshBasicMaterial({ map: M.glowT, color: 0xff9d3d, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }), 48);
@@ -3050,7 +3052,7 @@
   }
   function setFit(f, instant, dur) { R.fit = f; applyFit(instant, dur); }
   function applyFit(instant, dur) {
-    const f = R.fit; if (!f || !R.ok) return;
+    const f = R.fit; if (!f || !R.camera || !R.controls) return;
     syncDrawer();
     if (f.kind === 'preset') { const p = PRESETS.find(x => x.id === f.id); if (p) Object.assign(f, presetFit(p)); }
     const s = solveFit(f.pts, f.phi, f.th, f.rMin || 14, f.rMax || 150);
@@ -3267,7 +3269,12 @@
     if (!R.root) return;
     const avail = R.w - (R.drawerW || 0), root = R.root;
     const compact = R.mobile || avail <= 640;
-    if (compact !== R.compact) { R.compact = compact; root.classList.toggle('m', compact); closeSheets(); for (const id in R.lb) R.lb[id].sizes = {}; for (const id in R.rtLb) R.rtLb[id].sizes = {}; }
+    if (compact !== R.compact) {
+      R.compact = compact; root.classList.toggle('m', compact); closeSheets();
+      for (const id in R.lb) R.lb[id].sizes = {};
+      for (const id in R.rtLb) R.rtLb[id].sizes = {};
+      if (R.ui.sel && !R.ui.sel.hidden) { R.ui.selSig = ''; renderSelBar(); }
+    }
     const focus = !!(R.route && R.route.id);
     root.classList.toggle('focus', focus);
     root.classList.toggle('xs', compact && avail < 420);
@@ -3500,7 +3507,7 @@
   }
   /** Route-/Warte-Etikett: volle Form, sonst kompakt ('5 M09'); Route-Etiketten fallen nie weg */
   function placeFloat(l, rs, W, H) {
-    const vars = l.route ? (R.compact ? ['c'] : ['f', 'c']) : ['f'];
+    const vars = l.route ? (R.compact ? ['c'] : ['f', 'c']) : (l.dist > 60 || R.compact ? ['c'] : ['f', 'c']);
     for (let vi = 0; vi < vars.length; vi++) {
       const v = vars[vi], sz = measure(l, v, () => setVar(l, v));
       for (let ri = 0; ri < FL_RAD.length; ri++) for (let k = 0; k < FL_POS.length; k++) {
@@ -3572,7 +3579,7 @@
     for (const l of _all) {
       let ok = l.vis;
       if (l.route || l.wait) {
-        if (l.wait && (!L.flow || (R.compact && R.route.id))) ok = false;
+        if (l.wait && (!L.flow || R.route.id)) ok = false;
         if (ok) ok = placeFloat(l, _rects, W, H);
         if (ok) { setVar(l, l._v); _rects.push([l._x - 4, l._y - 4, l._x + l._w + 4, l._y + l._h + 4]); }
         leader(l, ok);
@@ -4277,8 +4284,8 @@
       if (R.flowFlash > 0) R.flowFlash = Math.max(0, R.flowFlash - dt);
       const fl = Math.min(1, R.flowFlash / 0.6);   // „Fluss“-Hervorhebung nach dem Einschalten der Ebene
       R.netK = Math.max(k, fl * 0.85);
-      R.netMat.uniforms.uOp.value = Math.max(0.45 * k * (R.route && R.route.id ? 0.3 : 1), 0.95 * fl);
-      R.netMat.uniforms.uR.value = Math.max(0.03, cd * 0.0012);
+      R.netMat.uniforms.uOp.value = Math.max(0.62 * k * (R.route && R.route.id ? 0.3 : 1), 0.95 * fl);
+      R.netMat.uniforms.uR.value = Math.max(0.03, cd * 0.001);
       R.netEnds.material.opacity = 0.85 * R.netK * (R.route && R.route.id ? 0.35 : 1);
       R.netGroup.visible = R.netK > 0.02;
       // Bänder wachsen mit dem Abstand (Mindestbreite w0), damit Transporte aus der Übersicht sichtbar bleiben
@@ -4568,8 +4575,11 @@
     for (const id in R.agvs) R.agvs[id].init = false;
     if (R.fork) R.fork.init = false;
     for (const id in R.people) R.people[id].vis = false;
-    for (const [, fl] of R.flowLines) for (const m of fl.meshes) { R.flowGroup.remove(m); m.geometry.dispose(); }
+    for (const [, fl] of R.flowLines) for (const m of fl.meshes) dropMesh(m);
     R.flowLines.clear();
+    for (const [, wl] of R.waitLines) dropMesh(wl.m);
+    R.waitLines.clear();
+    for (const key in R.wtLb) { const l = R.wtLb[key]; l.el.remove(); if (l.ln) { l.ln.remove(); l.dot.remove(); } delete R.wtLb[key]; }
     if (R.pulse) { for (const q of R.pulse.list) { R.pulse.free.push(q.slot); for (let k = 0; k < PULSE_PTS; k++) R.pulse.alpha[q.slot * PULSE_PTS + k] = 0; } R.pulse.list.length = 0; }
     for (const mo of R.moList) { mo.state = null; mo.prog = mo.p0 = mo.p1 = 0; if (mo.a) { mo.a.key = null; mo.a.sig = null; mo.a.n = null; } if (R.lb[mo.id]) R.lb[mo.id].sig = ''; }
     if (R.route.id) { const id = R.route.id; clearRoute(); buildRoute(id); }
