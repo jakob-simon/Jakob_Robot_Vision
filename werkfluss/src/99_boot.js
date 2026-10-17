@@ -1,4 +1,5 @@
-/* werkfluss – Start: Simulation aufbauen (inkl. Vorrechnen bis Mo 08:40), dann App starten. */
+/* werkfluss – Start: Startbildschirm zeichnen lassen, Simulation aufbauen (inkl. Vorrechnen bis Mo 08:40),
+   dann App starten. */
 (function () {
   const WF = window.WF;
   function boot() {
@@ -9,6 +10,8 @@
     }
     WF.app.start();
   }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
-  else boot();
+  // Erst einen Frame zeichnen (Startbildschirm), dann das synchrone Vorrechnen starten
+  const later = () => requestAnimationFrame(() => setTimeout(boot, 20));
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', later);
+  else later();
 })();

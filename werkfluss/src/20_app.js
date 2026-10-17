@@ -58,6 +58,7 @@
       </div>
       <div class="top-actions">
         <button class="icon-btn" id="t-bell" title="Benachrichtigungen" aria-label="Benachrichtigungen">${icon('bell')}<span class="count" id="t-count" hidden>0</span></button>
+        ${WF.tour ? `<button class="icon-btn" id="t-tour" title="Geführte Demo-Tour starten" aria-label="Demo-Tour">${icon('play', 16)}</button>` : ''}
         <button class="btn-ai" id="t-ai" title="KI-Copilot öffnen">${icon('sparkles', 17)}<span>Copilot</span></button>
         <button class="icon-btn" id="t-settings" title="Einstellungen" aria-label="Einstellungen">${icon('settings')}</button>
       </div>`;
@@ -71,6 +72,7 @@
     });
     top.querySelector('#t-bell').onclick = (e) => { e.stopPropagation(); toggleNotifPanel(); };
     top.querySelector('#t-ai').onclick = () => WF.bus.emit('ai:open', {});
+    const tb = top.querySelector('#t-tour'); if (tb) tb.onclick = () => WF.tour.start();
     top.querySelector('#t-settings').onclick = () => openSettings();
     markSpeed();
   }
@@ -357,8 +359,11 @@
     window.addEventListener('hashchange', () => { const id = location.hash.slice(1); if (id && (!app.current || app.current.id !== id) && WF.views.find(v => v.id === id)) app.navigate(id); });
     const fromHash = location.hash.slice(1);
     const startView = WF.views.find(v => v.id === fromHash) ? fromHash : (WF.views.find(v => v.id === settings.lastView) ? settings.lastView : (WF.views[0] && WF.views[0].id));
-    if (startView) app.navigate(startView);
+    if (fromHash === 'tour' && WF.tour) { app.navigate('leitstand'); setTimeout(() => WF.tour.start(), 600); }
+    else if (startView) app.navigate(startView);
     tick();
     requestAnimationFrame(loop);
+    const splash = document.getElementById('splash');
+    if (splash) { splash.classList.add('out'); setTimeout(() => splash.remove(), 600); }
   };
 })();
