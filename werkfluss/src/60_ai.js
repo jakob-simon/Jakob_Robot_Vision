@@ -339,6 +339,49 @@
     if (!g) return [];
     return PROF().machines.filter(x => x !== id && TYPE_GROUP[station(x).type] === g);
   }
+  /** Leistungsgrenzen wie in ENGINE_API §8 moveOp beschrieben (Gewicht, Ø/Länge, Stange beim Langdreher, 5-Achs) –
+      nur zur Vorprüfung, damit keine unmöglichen Verlagerungen vorgeschlagen werden; verbindlich entscheidet moveOp */
+  const CAPS = {
+    swiss: { barOnly: true, maxBarDia: 20, maxKg: 0.5, what: 'nur Stangenmaterial bis Ø 20 mm' },
+    lathe: { maxKg: 30, maxDia: 220, maxLen: 600, what: 'Teile bis ca. Ø 220 × 600 mm und 30 kg' },
+    biglathe: { minKg: 10, what: 'Wellen ab ca. 10 kg' },
+    mill5: { maxKg: 300, what: 'Werkstücke bis ca. 300 kg' },
+    mill3: { maxKg: 1000, no5axis: true, what: '3-Achs, keine 5-Achs-Bearbeitung' },
+  };
+  const numDe = (x) => Number(String(x).replace(',', '.'));
+  function partDims(o) {
+    const n = String(o.part.name || '') + ' ' + String(o.part.no || '');
+    let m = /Ø\s*(\d+(?:[.,]\d+)?)(?:\s*[×x]\s*(\d+(?:[.,]\d+)?))?/.exec(n);
+    if (m) return { dia: numDe(m[1]), len: m[2] ? numDe(m[2]) : null };
+    m = /\bm\s*(\d+(?:[.,]\d+)?)\s*z\s*(\d+)/i.exec(n);
+    if (m) return { dia: Math.round(numDe(m[1]) * (Number(m[2]) + 2)), len: null };
+    m = /(\d+)\s*[×x]\s*(\d+)(?:\s*[×x]\s*(\d+))?/.exec(n);
+    if (m) return { dia: null, len: Math.max(numDe(m[1]), numDe(m[2]), m[3] ? numDe(m[3]) : 0) };
+    return { dia: null, len: null };
+  }
+  /** null = kann bearbeiten, sonst kurze Begründung */
+  function capReason(orderId, seq, toId) {
+    const o = S().orders[orderId], to = station(toId);
+    if (!o || !to) return 'unbekannt';
+    const i = o.routing.findIndex(r => r.seq === seq), r = o.routing[i];
+    const cap = Object.assign({}, CAPS[to.type] || {}, to.caps || {});
+    const kg = o.part.weightKg || 0, d = partDims(o);
+    const f1 = (v) => nm(v, v < 1 ? 2 : v < 10 ? 1 : 0);
+    if (cap.barOnly) {
+      const mt = i === 0 && r.material ? S().materials[r.material.id] : null;
+      const bm = mt && mt.form === 'Stange' ? /Ø\s*(\d+(?:[.,]\d+)?)/.exec(mt.name) : null;
+      if (!bm) return `${cap.what} – „${r.op}“ geht nicht von Stangenmaterial aus`;
+      if (numDe(bm[1]) > cap.maxBarDia) return `Stange Ø ${f1(numDe(bm[1]))} mm > Ø ${cap.maxBarDia} mm`;
+    }
+    if (cap.maxKg && kg > cap.maxKg) return `Teilegewicht ${f1(kg)} kg > ${f1(cap.maxKg)} kg`;
+    if (cap.minKg && kg < cap.minKg) return `${cap.what} – ${o.part.name} wiegt ${f1(kg)} kg`;
+    if (cap.maxDia && d.dia && d.dia > cap.maxDia) return `Ø ${f1(d.dia)} mm > Ø ${cap.maxDia} mm`;
+    if (cap.maxLen && d.len && d.len > cap.maxLen) return `Länge ${f1(d.len)} mm > ${cap.maxLen} mm`;
+    if (cap.no5axis && /5-?Achs/i.test(r.op)) return `„${r.op}“ braucht eine 5-Achs-Maschine`;
+    return null;
+  }
+  /** gleichartige Maschinen, die den Arbeitsgang nach Leistungsgrenzen übernehmen könnten */
+  const capableAlts = (orderId, seq, fromId) => altMachines(fromId).filter(x => !capReason(orderId, seq, x));
 
   // ================================================================== Erkennung: Entitäten in der Frage
   const norm = (s) => String(s || '').toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
@@ -619,7 +662,9 @@
     recs.push(top.auto
       ? `${top.id} läuft auch unbemannt – Werkzeug- und Materialreichweite für die Geisterschicht sichern, Rüsten dort möglichst vermeiden.`
       : `${top.id} läuft nur bemannt – Bedienung in Pausen und zum Schichtwechsel sicherstellen; jede Stunde Stillstand dort verschiebt ${bn.length ? listJoin(bn.map(o => o.id)) : 'die nachfolgenden Aufträge'}.`);
-    recs.push(alt.length ? `Gleichartige Maschinen für eine Verlagerung: ${alt.map(mName).join(', ')} – die Machbarkeit (Gewicht, Durchmesser, Stange, 5-Achs) prüft „Arbeitsgang verlagern“.` : `Keine Alternativmaschine im Werk (einzige ${station(top.id).name}).`);
+    const movable = top.ops.filter(x => !x.active).map(x => ({ x, ok: capableAlts(x.orderId, x.seq, top.id) })).filter(y => y.ok.length);
+    recs.push(!alt.length ? `Keine Alternativmaschine im Werk (einzige ${station(top.id).name}).` : movable.length ? `Entlastung möglich: ${movable.slice(0, 2).map(y => `${y.x.orderId} AG ${y.x.seq} auf ${listJoin(y.ok)}`).join('; ')} verlagern (dort neu rüsten).` : `Gleichartige Maschinen (${listJoin(alt)}) können die eingeplanten Arbeitsgänge nicht übernehmen (Gewicht, Durchmesser bzw. Stangenmaterial).`);
+    for (const y of movable.slice(0, 1)) addAction(a, { label: `${y.x.orderId} AG ${y.x.seq} auf ${y.ok[0]} verlagern`, desc: `Entlastet ${top.id} um ca. ${durShortTxt(y.x.sec)} – auf ${station(y.ok[0]).short} wird neu gerüstet`, action: { type: 'moveOp', orderId: y.x.orderId, seq: y.x.seq, stationId: y.ok[0] }, icon: 'route' });
     a.md.push('', '> **Empfehlung:** ' + recs.join(' '));
     a.stats = [{ l: top.id + ' ' + top.st.short, v: durShortTxt(top.work), s: 'Engpass · ≈ ' + daysTxt(top.days), c: 'warn' }].concat(others.slice(0, 2).map(x => ({ l: x.id + ' ' + x.st.short, v: durShortTxt(x.work), s: '≈ ' + daysTxt(x.days) })));
     a.sources = ['Arbeitsinhalt offener Arbeitsgänge (Taktzeit, Rüsten)', 'Plantafel', 'Engpass je Auftrag (Prognose)', 'Schichtkalender', srcStand()];
@@ -1067,6 +1112,76 @@
     a.followups = top.length ? [`Was macht ${top[0].mv.id} gerade?`, 'Wie hoch ist der Energieverbrauch?', 'Was ist der Engpass?'] : ['Wie läuft die Schicht?'];
     return done(a);
   }
+  /** Zustandsursachen einer Maschine heute (Schichtzeit): Segmente des Zustands mit der Ursache aus dem Zustandsereignis */
+  function causeBreakdown(c, id, state) {
+    const t = c.t, d0 = Math.floor(t / DAY) * DAY, mv = c.mv(id);
+    const evs = (S().events || []).filter(e => e.type === 'state' && e.entity && e.entity.id === id && e.data && e.data.to === state && e.t >= d0 - DAY);
+    const groups = {};
+    for (const sg of mv.segments || []) {
+      if (sg.state !== state) continue;
+      const a = Math.max(d0, sg.t0), b = Math.min(t, sg.t1 == null ? t : sg.t1);
+      const w = workBetween(a, b); if (w <= 0) continue;
+      let ev = null; for (const e of evs) if (Math.abs(e.t - sg.t0) <= 2) ev = e;
+      const cause = ev && ev.data.cause ? String(ev.data.cause) : stLabel(state);
+      const key = cause.replace(/\d+([.,:]\d+)?/g, '#').replace(/\(.*?\)/g, '').slice(0, 60);
+      const g = groups[key] || (groups[key] = { cause, sec: 0, n: 0 });
+      g.sec += w; g.n++;
+    }
+    return Object.values(groups).sort((x, y) => y.sec - x.sec);
+  }
+  function ansLossMachine(c, id, q) {
+    const a = A('loss'), mv = c.mv(id);
+    a.entity = { kind: 'machine', id };
+    const row = lossByCause(c).byMachine.find(x => x.mv.id === id);
+    const want = Object.keys(CAUSE_LABEL).find(k => q.indexOf(norm(CAUSE_LABEL[k]).split(' ').pop()) >= 0) || (/material/.test(q) ? 'starved' : /bediener/.test(q) ? 'waitOperator' : /werkzeug/.test(q) && /wartet/.test(q) ? 'waitTool' : /stoerung/.test(q) ? 'fault' : /erstteil/.test(q) ? 'firstPiece' : null);
+    if (!row || !(row.loss > 0)) { a.md.push(`**${mName(id)}: heute keine Stillstandskosten** – die Maschine hat in der Schichtzeit produziert oder hatte keinen Auftrag.`); a.sources = ['Stillstandskosten je Maschine', srcStand()]; return done(a); }
+    a.md.push(`**${mName(id)}: heute ${eur(row.loss)} Stillstandskosten** – ${durR(row.lossSec)} mit Auftrag ohne Produktion in der Schichtzeit (Satz ${eur(mv.rate)}/h).`, '');
+    for (const x of row.causes) a.md.push(`- **${CAUSE_LABEL[x.state]}**: ca. ${eur(x.eur)} (${durR(x.sec)})`);
+    if (want && !row.causes.some(x => x.state === want)) {
+      const allDay = (mv.stateTimes && mv.stateTimes[want]) || 0;
+      a.md.push('', `**${CAUSE_LABEL[want]} an ${id}:** heute ${allDay > 0 ? 'nur außerhalb der Schichtzeit bzw. in Pausen (' + durR(allDay) + ') – das zählt nicht als Stillstandskosten' : 'nicht aufgetreten'}.`);
+    }
+    const focus = want && row.causes.some(x => x.state === want) ? want : row.causes[0] && row.causes[0].state;
+    if (focus) {
+      a.md.push('', `### Ursachen ${CAUSE_LABEL[focus]}`);
+      const br = causeBreakdown(c, id, focus);
+      for (const g of br.slice(0, 4)) a.md.push(`- ${durR(g.sec)}${g.n > 1 ? ' (' + g.n + '×)' : ''}: ${g.cause}`);
+      if (!br.length) a.md.push('- Keine Einzelereignisse in der Schichtzeit zuordenbar.');
+      const d0 = Math.floor(c.t / DAY) * DAY;
+      if (focus === 'fault') { const fs2 = (S().events || []).filter(e => e.type === 'fault' && e.t >= d0 && e.entity && e.entity.id === id); if (fs2.length) a.md.push(`- Alarme heute: ${fs2.map(e => clk(e.t) + ' ' + (e.data && e.data.code ? e.data.code : '')).join(', ')}.`); }
+      if (focus === 'toolchange') { const tcs = (S().events || []).filter(e => e.type === 'toolChanged' && e.t >= d0 && e.entity && e.entity.id === id); if (tcs.length) a.md.push(`- ${pl(tcs.length, 'Werkzeugwechsel', 'Werkzeugwechsel')} heute, zusammen ${durR(tcs.reduce((s2, e) => s2 + ((e.data && e.data.durSec) || 0), 0))}${tcs.some(e => e.data && e.data.tools && e.data.tools.some(x => x.bundled)) ? ', teils gebündelt' : ''}.`); }
+      a.md.push('', '> **Empfehlung:** ' + CAUSE_ADVICE[focus]);
+    }
+    a.sources = [`Stillstandskosten ${id} (Stundensatz)`, 'Zustandsband und Zustandsursachen heute', srcStand()];
+    a.followups = [`Was macht ${id} gerade?`, 'Wo verlieren wir heute Geld?'];
+    return done(a);
+  }
+  const LEVEL_INFO = {
+    0: { gets: 'Zustand und Stückzahl nur über die Tablet-Rückmeldung am Arbeitsplatz', manual: 'Start/Stopp, Stückzahl und Stillstandsgrund' },
+    1: { gets: 'Lauf/Stillstand automatisch aus Stromaufnahme und Signalsäule, Laufzeit sekundengenau, Energie je Auftrag', manual: 'Stillstandsgrund (ein Klick am Tablet) und – ohne Zähler – die Stückzahl' },
+    2: { gets: 'zusätzlich Programm, Spindeldrehzahl und -last, Override, Alarme mit Code und Text, Stückzähler der Steuerung', manual: 'Ausschussgrund und Quittierung von Rüsten/Erstteil' },
+    3: { gets: 'zusätzlich Werkzeugdaten (Werkzeug in der Spindel, Standzeitzähler) und Programmverwaltung', manual: 'nur noch Ausschussgründe' },
+  };
+  function ansConnectMachine(c, id, q) {
+    const a = A('connect'), mv = c.mv(id), st = station(id), lv = mv.conn.level || 0;
+    a.entity = { kind: 'machine', id };
+    const m = /level\s*(\d)/.exec(q), ask = m ? Math.max(0, Math.min(3, Number(m[1]))) : null;
+    a.md.push(lv === 0 ? `**${mName(id)}** (${st.vendor} ${st.model}, Baujahr ${st.year}, ${st.control.replace(/\s*\(Bj\.[^)]*\)/, '')}) ist **nicht angebunden** (Level 0) – Zustand und Stückzahl kommen per Tablet-Rückmeldung.` : `**${mName(id)}** (${st.vendor} ${st.model}, Baujahr ${st.year}, ${st.control}) ist auf **Level ${lv}** angebunden: ${label('conn', lv)} über ${mv.conn.protocol}.`, '');
+    const target = ask != null ? ask : Math.min(3, lv + 1);
+    const old = st.year < 2000 || /Bj\.|nicht angebunden|Tablet/.test(mv.conn.protocol);
+    if (target !== lv) {
+      a.md.push(`- **Level ${target} bringt:** ${LEVEL_INFO[target].gets}.`);
+      a.md.push(`- **Manuell bleibt:** ${LEVEL_INFO[target].manual}.`);
+      a.md.push(`- **Weg dorthin:** ${target === 1 ? 'Stromsensor und Signalsäulen-Abgriff nachrüsten – kein Eingriff in die Steuerung, keine Freischaltung durch den Hersteller nötig, Montage in ca. 1 Stunde.' : target === 2 ? (/fanuc/i.test(st.control) ? 'Fanuc FOCAS über Ethernet an der Steuerung freischalten.' : /siemens|heidenhain/i.test(st.control) ? 'OPC UA-Server der Steuerung aktivieren (bei neueren Steuerungen umati-Profil).' : 'MTConnect-Adapter bzw. OPC UA über das werkfluss Edge-Gateway.') : 'Werkzeug- und Programmdaten der Steuerung freigeben (OPC UA/umati mit Werkzeugverwaltung).'}`);
+    } else a.md.push(`- **Liefert heute:** ${LEVEL_INFO[lv].gets}.`, `- **Manuell bleibt:** ${LEVEL_INFO[lv].manual}.`);
+    if (old && target <= 1) a.md.push(`- ${st.year < 2000 ? 'Bei Baujahr ' + st.year + ' ' : ''}ist die Nachrüst-Sensorik der wirtschaftliche Weg: Die Steuerung hat keine nutzbare Netzwerkschnittstelle.`);
+    a.md.push(`- Heute an ${id}: ${pl(mv.goodToday, 'Gutteil', 'Gutteile')}, Stillstandskosten ${eur(mv.lossEurToday)}, Energie ${nm(mv.energyKwhToday, 0)} kWh${mv.powerKw == null ? ' (Modellwert – ohne Messung)' : ''}.`);
+    a.md.push('', '> **Empfehlung:** ' + (target > lv ? `Level ${target} für ${id} umsetzen – der Assistent in „Anbindung“ führt durch Protokoll, Signal-Mapping und Live-Test.` : `${id} ist passend angebunden.`));
+    if ((WF.views || []).some(v => v.id === 'anbindung')) addAction(a, { label: `Anbindung für ${id} öffnen`, desc: 'Protokoll, Signal-Mapping, Live-Test', action: { type: 'navigate', view: 'anbindung', params: { machineId: id } }, icon: 'plug', quiet: true });
+    a.sources = [`Anbindung ${id}`, 'Stammdaten Maschine', srcStand()];
+    a.followups = ['Welche Maschinen sind nicht angebunden?', `Was macht ${id} gerade?`];
+    return done(a);
+  }
   function ansEnergy(c) {
     const a = A('energy'), k = c.k();
     const mvs = c.mvs().slice().sort((x, y) => (y.energyKwhToday || 0) - (x.energyKwhToday || 0));
@@ -1188,7 +1303,8 @@
       const crit = flips.concat(stillLate);
       const alt = altMachines(id);
       const ne = crit.filter(r => r.o.priority !== 'eil');
-      recs.push(`Bei echtem Ausfall: ${ne.length ? listJoin(ne.map(r => r.o.id)) + ' als Eilauftrag kennzeichnen (holt an den Folgearbeitsplätzen Zeit auf)' : 'Kunden früh informieren'}${alt.length ? `, Verlagerung auf ${listJoin(alt)} prüfen` : ''}${st.loading !== 'auto' ? ', Ausfallzeit mit Überstunden an ' + id + ' aufholen' : ''}.`);
+      const altOk = [...new Set(crit.flatMap(r => capableAlts(r.o.id, r.e.seq, id)))];
+      recs.push(`Bei echtem Ausfall: ${ne.length ? listJoin(ne.map(r => r.o.id)) + ' als Eilauftrag kennzeichnen (holt an den Folgearbeitsplätzen Zeit auf)' : 'Kunden früh informieren'}${altOk.length ? `, Verlagerung auf ${listJoin(altOk)} prüfen` : alt.length ? '' : ''}${st.loading !== 'auto' ? ', Ausfallzeit mit Überstunden an ' + id + ' aufholen' : ''}.`);
       for (const r of ne) addAction(a, { label: `${r.o.id} als Eilauftrag`, desc: `Vorbeugend: ${r.o.id} wird an allen Arbeitsplätzen beim nächsten Auftragswechsel vorgezogen.`, action: { type: 'setPriority', orderId: r.o.id, priority: 'eil' }, icon: 'bolt' });
     } else if (rows.length) recs.push(`Die Puffer reichen – ein Ausfall von ${durR(N)} kostet vor allem Maschinenzeit (ca. ${eur(cost)}).${st.loading !== 'auto' && mv.operator ? ' Bediener:in während des Ausfalls an einer anderen Maschine einsetzen.' : ''}`);
     else recs.push('Keine Maßnahme nötig.');
@@ -1482,18 +1598,24 @@
       if (!cur) { a.md.push(`${o0}: kein offener Arbeitsgang an einer Bearbeitungsmaschine – nichts zu verlagern.`); return done(a); }
       const target = want && want !== cur.station ? want : altMachines(cur.station)[0];
       if (!target) { a.md.push(`Für ${o0} AG ${cur.seq} „${cur.op}“ (${mName(cur.station)}) gibt es keine gleichartige Maschine im Werk.`); return done(a); }
-      if (grpOf(target) !== grpOf(cur.station)) {
-        const alt = altMachines(cur.station);
-        a.md.push(`**Nicht möglich:** ${mName(target)} (${station(target).name}) kann AG ${cur.seq} „${cur.op}“ von ${o0} nicht bearbeiten – anderer Maschinentyp als ${mName(cur.station)}.`);
-        a.md.push('', alt.length ? `Gleichartig wären ${listJoin(alt.map(mName))}; ob Gewicht, Durchmesser bzw. Stangenmaterial passen, prüft die Verlagerung beim Ausführen.` : `Im Werk gibt es keine gleichartige Maschine.`);
-        for (const x of alt.slice(0, 2)) addAction(a, { label: `AG ${cur.seq} auf ${x} verlagern`, desc: `${o0} · ${cur.op} · ${station(x).short}`, action: { type: 'moveOp', orderId: o0, seq: cur.seq, stationId: x }, icon: 'route' });
+      const why = grpOf(target) !== grpOf(cur.station) ? `anderer Maschinentyp als ${mName(cur.station)} (${station(target).name})` : capReason(o0, cur.seq, target);
+      if (why) {
+        const alt = altMachines(cur.station).filter(x => x !== target), ok = capableAlts(o0, cur.seq, cur.station).filter(x => x !== target);
+        a.md.push(`**Nicht möglich:** ${mName(target)} kann AG ${cur.seq} „${cur.op}“ von ${o0} nicht übernehmen – ${why}.`, '');
+        if (ok.length) a.md.push(`Möglich wäre ${listJoin(ok.map(mName))} (gleicher Maschinentyp, Leistungsgrenzen passen).`);
+        else if (alt.length) a.md.push(`Auch ${alt.length === 1 ? 'die andere gleichartige Maschine passt' : 'die anderen gleichartigen Maschinen passen'} nicht: ${alt.map(x => `${mName(x)} – ${capReason(o0, cur.seq, x)}`).join('; ')}. ${o0} AG ${cur.seq} bleibt an ${mName(cur.station)}.`);
+        else a.md.push(`Im Werk gibt es keine gleichartige Maschine – ${o0} AG ${cur.seq} bleibt an ${mName(cur.station)}.`);
+        for (const x of ok.slice(0, 2)) addAction(a, { label: `AG ${cur.seq} auf ${x} verlagern`, desc: `${o0} · ${cur.op} · dort neu rüsten (${nm(cur.setupMin)} min)`, action: { type: 'moveOp', orderId: o0, seq: cur.seq, stationId: x }, icon: 'route' });
         a.entity = { kind: 'order', id: o0 };
-        a.sources = ['Arbeitsplan ' + o0, 'Maschinentypen', srcStand()];
+        a.sources = ['Arbeitsplan ' + o0, 'Maschinentypen und Leistungsgrenzen', srcStand()];
+        a.followups = [`Wo steht ${o0} gerade?`, 'Was ist der Engpass?'];
         return done(a);
       }
       a.md.push(`**${o0} AG ${cur.seq} „${cur.op}“ von ${mName(cur.station)} auf ${mName(target)} verlagern?** Dort wird neu gerüstet (${nm(cur.setupMin)} min); die Verlagerung prüft Leistungsgrenzen (Gewicht, Durchmesser, Stange, 5-Achs) und lehnt mit Begründung ab, wenn es nicht geht.`);
+      a.md.push('');
+      if (cur.state === 'active') { const mvF = c.mv(cur.station); if (mvF && mvF.partEndT) a.md.push(`- ${cur.station} bearbeitet den Arbeitsgang gerade – verlagert werden kann erst an der nächsten Teilegrenze (ca. ${clk(mvF.partEndT)}); dann wandern die restlichen ${teile(Math.max(0, mvF.partsTotal - mvF.partsDone - 1))}.`); }
       const lt = machineLoad(c).find(x => x.id === target), lf = machineLoad(c).find(x => x.id === cur.station);
-      if (lt && lf) a.md.push('', `- Belastung: ${mName(cur.station)} ${durShortTxt(lf.work)} · ${mName(target)} ${durShortTxt(lt.work)} Arbeitsinhalt.`);
+      if (lt && lf) a.md.push(`- Belastung: ${mName(cur.station)} ${durShortTxt(lf.work)} · ${mName(target)} ${durShortTxt(lt.work)} Arbeitsinhalt.`);
       addAction(a, { label: `AG ${cur.seq} auf ${target} verlagern`, desc: `${o0} · ${cur.op}`, action: { type: 'moveOp', orderId: o0, seq: cur.seq, stationId: target }, icon: 'route' });
       a.entity = { kind: 'order', id: o0 };
       a.followups = [`Wo steht ${o0} gerade?`, `Was macht ${target} gerade?`];
@@ -1576,7 +1698,8 @@
     if (has(/briefing/)) return { intent: 'briefing', E, q };
     // Themen
     if (has(/engpass|flaschenhals|bottleneck|limitier|kapazitaet|auslastung|ausgelastet|arbeitsvorrat/) && !E.orders.length && !(E.machines.length && !E.fromContext)) return { intent: 'bottleneck', E, q };
-    if (has(/geld|kosten|verlust|verlier|stillstandskost|euro|€|teuer|verschwend|sparen|rentab|wirtschaftlich/) && !has(/werkzeugkosten/)) return { intent: 'loss', E, q };
+    if (has(/angebunden|anbindung|vernetzt|\bopc\b|mtconnect|focas|schnittstelle|nachruest|sensorik|datenquelle|digitalisier|\blevel \d/)) return E.machines.length ? { intent: 'connectM', E, q } : { intent: 'connect', E, q };
+    if (has(/\bgeld|kosten|verlust|verlier|stillstandskost|\beuro\b|€|\bteuer|verschwend|\bsparen|rentab|wirtschaftlich/) && !has(/werkzeugkosten/)) return E.machines.length ? { intent: 'lossM', E, q } : { intent: 'loss', E, q };
     if (has(/energie|strom|kwh|kilowatt|verbrauch|leistungsaufnahme|\bkw\b/) && !E.materials.length) return { intent: 'energy', E, q };
     if (has(/qualitaet|ausschuss|\bspc\b|fpy|messwert|erstteil|toleranz|n\.?i\.?o|nacharbeit|regelkarte|reklamation/)) return { intent: 'quality', E, q, focusM: E.machines[0] };
     const toolQ = has(/werkzeug|\bwsp\b|wendeplatte|wendeschneid|standzeit|verschleiss|schleifscheibe|waelzfraeser|bohrer|saegeband|bohrkopf|schneide/);
@@ -1584,7 +1707,7 @@
     if (toolQ && E.machines.length && E.fromContext && !has(/alle|welche werkzeugwechsel|naechsten \d|heute|schicht/)) return { intent: 'machine', focus: 'tools', E, q };
     if (toolQ) return { intent: 'tools', E, q };
     if (has(/agv|transport|stapler|behaelter|fahrzeug|akku|logistik|fahrerlos/) && !E.orders.length) return { intent: 'logistics', E, q };
-    if (has(/angebunden|anbindung|vernetzt|\bopc\b|mtconnect|focas|schnittstelle|nachruest|sensorik|datenquelle|digitalisier/)) return { intent: 'connect', E, q };
+    if (has(/angebunden|anbindung|vernetzt|\bopc\b|mtconnect|focas|schnittstelle|nachruest|sensorik|datenquelle|digitalisier|\blevel \d/)) return E.machines.length ? { intent: 'connectM', E, q } : { intent: 'connect', E, q };
     if ((has(/material|\bbestand|bestaende|\blager(bestand|ort|bestaende)?\b|rohmaterial|\bstangen?\b|nachschub|einkauf|bestellung|lieferant|reichweite|vorrat|nachbestell/) && !has(/liefertermin/)) || (E.materials.length && !E.fromContext)) return { intent: 'material', E, q };
     if (E.machines.length && has(/\bwer\b.*(bedien|maschine|dran|zustaendig)|bedient|zustaendig/)) return { intent: 'machine', E, q, focus: 'people' };
     if (E.people.length && !E.fromContext) return { intent: 'people', E, q };
@@ -1639,6 +1762,8 @@
         case 'tools': a = ansTools(c, cl.q); break;
         case 'logistics': a = ansLogistics(c, E.agvs); break;
         case 'connect': a = ansConnect(c); break;
+        case 'connectM': a = ansConnectMachine(c, E.machines[0], cl.q); break;
+        case 'lossM': a = ansLossMachine(c, E.machines[0], cl.q); break;
         case 'material': a = ansMaterial(c, E.materials); break;
         case 'people': a = ansPeople(c, E.people, E.roles); break;
         case 'order': a = ansOrder(c, E.orders[0], cl.focus); break;
@@ -1777,7 +1902,7 @@
       else break;
       s = JSON.stringify(o);
     }
-    return s.length <= max ? o : JSON.parse(s.slice(0, 0) || '{}');
+    return o;
   }
   const r1 = (x) => (x == null ? null : Math.round(x * 10) / 10);
   const minOf = (sec) => (sec == null ? null : Math.round(sec / 60));
@@ -1925,10 +2050,14 @@
     },
     offlineAnswer,
     entities,
+    /** Stillstandskosten je Ursache (Schichtzeit, Zustandsband) – gleiche Rechnung für alle Ansichten nutzbar */
+    lossByCause: () => { const L = lossByCause(data()); return { causes: L.causes.map(x => ({ state: x.state, label: CAUSE_LABEL[x.state], eur: Math.round(x.eur) })), machines: L.byMachine.map(x => ({ id: x.mv.id, eur: x.loss, lossSec: x.lossSec, causes: x.causes.map(y => ({ state: y.state, sec: y.sec, eur: Math.round(y.eur) })) })) }; },
     suggestions: (ctx) => suggestionsFor(ctx || currentContext()),
     clear: () => UI.clear && UI.clear(),
     /** intern für Tests: Werkzeugliste (Name, Beschreibung) */
-    toolSpecs: () => TOOLS.map(t => ({ name: t.name, description: t.description })),
+    toolSpecs: () => TOOLS.map(t => ({ name: t.name, description: t.description, act: !!t.act })),
+    /** nur für Tests: Lese-Werkzeug ausführen (Aktions-Werkzeuge laufen ausschließlich über die Bestätigung im Panel) */
+    _readTool: (name, input) => { const t = TOOLS.find(x => x.name === name && !x.act && x.run && name.indexOf('get_') === 0); return t ? t.run(input || {}) : null; },
   };
 
   function currentContext() {
@@ -1994,6 +2123,8 @@
     background:linear-gradient(140deg,var(--accent) 0%,color-mix(in srgb,var(--accent) 45%,var(--st-tool)) 100%);box-shadow:0 6px 18px color-mix(in srgb,var(--accent) 26%,transparent),inset 0 1px 0 rgba(255,255,255,.35)}
   .ai-orb .ico{width:calc(var(--s) * .52);height:calc(var(--s) * .52)}
   .ai-orb.sm{--s:24px;box-shadow:0 3px 10px color-mix(in srgb,var(--accent) 20%,transparent)}
+  .ai-panel.busy .ai-h .ai-orb{animation:aiGlow 1.6s ease-in-out infinite}
+  @keyframes aiGlow{0%,100%{box-shadow:0 6px 18px color-mix(in srgb,var(--accent) 26%,transparent),inset 0 1px 0 rgba(255,255,255,.35)}50%{box-shadow:0 6px 26px color-mix(in srgb,var(--accent) 55%,transparent),0 0 0 4px color-mix(in srgb,var(--accent) 14%,transparent),inset 0 1px 0 rgba(255,255,255,.35)}}
   .ai-ht{flex:1;min-width:0}
   .ai-ttl{font:600 19px/1.1 var(--f-cond);letter-spacing:.01em;white-space:nowrap}
   .ai-ttl b{color:var(--accent);font-weight:600}
@@ -2052,6 +2183,12 @@
   .ai-md blockquote + blockquote{margin-top:6px}
   .ai-md code{font:500 12px/1 var(--f-mono);background:var(--bg2);border:1px solid var(--line);border-radius:4px;padding:1px 4px}
   .ai-md hr{border:0;border-top:1px solid var(--line);margin:10px 0}
+  .ai-tblw{overflow-x:auto;margin:6px 0 10px;border:1px solid var(--line);border-radius:8px}
+  .ai-tbl{width:100%;border-collapse:collapse;font-size:12px}
+  .ai-tbl th{text-align:left;font:600 10px/1.2 var(--f-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--line);background:var(--bg2);white-space:nowrap}
+  .ai-tbl td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  .ai-tbl tr:last-child td{border-bottom:0}
+  .ai-pre{margin:6px 0 10px;padding:8px 10px;border-radius:8px;background:var(--bg2);border:1px solid var(--line);font:500 11.5px/1.5 var(--f-mono);color:var(--text2);white-space:pre-wrap;overflow-wrap:anywhere}
   .ai-md p.ai-note{font-size:11.5px;line-height:1.5;color:var(--faint);margin:10px 0 0}
   .ai-md p + p.ai-note, .ai-md h4 + p.ai-note{margin-top:-4px;margin-bottom:8px}
   .ai-md .ai-cursor{display:inline-block;width:7px;height:14px;margin-left:2px;vertical-align:-2px;border-radius:1px;background:var(--accent);animation:aiCaret 1s steps(2,start) infinite}
@@ -2150,6 +2287,8 @@
   .ai-ex .ar{flex:none;display:grid;color:var(--faint);opacity:0;transform:translateX(-4px);transition:opacity .15s ease,transform .15s ease}
   .ai-ex:hover{border-color:var(--line2);color:var(--text);background:var(--card2)}
   .ai-ex:hover .ico{color:var(--accent)} .ai-ex:hover .ar{opacity:1;transform:none}
+  .ai-tipline{display:flex;gap:7px;align-items:flex-start;margin:2px 0 0;font-size:11.5px;line-height:1.45;color:var(--faint)}
+  .ai-tipline .ico{flex:none;margin-top:1px;color:var(--accent);opacity:.8}
   .ai-foot{position:relative;border-top:1px solid var(--line);padding:9px 12px max(10px,env(safe-area-inset-bottom,0px));background:var(--panel)}
   .ai-sugg{display:flex;gap:6px;overflow-x:auto;padding:1px 0 9px;scrollbar-width:none;-webkit-mask-image:linear-gradient(90deg,#000 88%,transparent);mask-image:linear-gradient(90deg,#000 88%,transparent)}
   .ai-sugg::-webkit-scrollbar{display:none}
@@ -2226,13 +2365,24 @@
   }
   function md(src) {
     const lines = String(src || '').replace(/\r/g, '').split('\n');
-    let html = '', list = null, para = [], quote = [];
+    let html = '', list = null, para = [], quote = [], table = [], code = null;
+    const flushT = () => {
+      if (!table.length) return;
+      const rows = table.filter(r => !/^\s*\|?\s*:?-{2,}/.test(r)).map(r => r.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(x => x.trim()));
+      const head = rows.shift() || [];
+      html += `<div class="ai-tblw"><table class="ai-tbl"><thead><tr>${head.map(h => '<th>' + inline(h) + '</th>').join('')}</tr></thead><tbody>${rows.map(r => '<tr>' + r.map(x => '<td>' + inline(x) + '</td>').join('') + '</tr>').join('')}</tbody></table></div>`;
+      table = [];
+    };
     const flushP = () => { if (para.length) { html += '<p>' + para.map(inline).join('<br>') + '</p>'; para = []; } };
     const flushQ = () => { if (quote.length) { html += '<blockquote>' + quote.map(inline).join('<br>') + '</blockquote>'; quote = []; } };
     const closeL = () => { if (list) { html += '</' + list + '>'; list = null; } };
     for (const raw of lines) {
       const line = raw.replace(/\s+$/, '');
       let m;
+      if (code != null) { if (/^\s*```/.test(line)) { html += '<pre class="ai-pre">' + esc(code.join('\n')) + '</pre>'; code = null; } else code.push(raw); continue; }
+      if (/^\s*```/.test(line)) { flushP(); flushQ(); closeL(); flushT(); code = []; continue; }
+      if (/^\s*\|.*\|\s*$/.test(line)) { flushP(); flushQ(); closeL(); table.push(line); continue; }
+      flushT();
       if (!line.trim()) { flushP(); flushQ(); closeL(); continue; }
       if ((m = /^\s{0,3}#{1,6}\s+(.*)$/.exec(line))) { flushP(); flushQ(); closeL(); html += '<h4>' + inline(m[1].replace(/\*\*/g, ''), true) + '</h4>'; continue; }
       if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { flushP(); flushQ(); closeL(); html += '<hr>'; continue; }
@@ -2244,7 +2394,8 @@
       if (quote.length) { quote.push(line.trim()); continue; }
       closeL(); para.push(line.trim());
     }
-    flushP(); flushQ(); closeL();
+    if (code != null) html += '<pre class="ai-pre">' + esc(code.join('\n')) + '</pre>';
+    flushP(); flushQ(); closeL(); flushT();
     return html;
   }
 
@@ -2421,6 +2572,7 @@
         <p>Der Copilot kennt jede Maschine, jeden Auftrag, jedes Werkzeug und jeden Behälter – live. Er erklärt Ursachen, rechnet Szenarien durch und schlägt Maßnahmen vor; Aktionen laufen erst nach Bestätigung.</p></div>
       <div class="ai-live"><span><i></i><span><b>${prod}</b>/${mvs} produzieren</span></span><span style="--c:var(--info)"><i></i><span><b>${ord}</b> Aufträge offen</span></span><span style="--c:var(--st-setup)"><i></i><span><b>${ppl}</b> im Dienst</span></span></div>
       ${exampleGroups().map(g => `<div class="ai-exg"><span class="eyebrow">${esc(g.g)}</span>${g.items.map(([ic, t]) => `<button type="button" class="ai-ex" data-ask="${esc(t)}">${icon(ic, 16)}<span class="tx">${esc(t)}</span><span class="ar">${icon('arrowRight', 14)}</span></button>`).join('')}</div>`).join('')}
+      <p class="ai-tipline">${icon('sparkles', 13)}<span>Tipp: In jeder Detailansicht (Maschine, Auftrag, Meldung) öffnet das Funkel-Symbol den Copilot direkt mit diesem Bezug.</span></p>
     </div>`;
   }
   UI.clear = () => {
@@ -2611,6 +2763,7 @@
   function stop() { if (conv.ctl) { try { conv.ctl.abort(); } catch (e) { /* */ } } }
   function setBusy(b) {
     conv.busy = b;
+    panel.classList.toggle('busy', b);
     R.send.classList.toggle('stop', b);
     R.send.innerHTML = b ? '<i></i>' : icon('send', 16);
     R.send.title = b ? 'Antwort stoppen' : 'Senden (Enter)';
@@ -2621,6 +2774,12 @@
   async function send(text, context) {
     if (!text) return null;
     build();
+    // Meldungs-Bezug gilt nur für die eine Analyse; danach zählt die betroffene Maschine/der Auftrag als Bezug
+    if (context && context.kind === 'notification' && conv.context === context) {
+      const n = (S().notifications || []).find(x => x.id === context.id);
+      conv.context = n && n.entity && n.entity.id && S()[n.entity.kind === 'machine' ? 'machines' : n.entity.kind === 'order' ? 'orders' : n.entity.kind === 'material' ? 'materials' : 'x'] ? { kind: n.entity.kind, id: n.entity.id } : null;
+      setTimeout(() => { renderCtx(); renderSugg(true); }, 0);
+    }
     addUser(text);
     setBusy(true);
     const ctl = new AbortController(); conv.ctl = ctl;
@@ -2629,7 +2788,7 @@
       const sample = live.status === 'offline' ? null : await waitSample(ctl);
       if (ctl.signal.aborted) throw { code: 'cancelled' };
       if (sample) res = await askLive(sample, text, context, ctl);
-      else res = await askOffline(text, context, ctl);
+      else { const note = conv.pendingNote; conv.pendingNote = null; res = await askOffline(text, context, ctl, note); }
     } catch (e) {
       if (!(e && e.code === 'cancelled')) console.error('[ai]', e);
     } finally {
@@ -2638,13 +2797,15 @@
     }
     return res;
   }
+  /** Claude-Verbindung abwarten – höchstens ca. 3,5 s; dauert es länger, antwortet der Offline-Copilot (Verbindung läuft weiter) */
   async function waitSample(ctl) {
     if (live.status === 'live' && live.sample) return live.sample;
     const p = getSample();
     if (live.status !== 'verbinde') return p;
     const pending = addAssistant('KI'); setTyping(pending, 'Verbinde mit Claude …');
-    const s = await Promise.race([p, new Promise(r => ctl.signal.addEventListener('abort', () => r(null)))]);
+    const s = await Promise.race([p, new Promise(r => setTimeout(() => r('timeout'), 3500)), new Promise(r => ctl.signal.addEventListener('abort', () => r(null)))]);
     pending.el.remove(); conv.msgs.splice(conv.msgs.indexOf(pending), 1);
+    if (s === 'timeout') { conv.pendingNote = 'Die Verbindung zu Claude wird noch aufgebaut – diese Antwort kommt aus dem Offline-Copilot.'; return null; }
     return s;
   }
   /** Offline: Antwort sofort berechnen, dann zügig „schreiben“ (wie Streaming, max. ca. 0,9 s) */
@@ -2780,10 +2941,11 @@
   WF.bus.on('select', (p) => {
     if (!panel) return;
     if (openState && p && p.kind && p.id && (!conv.context || conv.context.auto || conv.context.kind !== 'notification')) conv.context = { kind: p.kind, id: p.id, auto: true };
+    else if (p && !p.kind && conv.context && conv.context.auto) conv.context = null;
     setTimeout(layout, 0);
     renderCtx(); renderSugg(false);
   });
-  WF.bus.on('navigate', () => { if (panel) renderSugg(false); });
+  WF.bus.on('navigate', () => { if (!panel) return; renderSugg(false); if (!conv.msgs.length && R.log.querySelector('.ai-empty')) renderEmpty(); });
   WF.bus.on('sim:reset', () => { if (panel) { UI.clear(); } });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || !openState) return;
@@ -2792,7 +2954,6 @@
     UI.close();
   }, true);
   G.addEventListener && G.addEventListener('resize', () => layout());
-  if (R.log === undefined) { /* noch nicht aufgebaut */ }
   // Live-Zustand der Chips (Zustandsfarben), Kontextzeile und Vorschläge alle 2 s nachziehen – nur sichtbar
   setInterval(() => {
     if (!openState || !panel || !S()) return;

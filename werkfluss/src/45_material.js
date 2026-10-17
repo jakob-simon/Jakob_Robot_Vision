@@ -1,8 +1,9 @@
-/* werkfluss – Ansicht „Material & Logistik“ (45_material.js) + Details „agv“, „material“, „container“.
-   Abschnitte: Kopf mit Logistik-Lage, Kennzahlen, „Materialfluss heute“ (Hallenplan als Fluss-Diagramm: Stationen an ihrer
-   Hallenposition, Kanten = heute bewegte Behälter, laufende Transporte als wandernde Punkte, AGVs/Stapler live auf den
-   Fahrwegen), Flotte, Transportaufträge, Rohmaterial (Bestand, Reichweite aus offenem Bedarf, Bestellungen, Nachbestellen),
-   Behälter im Umlauf (nach Ort gruppiert).
+/* werkfluss – Ansicht „Material & Logistik“ (45_material.js) + Details „agv“ (auch Stapler „STP1“), „material“, „container“.
+   Abschnitte: Kopf mit Logistik-Lage, Kennzahlen (mit Verlauf), „Materialfluss heute“ (Hallenplan als Fluss-Diagramm: Stationen
+   an ihrer Hallenposition, Kanten = heute bewegte Behälter mit Ports und verschachtelten Bögen, laufende Transporte als wandernde
+   Punkte, AGVs/Stapler live auf den Fahrwegen, Zuteilungen als Informations-Impuls, Härterei-Schleife, Direktentnahme der Säge),
+   Tagesbilanz/Servicegrad, Flotte, Transportaufträge, Rohmaterial (Bestand, Reichweite aus offenem Bedarf und Plantafel,
+   Bestellungen, Nachbestellen-Dialog), Behälter im Umlauf (nach Ort in Flussrichtung gruppiert).
    Daten nur lesend aus WF.sim (state, forecast, kpis, containerView …); Aktionen über WF.sim.actions.reorder.
    Ein kleiner Mitschreiber (Ledger) hält Transporte, Fremdbearbeitungs-Lose, Akku-/Zustandsverläufe und Lagerentnahmen
    lokal fest, weil die Engine erledigte Transporte nur 6 h aufbewahrt und keine Akku-Historie führt.
@@ -99,6 +100,9 @@
       const c = t.containerId ? s.containers[t.containerId] : null;
       if (c && t.status !== 'done') { r.qty = c.qty; r.partName = c.partName; r.cKind = c.kind; r.seq = c.seq; r.srcSeq = c.srcSeq; r.weightKg = c.weightKg; }
       if (!r.partName && r.orderId && s.orders[r.orderId]) r.partName = s.orders[r.orderId].part.name;
+      // erst nach dem Abstellen gesehen (Behälter evtl. schon aufgebraucht): Menge aus der Transportbezeichnung, Ziel-AG aus dem Arbeitsplan
+      if (r.qty == null && t.kind !== 'bars') { const m = /^(\d+) Stk/.exec(t.label || ''); if (m) r.qty = Number(m[1]); else if (c) r.qty = c.qty; }
+      if (r.seq == null && r.orderId && s.orders[r.orderId]) { const ops = s.orders[r.orderId].routing.filter(x => x.station === r.to); if (ops.length === 1) r.seq = ops[0].seq; }
       if (st0 !== r.status || to0 !== r.to) L.ver++;
       if (t.status === 'done') r.final = true;
     }
@@ -546,11 +550,15 @@
   .mt-node .pipn{font:600 9px var(--f-ui);fill:var(--text2)}
   .mt-node .bdg{display:none}
   .mt-node .bdg circle{fill:var(--st-wait);stroke:var(--card);stroke-width:2}
-  .mt-node .bdg text{font:700 9.5px var(--f-ui);fill:#241a02}
+  .mt-node .bdg text{font:700 9.5px var(--f-ui);fill:color-mix(in srgb,var(--st-wait) 14%,black)}
   .mt-node.haswait .bdg{display:block}
   .mt-node .pk{fill:none;stroke:var(--info);stroke-width:1.5;opacity:0}
   .mt-node.pick .pk{animation:mtPick 1.4s ease-out infinite}
   @keyframes mtPick{0%{opacity:.85;stroke-width:3}100%{opacity:0;stroke-width:9}}
+  .mt-e.pinned .b{opacity:.95;stroke:color-mix(in srgb,var(--mat) 80%,white)}
+  .mt-e.pinned .g{opacity:.22}
+  .mt-el.pinned rect{stroke:var(--accent);stroke-width:1.5}
+  .mt-node.pinned .bg{stroke:var(--accent);stroke-width:1.6}
   .mt-svg.hl .mt-e:not(.on){opacity:.12}
   .mt-svg.hl .mt-el:not(.on){opacity:.15}
   .mt-svg.hl .mt-node:not(.on){opacity:.42}
@@ -689,6 +697,8 @@
   .mt-tbl tr.sep td{padding:7px 10px 5px;background:color-mix(in srgb,var(--bg2) 60%,transparent);font:600 10px/1 var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);border-bottom:1px solid var(--line)}
   .mt-tbl td.st{width:4px;padding:0;box-shadow:inset 3px 0 0 var(--c)}
   .mt-rel{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  .mt-trid{font-size:11.5px;color:var(--text2)}
+  .mt-trt .mt-why{max-width:230px}
   .mt-rel .ico{color:var(--faint)}
   .mt-mode{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:2px 7px;border-radius:6px;border:1px solid var(--line);background:var(--card2);color:var(--text2);white-space:nowrap}
   .mt-mode .ico{color:var(--muted)}
@@ -846,7 +856,6 @@
     .mt-lg:nth-child(2n){border-left:1px solid var(--line)}
     .mt-lg small{max-width:none}
     .mt-topr{grid-template-columns:minmax(0,1fr) 70px 48px}
-    .mt-d-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
     .mt-kpis .kpi .s{-webkit-line-clamp:3}
     /* Tabellen als Karten */
     .mt-trt thead,.mt-mtt thead{display:none}
@@ -1073,7 +1082,7 @@
           </div>
         </div>
         <div class="tbl-wrap"><table class="tbl mt-tbl mt-trt"><thead><tr>
-          <th style="width:4px;padding:0"></th><th>Auftrag</th><th>Behälter / Inhalt</th><th>Von → Nach</th><th class="r">Gewicht</th><th>Mittel · Träger</th><th>Status</th><th>Wartet / Dauer</th><th>Grund / Hinweis</th>
+          <th style="width:4px;padding:0"></th><th>Nr.</th><th>Behälter · Auftrag</th><th>Von → Nach</th><th class="r">Gewicht</th><th>Mittel · Träger</th><th>Status</th><th>Wartet / Dauer</th><th>Grund / Hinweis</th>
         </tr></thead><tbody data-r="trBody"></tbody></table></div>
         <div class="mt-more" data-r="trMore" hidden><button class="btn sm ghost" data-r="trMoreBtn">Alle erledigten anzeigen</button></div>
       </section>
@@ -1247,7 +1256,7 @@
         px -= 6;
         const sepX = px + 3;
         const inH = pipsHtml(capIn, 'i');
-        inner += inH + (capIn > 0 ? `<path d="M${sepX},5.5 v6" stroke="var(--line2)" stroke-width="1"/>` : '') + outH;
+        inner += inH + (capIn > 0 ? `<path style="stroke:var(--line2)" d="M${sepX},5.5 v6" stroke-width="1"/>` : '') + outH;
       } else {
         inner += svgIco(n.icon, -n.w / 2 + 8, -n.h / 2 + (n.kind === 'charge' ? 8 : 7), 14, 'ic');
         inner += `<text class="t" x="${-n.w / 2 + 27}" y="${n.kind === 'charge' ? 4.5 : -2.5}">${esc(n.name)}</text>`;
@@ -1284,15 +1293,15 @@
   function buildLegend() {
     const sw = (inner, w = 26) => `<svg width="${w}" height="14" viewBox="0 0 ${w} 14" aria-hidden="true">${inner}</svg>`;
     const items = [
-      [sw('<path d="M2,7 H24" stroke="var(--mat)" stroke-width="2" stroke-linecap="round" opacity=".55"/><path d="M2,7 H24" stroke="var(--mat)" stroke-width="7" stroke-linecap="round" opacity=".18"/>'), 'Fluss heute (Stärke = Menge)'],
-      [sw('<circle cx="13" cy="7" r="6.5" fill="var(--mat)" opacity=".22"/><circle cx="13" cy="7" r="3.6" fill="color-mix(in srgb,var(--mat) 55%,white)" stroke="var(--mat)" stroke-width="1.6"/>'), 'Behälter wird transportiert'],
-      [sw('<circle cx="13" cy="7" r="6.5" fill="var(--st-wait)"/><text x="13" y="10" text-anchor="middle" style="font:700 8.5px var(--f-ui);fill:#241a02">2</text>'), 'Behälter abholbereit'],
-      [sw('<path d="M2,7 H24" stroke="var(--st-wait)" stroke-width="2" stroke-dasharray="3 4" opacity=".85"/>'), 'wartet, heute noch keine Fahrt'],
-      [sw('<path d="M2,7 H24" stroke="var(--mat)" stroke-width="2.2" stroke-dasharray="6 4" opacity=".7"/>'), 'Fremdbearbeitung (Spedition)'],
-      [sw('<path d="M2,7 H24" stroke="var(--mat)" stroke-width="2.4" stroke-dasharray="1.5 4" stroke-linecap="round" opacity=".8"/>'), 'Direktentnahme Säge (ohne Transport)'],
+      [sw('<path style="stroke:var(--mat)" d="M2,7 H24" stroke-width="2" stroke-linecap="round" opacity=".55"/><path style="stroke:var(--mat)" d="M2,7 H24" stroke-width="7" stroke-linecap="round" opacity=".18"/>'), 'Fluss heute (Stärke = Menge)'],
+      [sw('<circle style="fill:var(--mat)" cx="13" cy="7" r="6.5" opacity=".22"/><circle style="fill:color-mix(in srgb,var(--mat) 55%,white);stroke:var(--mat)" cx="13" cy="7" r="3.6" stroke-width="1.6"/>'), 'Behälter wird transportiert'],
+      [sw('<circle style="fill:var(--st-wait)" cx="13" cy="7" r="6.5"/><text x="13" y="10" text-anchor="middle" style="font:700 8.5px var(--f-ui);fill:color-mix(in srgb,var(--st-wait) 14%,black)">2</text>'), 'Behälter abholbereit'],
+      [sw('<path style="stroke:var(--st-wait)" d="M2,7 H24" stroke-width="2" stroke-dasharray="3 4" opacity=".85"/>'), 'wartet, heute noch keine Fahrt'],
+      [sw('<path style="stroke:var(--mat)" d="M2,7 H24" stroke-width="2.2" stroke-dasharray="6 4" opacity=".7"/>'), 'Fremdbearbeitung (Spedition)'],
+      [sw('<path style="stroke:var(--mat)" d="M2,7 H24" stroke-width="2.4" stroke-dasharray="1.5 4" stroke-linecap="round" opacity=".8"/>'), 'Direktentnahme Säge (ohne Transport)'],
       [sw('<g transform="translate(13,7)" class="mt-veh" style="--c:var(--mat)"><rect class="vb" x="-9" y="-5" width="18" height="10" rx="3"/><rect class="vl" x="-3" y="-3" width="6" height="6" rx="1.2"/></g>'), 'AGV (mit Ladung)'],
       [sw('<g transform="translate(11,7)" class="mt-veh" style="--c:var(--info)"><rect class="vb" x="-7.5" y="-5" width="12" height="10" rx="2.5"/><path class="vk" d="M4.5,-3 h5 M4.5,3 h5"/></g>'), 'Stapler'],
-      [sw('<rect x="1" y="4" width="5" height="5" rx="1" fill="color-mix(in srgb,var(--text2) 70%,transparent)"/><rect x="8" y="4" width="5" height="5" rx="1" fill="var(--track)" stroke="var(--line2)" stroke-width=".8"/><path d="M15.5,3.5 v6" stroke="var(--line2)"/><rect x="18" y="4" width="5" height="5" rx="1" fill="var(--mat)"/>', 26), 'Puffer Eingang | Ausgang (orange = abholbereit)'],
+      [sw('<rect style="fill:color-mix(in srgb,var(--text2) 70%,transparent)" x="1" y="4" width="5" height="5" rx="1"/><rect style="fill:var(--track);stroke:var(--line2)" x="8" y="4" width="5" height="5" rx="1" stroke-width=".8"/><path style="stroke:var(--line2)" d="M15.5,3.5 v6"/><rect style="fill:var(--mat)" x="18" y="4" width="5" height="5" rx="1"/>', 26), 'Puffer Eingang | Ausgang (orange = abholbereit)'],
     ];
     V.r.legend.innerHTML = items.map(([g, t]) => `<span>${g}${esc(t)}</span>`).join('');
   }
@@ -1331,6 +1340,12 @@
       if (!any) { V.trFilter = 'all'; V.r.trSeg.querySelectorAll('[data-f]').forEach(x => x.classList.toggle('on', x.dataset.f === 'all')); }
     }
     update();
+    markPinned();
+  }
+  function markPinned() {
+    const f = V.relFilter;
+    for (const [k, E] of V.edges) { if (E.g) E.g.classList.toggle('pinned', !!f && !f.station && f.key === k); if (E.lab) E.lab.classList.toggle('pinned', !!f && !f.station && f.key === k); }
+    for (const n of V.nodes) if (n.el) n.el.classList.toggle('pinned', !!f && (f.station === n.id || (!f.station && (f.from === n.id || f.to === n.id))));
   }
   const relMatch = (r, f) => !f || (f.station ? (r.from === f.station || r.to === f.station) : (r.from === f.from && r.to === f.to));
   function onFlowMove(e) {
@@ -1425,7 +1440,7 @@
     }
     const st = s.stations[id];
     const flows = [...V.edges.values()].map(E => E.data);
-    const inn = flows.filter(e => e.to === id), out = flows.filter(e => e.from === id);
+    const inn = flows.filter(e => e.to === id && e.n > 0), out = flows.filter(e => e.from === id && e.n > 0);
     const sumN = (arr) => arr.reduce((a, e) => a + e.n, 0);
     h += `<dl class="tk">`;
     if (st && n.st && (n.kind === 'machine')) {
@@ -1816,6 +1831,7 @@
     for (const e of edges) V.edges.set(e.key, { g: gEls[e.key], lab: lEls[e.key], lut: lutOf(gm.get(e.key)), data: e });
     plap('be_len');
     if (V.hl) { const k = V.hl; V.hl = null; applyHl(k); }
+    markPinned();
     for (const [, d] of V.dots) d.f = null;
   }
   function updateFlowFoot(s, flows) {
@@ -2086,14 +2102,15 @@
     const o = r.orderId ? s.orders[r.orderId] : null;
     let content;
     if (r.kind === 'bars') {
-      content = `<button class="lnk" data-sel="material|${esc(r.materialId)}"><b>Stangen ${esc(matName(r.materialId))}</b></button><span class="mt-s">Nachschub Stangenlader${r.meters ? ' · ' + U.fmtNum(r.meters, 1) + ' m' : ''}</span>`;
+      content = `<button class="lnk" data-sel="material|${esc(r.materialId)}"><b>${r.meters ? U.fmtNum(r.meters, 1) + ' m ' : ''}Stangen</b> ${esc(matName(r.materialId))}</button><span class="mt-s">${r.orderId ? `<button class="lnk mono" data-sel="order|${esc(r.orderId)}">${esc(r.orderId)}</button> · ` : ''}Nachschub Stangenlader ${esc(r.to)}</span>`;
     } else {
       const toOp = o && r.seq != null ? o.routing.find(x => x.seq === r.seq) : null;
       const kindTxt = r.kind === 'supply' ? 'Rohteile' : r.kind === 'ext-out' ? 'zur Härterei' : r.kind === 'ext-in' ? 'aus der Härterei' : null;
-      content = `<b>${r.qty != null ? stk(r.qty) : '–'}</b> ${esc(r.partName || '')}<span class="mt-s">${r.containerId ? `<button class="lnk mono" data-sel="container|${esc(r.containerId)}">${esc(r.containerId)}</button> · ` : ''}${kindTxt ? esc(kindTxt) + ' · ' : ''}${toOp ? 'für AG ' + toOp.seq + ' ' + esc(toOp.op) : 'Versand'}</span>`;
+      content = `<b>${r.qty != null ? stk(r.qty) : '–'}</b> ${esc(r.partName || '')}<span class="mt-s">${r.orderId ? `<button class="lnk mono" data-sel="order|${esc(r.orderId)}" title="${esc(o ? o.customer : '')}">${esc(r.orderId)}</button> · ` : ''}${r.containerId ? `<button class="lnk mono" data-sel="container|${esc(r.containerId)}">${esc(r.containerId)}</button> · ` : ''}${toOp ? (toOp.station === 'VERSAND' ? 'in den Versand' : 'für AG ' + toOp.seq + ' ' + esc(toOp.op)) : r.to === 'VERSAND' ? 'in den Versand' : ''}</span>`;
     }
-    const ord = r.orderId ? `<button class="lnk mono" data-sel="order|${esc(r.orderId)}">${esc(r.orderId)}</button>${o ? `<span class="mt-s">${esc(String(o.customer || '').replace(/\s*\([^)]*\)/g, '').replace(/\s+(GmbH|AG|KG)\b/g, ''))}</span>` : ''}` : '<span class="muted">–</span>';
-    const rel = `<span class="mt-rel">${esc(stName(r.from))} ${ICO('arrowRight', 12)} ${esc(stName(r.to))}</span>`;
+    const KT = { container: 'Behälter', supply: 'Rohteile', 'ext-out': 'zur Härterei', 'ext-in': 'aus Härterei', bars: 'Stangen' };
+    const ord = `<span class="mono mt-trid">${esc(r.id)}</span><span class="mt-s">${esc(KT[r.kind] || r.kind)}</span>`;
+    const rel = `<span class="mt-rel">${esc(stName(r.from))} ${ICO('arrowRight', 12)} ${esc(stName(r.to))}</span><span class="mt-s">${esc(r.from)} → ${esc(r.to)}</span>`;
     const mode = `<span class="mt-mode${r.mode === 'Stapler' ? ' stp' : ''}">${ICO(r.mode === 'AGV' ? 'agv' : 'forklift', 13)}${esc(r.mode)}</span>${r.carrier ? `<span class="mt-s">${esc(r.carrier)}</span>` : `<span class="mt-s">noch nicht zugeteilt</span>`}`;
     const status = pill(c, trStatusLabel(r));
     let time, why;
@@ -2104,7 +2121,7 @@
       why = r.cancelled ? '<span class="mt-why muted">Transport entfallen (Behälter umgebucht)</span>' : (r.pickupT != null && r.pickupT - r.createdT > 300 && r.why) ? `<span class="mt-why">wartete: ${esc(whyShort(r.why))}</span>` : '<span class="mt-why muted">–</span>';
     } else if (r.pickupT != null) {
       time = `<span class="mt-w">unterwegs ${dur(now - r.pickupT)}</span><span class="mt-s">Wartezeit ${dur(r.pickupT - r.createdT)}</span>`;
-      why = `<span class="mt-why">${esc((r.carrier || '') + ' bringt den Behälter nach ' + stName(r.to))}</span>`;
+      why = `<span class="mt-why">${esc((r.carrier || '') + (r.kind === 'bars' ? ' bringt die Stangen zu ' : ' bringt den Behälter nach ') + stName(r.to))}</span>`;
     } else {
       time = `<span class="mt-w${wcls}">wartet ${dur(w)}</span><span class="mt-s">bereit seit ${tclock(r.createdT, now)}</span>`;
       const s2 = s.transports[r.id];
@@ -2113,7 +2130,7 @@
     }
     const sel = r.kind === 'bars' ? 'material|' + r.materialId : r.containerId ? 'container|' + r.containerId : '';
     return `<tr class="click${done ? ' done' : ''}" data-row="${esc(sel)}"><td class="st" style="--c:${c}"></td>
-      <td class="nw">${ord}</td><td>${content}</td><td>${rel}<span class="mt-s mono">${esc(r.id)}</span></td><td class="r nw">${r.weightKg ? kg(r.weightKg) : '–'}</td>
+      <td class="nw">${ord}</td><td>${content}</td><td class="nw">${rel}</td><td class="r nw">${r.weightKg ? kg(r.weightKg) : '–'}</td>
       <td class="nw">${mode}</td><td class="nw">${status}</td><td class="nw">${time}</td><td>${why}</td></tr>`;
   }
   function updateTransports(s) {
@@ -2450,6 +2467,7 @@
       render(el) { bindSel(el); this._s = sectionsRender(el, a ? ['hero', 'bat', 'mission', 'today', 'list', 'master'] : ['hero', 'mission', 'today', 'staff', 'list']); this.update(el); },
       update(el) {
         const s2 = S(); const now = s2.t; const X = this._s; if (!X) return;
+        try { scanTransports(); } catch (e) { /* ignorieren */ }
         if (a) {
           const ag = s2.agvs[id]; if (!ag) return;
           const c = AGV_C[ag.state] || 'var(--st-idle)';
@@ -2557,6 +2575,7 @@
       },
       update(el) {
         const s2 = S(); const now = s2.t; const X = this._s; if (!X) return;
+        try { scanTransports(); } catch (e) { /* ignorieren */ }
         const mt = s2.materials[id]; if (!mt) return;
         const D = demand(id);
         const ri = reachInfo(mt, D, now);
@@ -2613,6 +2632,7 @@
       render(el) { bindSel(el); this._s = sectionsRender(el, ['hero', 'content', 'route', 'hist']); this.update(el); },
       update(el) {
         const s2 = S(); const now = s2.t; const X = this._s; if (!X) return;
+        try { scanTransports(); } catch (e) { /* ignorieren */ }
         const c = s2.containers[id];
         const trs = [...L.tr.values()].filter(r => r.containerId === id).sort((a, b) => a.createdT - b.createdT);
         if (!c) {

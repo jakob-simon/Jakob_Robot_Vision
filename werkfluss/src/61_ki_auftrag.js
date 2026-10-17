@@ -722,10 +722,11 @@
 
   // ------------------------------------------------------------------ Material: Bestand, Reservierungen, Bedarf
   /** Bedarf offener Aufträge an diesem Material (erster Arbeitsgang, noch nicht entnommen) */
+  let ignoreOid = null;   // eingelasteter Auftrag dieses Angebots – zählt bei der eigenen Neuberechnung nicht als Fremdbelegung
   function reservedOf(matId) {
     const st = S(), list = []; let total = 0; const mag = {};
     for (const id in st.orders) {
-      const o = st.orders[id]; if (o.status === 'fertig') continue;
+      const o = st.orders[id]; if (o.status === 'fertig' || id === ignoreOid) continue;
       const r0 = o.routing[0]; if (!r0 || !r0.material || r0.material.id !== matId) continue;
       const left = WF.sim.partsLeft(o.id, r0.seq); if (!(left > 0)) continue;
       const sn = STN(r0.station) || {};
@@ -742,12 +743,20 @@
     }
     return { total, list };
   }
-  function matInfo(q, qty) {
+  /** Material für diesen Auftrag: Bestand minus Bedarf der Aufträge, die laut Plantafel VOR ihm beginnen (s0 = geplanter Start) */
+  function matInfo(q, qty, s0, fc) {
     const id = q.raw && q.raw.materialId; const mt = matOf(id);
     if (!mt) return { none: true, ok: true };
     const st = S(), now = st.t, perPart = q.raw.perPart || 0, need = qty * perPart;
     const res = reservedOf(id);
-    const free = mt.onHand - res.total;
+    const startOf = (oid) => {
+      const o = st.orders[oid], f = fc && fc.orders[oid]; if (!o || !f || !f.ops) return -Infinity;
+      const r0 = o.routing[0], rec = f.ops.find(x => x && x.seq === r0.seq);
+      return rec ? rec.start : -Infinity;
+    };
+    const before = res.list.filter(x => s0 == null || startOf(x.id) <= s0 + 60), after = res.list.filter(x => !before.includes(x));
+    const resBefore = before.reduce((a, x) => a + x.amount, 0);
+    const free = mt.onHand - resBefore;
     const open = (st.purchases || []).filter(p => p.materialId === id && p.status === 'bestellt').sort((a, b) => a.etaT - b.etaT);
     let readyT = null, needsOrder = false;
     const ok = free + 1e-9 >= need;
@@ -756,11 +765,12 @@
       for (const p of open) { cover += p.qty; if (cover + 1e-9 >= need) { readyT = p.etaT; break; } }
       if (readyT == null) { needsOrder = true; readyT = now + mt.leadMin * 60; }
     }
-    const after = mt.onHand + (mt.onOrder || 0) - res.total - need;
-    const belowMin = after < mt.min;
+    const afterQ = mt.onHand + (mt.onOrder || 0) - res.total - need;
+    const laterShort = ok && afterQ < -1e-6 && after.length > 0;
     const dec = mt.unit === 'm' ? 1 : 0;
-    const suggest = Math.max(mt.reorderQty, Math.ceil((mt.min - after) / (dec ? 1 : 1)));
-    return { id, mt, perPart, need, res, free, open, ok, readyT, needsOrder, after, belowMin, suggest, dec };
+    const suggest = Math.max(mt.reorderQty, Math.ceil(Math.max(0, mt.min - afterQ)));
+    const shortParts = ok ? 0 : Math.ceil((need - Math.max(0, free)) / Math.max(1e-9, perPart));
+    return { id, mt, perPart, need, res, before, resBefore, free, open, ok, readyT, needsOrder, after: afterQ, laterList: after, laterShort, belowMin: afterQ < mt.min, suggest, dec, shortParts };
   }
   const qtyU = (v, mt) => nf(v, mt && mt.unit === 'm' ? (v < 1 ? (Math.round(v * 1000) % 10 ? 3 : 2) : v < 10 ? 2 : 1) : (Math.round(v * 1000) % 1000 ? (Math.round(v * 1000) % 10 ? 3 : 2) : 0)) + ' ' + (mt ? mt.unit : '');
 
@@ -779,14 +789,21 @@
     if (sn.loading === 'auto') return Math.max(tS + w.run * 1.1, addWork(tS, w.run * 0.75));
     return addWork(tS, w.run);
   }
-  /** frühester Beginn auf der Maschine: Einträge der Plantafel, die vorher dran sind, belegen sie; spätere werden verschoben */
-  function fitMachine(fc, mid, earliest, prio) {
-    const list = (fc.machines[mid] || []).slice().sort((a, b) => a.start - b.start);
-    const eil = (oid) => { const o = S().orders[oid]; return !!o && o.priority === 'eil'; };
+  /** frühester Beginn auf der Maschine – wie die Listenplanung der Engine: wer früher beginnen kann, ist zuerst dran;
+      bei gleichem Beginn (±1 s) entscheidet Eil → Termin → Auftragsnummer. Spätere Einträge werden verschoben. */
+  function fitMachine(fc, mid, earliest, prio, myDue, impacts) {
+    // bereits verschobene Aufträge kommen an ihren Folge-Arbeitsgängen entsprechend später an (Kaskade)
+    const list = (fc.machines[mid] || []).filter(e => e.orderId !== ignoreOid).map(e => {
+      const im = impacts && impacts[e.orderId], d = im && e.seq > im.seq && !e.active ? im.delay : 0;
+      return d ? Object.assign({}, e, { start: e.start + d, end: e.end + d }) : e;
+    }).sort((a, b) => a.start - b.start);
+    const myKey = [prio === 'eil' ? 0 : 1, myDue, 'FA-~'];
+    const keyOf = (oid) => { const o = S().orders[oid]; return [o && o.priority === 'eil' ? 0 : 1, o ? o.due : 0, oid]; };
+    const before = (a, b) => { for (let i = 0; i < a.length; i++) { if (a[i] < b[i]) return true; if (a[i] > b[i]) return false; } return false; };
     let s = earliest; const blockers = [], pushed = [];
     for (const e of list) {
       if (e.end <= s) continue;
-      const blocks = e.active || ((prio !== 'eil' || eil(e.orderId)) && e.start <= s + 1);
+      const blocks = e.active || e.start < s - 1 || (Math.abs(e.start - s) <= 1 && before(keyOf(e.orderId), myKey));
       if (blocks) { blockers.push(e); s = Math.max(s, e.end); } else pushed.push(e);
     }
     return { start: s, blockers, pushed };
@@ -794,8 +811,9 @@
   function schedule(q, qty, prio, opt = {}) {
     const now = S().t;
     const fc = WF.sim.forecast(120);
-    const mat = opt.mat || matInfo(q, qty);
-    const out = { now, steps: [], impacts: {}, mat, prio };
+    const wd = dueT();
+    const out = { now, steps: [], impacts: {}, mat: null, prio, myDue: opt.due != null ? opt.due : wd && wd > now ? wd : addWork(now, 3 * 16 * 3600) };
+    let mat = { none: true, ok: true };
     let prevEnd = now, prevFirst = now, prevBatch = 1, prevCyc = 0;
     q.routing.forEach((r, k) => {
       if (r.station === 'EXT') {
@@ -815,17 +833,28 @@
       const sn = STN(r.station); if (!sn) return;
       const w = stepWork(sn, r, qty);
       const bq = Math.min(qty, Math.max(1, Math.round(r.transferBatch || Math.min(qty, 20))));
-      const avail = k === 0 ? (!mat.ok && mat.readyT ? mat.readyT : now) : prevFirst;
-      const tail = k === 0 ? 0 : prevEnd + Math.min(bq, qty) * w.cyc + 600;
+      const avail = k === 0 ? now : prevFirst;
+      let tail = k === 0 ? 0 : prevEnd + Math.min(bq, qty) * w.cyc + 600;
       const earliest = Math.max(now, avail - w.setup);
-      const fit = fitMachine(fc, r.station, earliest, prio);
+      const fit = fitMachine(fc, r.station, earliest, prio, out.myDue, out.impacts);
       const start = fit.start;
+      // Material (erster Arbeitsgang): Verbrauch in Plan-Reihenfolge; fehlt etwas, kann der Rest erst nach dem Wareneingang laufen
+      let matTail = 0;
+      if (k === 0) {
+        mat = matInfo(q, qty, start, fc);
+        if (!mat.ok && mat.readyT) {
+          const restT = mat.shortParts * w.cyc * 1.03;
+          matTail = (sn.loading === 'auto' ? mat.readyT + restT : addWork(mat.readyT, restT)) + 300;
+          tail = Math.max(tail, matTail);
+        }
+      }
       const occ = Math.max(calEnd(sn, start, w), calEnd(sn, Math.max(start, avail), { setup: 0, fpi: w.fpi, run: w.run }));
       const end = Math.max(occ, tail);
       const setupEnd = addWork(start, w.setup), fpiEnd = addWork(start, w.setup + w.fpi);
       const runStart = Math.max(fpiEnd, avail);
       const need = Math.min(bq, qty);
       let first = (sn.loading === 'auto' ? runStart + need * w.cyc : addWork(runStart, need * w.cyc)) + 600;
+      if (matTail && mat.free / Math.max(1e-9, mat.perPart) < need) first = Math.max(first, mat.readyT + (need - Math.max(0, Math.floor(mat.free / mat.perPart))) * w.cyc + 600);
       first = Math.min(first, end + 600);
       const releasable = k > 0 && !(r.setupMin > 10) && !r.firstPiece;
       const busyEnd = releasable ? occ : end;
@@ -839,10 +868,11 @@
         shift = e.end + d;
       }
       out.steps.push({ k, kind: 'machine', station: r.station, start, setupEnd, fpiEnd, runStart, end, busyEnd, first, avail, earliest,
-        wait: Math.max(0, start - earliest), blockers: fit.blockers, w, bq, auto: sn.loading === 'auto' });
+        wait: Math.max(0, start - earliest), blockers: fit.blockers, w, bq, auto: sn.loading === 'auto', matTail });
       prevEnd = end; prevFirst = first; prevBatch = bq; prevCyc = w.cyc;
     });
     const ship = Math.max(now, prevEnd) + 600;
+    out.mat = mat;
     out.steps.push({ kind: 'ship', station: 'VERSAND', start: ship, end: ship });
     out.eta = ship;
     out.pickup = nextDayWindow(ship);
@@ -865,6 +895,7 @@
     { re: /vakuum/i, perKg: 2.2, perPc: 0.6, min: 150, label: 'Vakuumhärten' },
     { re: /elox/i, perKg: 4.0, perPc: 1.1, min: 90, label: 'Eloxieren' },
     { re: /nitrier/i, perKg: 2.0, perPc: 0.6, min: 140, label: 'Nitrieren' },
+    { re: /passivier|beiz/i, perKg: 3.0, perPc: 0.4, min: 110, label: 'Passivieren' },
     { re: /verzink|galvan|beschicht|brünier|vernickel|chrom|lackier/i, perKg: 2.4, perPc: 0.6, min: 90, label: 'Beschichten' },
     { re: /./, perKg: 2.0, perPc: 1.0, min: 100, label: 'Fremdbearbeitung' },
   ];
@@ -942,7 +973,7 @@
   function extDefaults(process, op) {
     const t = (process || '') + ' ' + (op || '');
     if (/elox/i.test(t)) return { partner: 'Eloxalwerk Simmering (Beispiel)', leadMin: 480 };
-    if (/beschicht|verzink|galvan|vernickel|chrom|brünier|lackier/i.test(t)) return { partner: 'Oberflächentechnik Wien (Beispiel)', leadMin: 600 };
+    if (/beschicht|verzink|galvan|vernickel|chrom|brünier|lackier|passivier|beiz/i.test(t)) return { partner: 'Oberflächentechnik Wien (Beispiel)', leadMin: 600 };
     if (/induktion/i.test(t)) return { partner: HAERTEREI, leadMin: 360 };
     if (/vakuum/i.test(t)) return { partner: HAERTEREI, leadMin: 420 };
     return { partner: HAERTEREI, leadMin: 480 };
@@ -1046,6 +1077,8 @@
       if (cand.length) { rep.push(`${why} → ${cand[0]} ${STN(cand[0]).short}`); r.station = cand[0]; }
       else rep.push(why);
     });
+    { const bd = mtx && mtx.form === 'Stange' ? barDia(mtx.id) : null, pd = partDims((part.dims || '') + ' ' + part.name).dia;
+      if (bd && pd && pd > bd) rep.push(`Rohteil prüfen: Stange Ø${nf(bd)} ist kleiner als das Teil (Ø${nf(pd)}) – passendes Stangenmaterial bestellen`); }
     if (rawM.materialId && steps[0] && steps[0].station === 'EXT') { rep.push('Erster Schritt Fremdbearbeitung: Teile werden beigestellt – Lagermaterial entfällt'); rawM.materialId = null; rawM.perPart = 0; }
     if (!steps.some(s => s.station === 'QS')) {
       const crit = (Array.isArray(o.features) ? o.features : []).filter(f => f && f.critical).length;
@@ -1579,10 +1612,11 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
   }
   function recalc() {
     if (!quote || !S()) { calc = null; return null; }
+    ignoreOid = placed && S().orders[placed.id] && placed.key === quoteKey() ? placed.id : null;
     const qty = ui.qty, prio = ui.prio;
-    const mat = matInfo(quote, qty);
-    const sch = schedule(quote, qty, prio, { mat });
-    const schAlt = prio === 'normal' ? schedule(quote, qty, 'eil', { mat }) : null;
+    const sch = schedule(quote, qty, prio);
+    const mat = sch.mat;
+    const schAlt = prio === 'normal' ? schedule(quote, qty, 'eil') : null;
     const pr = price(quote, qty, prio, ui.zus);
     const zus = zusageOf(sch);
     const wunsch = dueT();
@@ -1591,7 +1625,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
       return [r.orig.station].concat(r.alts.map(a => a.station)).map(sid => {
         if (sid === r.station) return { sid, eta: sch.eta, dCost: 0 };
         const q2 = withStation(k, sid);
-        return { sid, eta: schedule(q2, qty, prio, { mat }).eta, dCost: price(q2, qty, prio, ui.zus).machSum - pr.machSum };
+        return { sid, eta: schedule(q2, qty, prio).eta, dCost: price(q2, qty, prio, ui.zus).machSum - pr.machSum };
       });
     });
     const fc = WF.sim.forecast(120);
@@ -1604,6 +1638,7 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     calc.dueT = chosenDue(calc);
     calc.hints = buildHints(calc);
     calcAt = performance.now();
+    ignoreOid = null;
     return calc;
   }
   function buildHints(c) {
@@ -1619,10 +1654,13 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     }
     if (m && !m.none) {
       const mt = m.mt, resTxt = m.res.list.length ? ' für ' + m.res.list.map(x => x.id).join(', ') : '';
+      const bTxt = m.before.length ? ` − ${qtyU(m.resBefore, mt)} für ${m.before.map(x => x.id).join(', ')} (vorher eingeplant)` : '';
       if (!m.ok) H.push({ sev: m.needsOrder ? 'crit' : 'warn', ic: 'box', t: m.needsOrder ? `Material reicht nicht: ${mt.name}` : `Material kommt mit offener Bestellung: ${mt.name}`,
-        p: `Bedarf ${qtyU(m.need, mt)}, frei ${qtyU(Math.max(0, m.free), mt)} (Bestand ${qtyU(mt.onHand, mt)} − reserviert ${qtyU(m.res.total, mt)}${resTxt}). ` +
+        p: `Bedarf ${qtyU(m.need, mt)}, verfügbar ${qtyU(Math.max(0, m.free), mt)} (Bestand ${qtyU(mt.onHand, mt)}${bTxt}) – ${nf(m.shortParts)} Teile erst nach dem Wareneingang. ` +
           (m.needsOrder ? `Bei Bestellung jetzt (${mt.supplier}, ca. ${fDurL(mt.leadMin * 60)}) im Haus ${fRel(m.readyT)} – der Termin rechnet damit.` : `Lieferung ${fRel(m.readyT)} – der Termin rechnet damit.`),
         act: m.needsOrder ? { label: `${qtyU(m.suggest, mt)} bestellen`, act: 'reorder' } : null });
+      else if (m.laterShort) H.push({ sev: 'warn', ic: 'box', t: `Danach fehlt Material für ${m.laterList.map(x => x.id).join(', ')}`, p: `Dieser Auftrag läuft vorher und verbraucht ${qtyU(m.need, mt)} ${mt.name} – für ${m.laterList.map(x => x.id).join(', ')} fehlen dann ${qtyU(-m.after, mt)}. Rechtzeitig nachbestellen (${mt.supplier}, ca. ${fDurL(mt.leadMin * 60)}).`,
+        act: mt.onOrder ? null : { label: `${qtyU(m.suggest, mt)} nachbestellen`, act: 'reorder' } });
       else if (m.belowMin) H.push({ sev: 'warn', ic: 'box', t: 'Bestand fällt unter Mindestbestand', p: `${mt.name}: nach diesem Auftrag und den Reservierungen${resTxt} noch ${qtyU(Math.max(0, m.after), mt)} (Mindestbestand ${qtyU(mt.min, mt)})${mt.onOrder ? ' – bestellt: ' + qtyU(mt.onOrder, mt) : ''}.`,
         act: mt.onOrder ? null : { label: `${qtyU(Math.max(mt.reorderQty, m.suggest), mt)} nachbestellen`, act: 'reorder' } });
       else H.push({ sev: 'ok', ic: 'box', t: 'Material aus dem Lager', p: `${qtyU(m.need, mt)} ${mt.name} frei verfügbar – danach ${qtyU(m.after, mt)} (Mindestbestand ${qtyU(mt.min, mt)}).` });
@@ -1761,8 +1799,8 @@ costPerPart nur wenn kein Lagermaterial passt (geschätzte Rohteilkosten in €)
     cancelRun();
     if (ui.upload && ui.upload.url) { try { URL.revokeObjectURL(ui.upload.url); } catch (e) { /* egal */ } }
     ui.upload = { kind: isPdf ? 'pdf' : 'image', file, name: file.name || 'Zeichnung', size: file.size, type: file.type, url: isImg ? URL.createObjectURL(file) : null, w: 0, h: 0 };
+    if (ui.src.kind !== 'upload') { ui.customer = ''; R.cust.value = ''; }
     ui.src = { kind: 'upload' }; ui.notice = null;
-    if (!ui.customer) ui.customer = '';
     resetResult();
     renderExamples(); renderStage(); renderGo(); renderOut();
     R.srcHint.textContent = (isPdf ? 'PDF' : 'Bild') + ' · ' + (file.name || '');
@@ -2452,7 +2490,7 @@ Erstellt mit werkfluss KI-Auftrag · ${WF.sim.clock()}`;
     const a = b.dataset.act;
     if (a === 'ex') selectExample(b.dataset.id);
     else if (a === 'up' || a === 'pick') {
-      if (a === 'up' && ui.src.kind !== 'upload') { cancelRun(); ui.src = { kind: 'upload' }; ui.notice = null; resetResult(); renderExamples(); renderStage(); renderGo(); renderOut(); R.srcHint.textContent = 'Bild oder PDF ablegen'; if (ui.upload) return; }
+      if (a === 'up' && ui.src.kind !== 'upload') { cancelRun(); ui.src = { kind: 'upload' }; ui.notice = null; ui.customer = ''; R.cust.value = ''; resetResult(); renderExamples(); renderStage(); renderGo(); renderOut(); R.srcHint.textContent = 'Bild oder PDF ablegen'; if (ui.upload) return; }
       R.file.click();
     }
     else if (a === 'zoom') openZoom();

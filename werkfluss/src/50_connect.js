@@ -58,6 +58,7 @@
   .cn-road-r:hover>.ico{color:var(--accent)}
   .cn-road-e{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text2)}.cn-road-e .ico{color:var(--st-run)}
   .cn-alarm{color:var(--st-fault)}
+  @media (max-width:560px){.cn-hs{display:none}}
   .cn-stat .v{font:600 28px/1.1 var(--f-cond);margin-top:6px;white-space:nowrap;font-variant-numeric:tabular-nums}
   .cn-stat .v small{font-size:14px;color:var(--muted);font-weight:500;margin-left:3px}
   .cn-stat .s{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.35}
@@ -68,10 +69,10 @@
 
   /* ---------- Datenfluss + Stufen */
   .cn-rowA{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:14px;margin-top:14px;align-items:stretch}
-  @media (max-width:1180px){.cn-rowA{grid-template-columns:minmax(0,1fr)}}
+  @media (max-width:1320px){.cn-rowA{grid-template-columns:minmax(0,1fr)}}
   .cn-rowA>.card{display:flex;flex-direction:column}
   .cn-flow{position:relative;padding:12px 14px 10px;flex:1}
-  .cn-flow svg{display:block;width:100%;overflow:visible}
+  .cn-flow svg{display:block;width:100%;max-width:1000px;margin:0 auto;overflow:visible}
   .cn-flow text{font-family:var(--f-ui);font-size:12px;fill:var(--text2)}
   .cn-flow .fx-chip{cursor:pointer}
   .cn-flow .fx-chip rect.bg{fill:var(--card2);stroke:var(--line)}
@@ -139,7 +140,6 @@
   .cn-ck .ico{stroke-width:2.6}
   .cn-mn{display:inline-block;font-size:10.5px;color:var(--muted);border:1px dashed var(--line2);border-radius:5px;padding:1px 5px;white-space:nowrap}
   .cn-no{color:var(--faint)}
-  .cn-mx-n{margin:10px 0 0;font-size:11.5px;color:var(--muted)}
   @media (max-width:560px){.cn-mx{font-size:11.5px}.cn-mx td.l{white-space:normal}.cn-mx th .t{font-size:9.5px;letter-spacing:.03em}.cn-mn{font-size:9.5px;padding:1px 3px}}
 
   /* ---------- Maschinenliste */
@@ -238,7 +238,10 @@
     .cn-st-m b{color:var(--text);font-size:14px}
   }
   .cn-wz-body{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;align-items:start}
-  @media (max-width:1100px){.cn-wz-body{grid-template-columns:minmax(0,1fr)}}
+  @media (max-width:1280px){.cn-wz-body{grid-template-columns:minmax(0,1fr)}
+    .cn-aside .card-b{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.3fr);gap:14px;align-items:start}
+    .cn-aside .cn-aside-n{grid-column:1/-1}}
+  @media (max-width:760px){.cn-aside .card-b{display:flex}}
   .cn-wz-main{display:flex;flex-direction:column;min-height:420px}
   .cn-wz-c{padding:18px 20px 20px;flex:1}
   .cn-wz-f{display:flex;align-items:center;gap:10px;padding:12px 16px;border-top:1px solid var(--line);background:color-mix(in srgb,var(--panel) 60%,var(--card));border-radius:0 0 var(--r) var(--r);position:sticky;bottom:-28px;z-index:2}
@@ -264,7 +267,7 @@
   /* Schritt 1 */
   .cn-s0{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);grid-template-areas:"a b" "c b";grid-template-rows:auto 1fr;column-gap:22px;align-items:start}
   .cn-s0>.a{grid-area:a}.cn-s0>.b{grid-area:b}.cn-s0>.c{grid-area:c}
-  @media (max-width:1280px){.cn-s0{grid-template-columns:minmax(0,1fr);grid-template-areas:"a" "b" "c";grid-template-rows:auto}.cn-s0>.b{margin-top:16px}}
+  @media (max-width:960px){.cn-s0{grid-template-columns:minmax(0,1fr);grid-template-areas:"a" "b" "c";grid-template-rows:auto}.cn-s0>.b{margin-top:16px}}
   .cn-s0 .field{margin-top:14px}
   .cn-note{display:flex;gap:9px;align-items:flex-start;margin-top:12px;padding:10px 12px;border-radius:9px;font-size:12.8px;color:var(--text2);background:color-mix(in srgb,var(--c,var(--info)) 8%,var(--bg2));border:1px solid color-mix(in srgb,var(--c,var(--info)) 28%,transparent)}
   .cn-note .ico{color:var(--c,var(--info));flex:none;margin-top:1px}
@@ -445,8 +448,6 @@
   .cn-tile .v small{font:500 12px var(--f-ui);color:var(--muted);margin-left:3px}
   .cn-tile .v.s{font:500 12.5px/1.35 var(--f-mono);white-space:normal;overflow-wrap:anywhere;margin-top:6px}
   .cn-tile.wide{grid-column:1/-1}
-  .cn-tile .sp{margin-top:4px;height:26px}
-  .cn-tile .sp svg{width:100%;height:26px}
   .cn-s3-r{display:flex;flex-direction:column;gap:8px;min-width:0}
   .cn-chart{border:1px solid var(--line);border-radius:10px;background:var(--bg2);padding:9px 11px 6px;flex:1;display:flex;flex-direction:column;justify-content:space-between}
   .cn-chart-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
@@ -728,13 +729,23 @@
     }
     return { off: true };
   }
+  /** Wann die Montage am wenigsten stört – aus Schichtplan und Beladeart der Maschine */
   function downtimeText(sj, mins) {
-    if (sj.loading === 'auto') return `ca. ${mins} min spannungsfrei – beim nächsten Rüsten oder Werkzeugwechsel (die Maschine läuft auch in den Pausen)`;
+    if (sj.loading === 'auto') return `ca. ${mins} min spannungsfrei – beim nächsten Rüsten oder Werkzeugwechsel`;
     const b = breakHint();
-    if (b.now) return `ca. ${mins} min spannungsfrei – jetzt ist Pause bis ${b.until}, die Maschine steht ohnehin`;
-    if (b.text && !b.end) return `ca. ${mins} min spannungsfrei – am besten in der Pause ${b.text}, die Maschine steht dann ohnehin`;
+    if (b.now) return `ca. ${mins} min spannungsfrei – jetzt in der Pause bis ${b.until}`;
+    if (b.text && !b.end && !b.off) return `ca. ${mins} min spannungsfrei – in der Pause ${b.text}`;
     if (b.end) return `ca. ${mins} min spannungsfrei – nach Schichtende ${b.text}`;
-    return `ca. ${mins} min spannungsfrei – außerhalb der Schicht steht die Maschine, Montage sofort möglich`;
+    return `ca. ${mins} min spannungsfrei – sofort möglich (keine Schicht)`;
+  }
+  function timingWhy(sj) {
+    const per = sj.loading === 'perPart' ? 'die Maschine wird je Teil eingelegt' : 'die Maschine wird bedient';
+    if (sj.loading === 'auto') return 'Die Maschine läuft auch in den Pausen – die Montage passt am besten in das nächste Rüsten oder einen Werkzeugwechsel.';
+    const b = breakHint();
+    if (b.now) return `Jetzt ist Pause bis ${b.until}: ${per} und steht ohnehin – die Montage kann sofort erfolgen.`;
+    if (b.text && !b.end && !b.off) return `Montage am besten in der Pause ${b.text}: ${per} und steht dann ohnehin.`;
+    if (b.end) return `Montage nach Schichtende ${b.text} – dann steht die Maschine ohnehin.`;
+    return 'Außerhalb der Schicht steht die Maschine – die Montage kann sofort erfolgen.';
   }
   const faultOf = (type) => { const f = (PR().faults[type] || [])[0] || (PR().faults.generic || [])[0]; return f ? `${f.code} ${f.text}` : null; };
   const priciestTool = (id) => {
@@ -767,7 +778,7 @@
         f.kind === 'none' ? `Baujahr ${sj.year}: ${sj.controlShort} ohne Netzwerkschnittstelle${f.rs232 ? ' – die RS-232-Schnittstelle überträgt nur NC-Programme, keine Zustände' : ''}.` : `${sj.controlShort} bietet heute keinen offenen Datenzugang – die Sensorik liefert sofort belastbare Zustände.`,
         sj.noLight ? 'Der Laststrom zeigt zuverlässig, ob die Maschine zerspant oder steht – auch ohne Signalsäule.' : 'Strom und Signalsäule zeigen zuverlässig, ob die Maschine arbeitet, wartet oder gestört ist – unabhängig vom Hersteller.',
         'Klemmen statt Eingreifen: Steuerung, NC-Programm und CE-Konformität bleiben unberührt.',
-        'Montage ' + downtimeText(sj, 10).replace(/^ca\. 10 min spannungsfrei – /, '') + '.',
+        timingWhy(sj),
       ],
       install: ['Schaltschrank durch eine Elektrofachkraft spannungsfrei schalten', 'Stromwandler um die drei Phasen der Zuleitung klappen', sj.noLight ? 'Hauptschütz-Rückmeldung an Eingang DI0 klemmen' : 'Signalsäule grün / gelb / rot parallel an DI0–DI2 klemmen', 'Edge auf die Hutschiene setzen, 24 V anschließen, per QR-Code koppeln'] });
     const s7 = () => ({ key: 's7', level: 2, family: 's7', possible: true, title: 'SPS lesen (S7-Protokoll)', sub: `${gw(2)} liest die Datenbausteine der SPS – nur lesend`,
@@ -1223,7 +1234,6 @@
   let root = null, ovEl = null, wzEl = null, ro = null, lastW = 0;
   let ovSig = '', filter = 'all', ovRefs = null, flowRefs = null, ovScroll = 0;
   let WZ = null, wzSig = {}, wzRefs = {};
-  const lastSigT = {};
 
   // =================================================================== Übersicht
   function counts() {
@@ -1285,11 +1295,12 @@
         <div class="cn-stat"><div class="eyebrow">Edge-Gateways</div><div class="v"><span>${edges.length}/${edges.length}</span><small>online</small></div><div class="s"><span data-k="h-gw">–</span>${direct ? ` · ${direct} Stationen direkt im Firmennetz` : ''}</div></div>
         <div class="cn-stat"><div class="eyebrow">Tablet-Rückmeldung</div><div class="v"><span>${l0.length}</span><small>${l0.length === 1 ? 'Station' : 'Stationen'}</small></div>
           <div class="s">${l0.length ? esc(l0.map(id => ST(id).short).join(', ')) + ' – Zustand nur so aktuell wie die letzte Meldung' : 'Alle Stationen melden automatisch.'}</div>
+          ${l0.length ? '<div class="s" data-k="h-loss"></div>' : ''}
           ${l0.length ? `<button class="link" data-act="wz-open" data-id="${esc(l0[0])}">Jetzt anbinden ${icon('arrowRight', 13)}</button>` : ''}</div>
       </div>
       <div class="cn-rowA">
         <div class="card">
-          <div class="card-h"><h3>Datenfluss: Maschine → Gateway → werkfluss</h3><span class="cn-live"><i></i>live · 5-s-Raster</span></div>
+          <div class="card-h"><h3>Datenfluss: Maschine → Gateway → werkfluss</h3><span class="cn-live"><i></i>live<span class="cn-hs"> · 5-s-Raster</span></span></div>
           <div class="cn-flow" data-k="flow"></div>
           <div class="cn-flow-f"><span><i class="ln"></i>automatisch (Steuerung / Sensorik)</span><span><i class="ln d"></i>manuell (Tablet)</span><span><i class="pk"></i>Datenpaket</span><span><span class="cn-dot" style="--c:var(--st-run)"></span>Punkt = Maschinenzustand</span></div>
         </div>
@@ -1334,10 +1345,10 @@
   }
   function matrixHtml(c) {
     const cell = (v, l) => v === 'auto' ? `<span class="cn-ck" style="--c:${lvVar(Math.max(1, l))}">${icon('check', 12)}</span>` : v ? `<span class="cn-mn">${esc(v)}</span>` : '<span class="cn-no">–</span>';
-    return `<table class="cn-mx"><thead><tr><th class="l"></th>${LV.map(L => `<th>${lvBadge(L.l)}<span class="t">${esc(L.short)}</span></th>`).join('')}</tr></thead>
+    return `<div class="tbl-wrap"><table class="cn-mx"><thead><tr><th class="l"></th>${LV.map(L => `<th>${lvBadge(L.l)}<span class="t">${esc(L.short)}</span></th>`).join('')}</tr></thead>
       <tbody>${CAPS.map(cp => `<tr><td class="l" title="${esc(cp.d)}">${esc(cp.label)}</td>${cp.v.map((v, l) => `<td>${cell(v, l)}</td>`).join('')}</tr>`).join('')}
       <tr class="f"><td class="l">Aufwand</td>${LV.map(L => `<td>${esc(L.effort)}</td>`).join('')}</tr>
-      <tr class="f"><td class="l">Stationen heute</td>${LV.map(L => `<td><b>${c[L.l]}</b></td>`).join('')}</tr></tbody></table>
+      <tr class="f"><td class="l">Stationen heute</td>${LV.map(L => `<td><b>${c[L.l]}</b></td>`).join('')}</tr></tbody></table></div>
       ${roadmapHtml()}`;
   }
   /** Empfohlener Ausbau: niedrigste Stufe zuerst, bei Gleichstand höchster Maschinenstundensatz */
@@ -1358,7 +1369,7 @@
       ? `<button class="btn sm${lv === 0 ? ' primary' : ''}" data-act="wz-open" data-id="${esc(id)}">${icon('plug', 14)}${lv === 0 ? 'Anbinden' : 'Verbessern'}</button>`
       : `<span class="cn-opt-ok">${icon('check', 14)}Optimal angebunden</span>`;
     const gwT = lv === 0 ? 'manuell' : /direkt/i.test(c.gateway) ? 'direkt an werkfluss' : c.gateway;
-    return `<div class="cn-lr${isNew && nowT() - c.connectedT < 120 ? ' fresh' : ''}" data-act="sel" data-id="${esc(id)}" title="Details zu ${esc(st.short)} öffnen">
+    return `<div class="cn-lr${isNew && nowT() - c.connectedT < 120 ? ' fresh' : ''}" data-act="sel" data-id="${esc(id)}" role="button" tabindex="0" title="Details zu ${esc(st.short)} öffnen">
       <div class="cn-mc cn-c-m"><span class="cn-dot" data-r="dot" style="--c:${stColor(m.state)}" title="${esc(stLabel(m.state))}"></span><div><div><b>${esc(st.short)}</b><span class="mono">${esc(id)}</span>${isNew ? '<span class="cn-new">neu</span>' : ''}</div><div class="cn-sub">${esc(st.name)}</div></div></div>
       <div class="cn-cell cn-c-d"><div class="t2">${esc(st.vendor !== '–' ? st.vendor + ' ' + st.model : st.model)} · Bj. ${esc(st.year)} · ${esc(ctrlShort(st.control))}</div></div>
       <div class="cn-cell cn-c-year num">${esc(st.year)}</div>
@@ -1384,7 +1395,8 @@
     else if (st.type === 'washer') { l1 = `${MODE_DE[sg.mode] || sg.mode} · ${U.fmtNum(sg.bathTempC)} °C · ${sg.cycle && sg.cycle !== '–' ? sg.cycle : 'bereit'}`; l2 = `${prog} · Zähler ${U.fmtNum(sg.partCounter)}`; }
     else if (st.type === 'assembly') { l1 = `${sg.terminalStep && sg.terminalStep !== '–' ? 'Montage ' + sg.terminalStep : 'kein Montageschritt aktiv'}`; l2 = `${prog} · Zähler ${U.fmtNum(sg.partCounter)}`; }
     else {
-      l1 = sg.spindleRpm > 0 ? `${MODE_DE[sg.mode] || sg.mode} · ${U.fmtNum(sg.spindleRpm)} 1/min · Last ${U.fmtNum(sg.spindleLoadPct)} %` : `${MODE_DE[sg.mode] || sg.mode} · Spindel steht`;
+      const loading = m.state === 'running' && m.part && m.part.sub === 'load';
+      l1 = sg.spindleRpm > 0 ? `${MODE_DE[sg.mode] || sg.mode} · ${U.fmtNum(sg.spindleRpm)} 1/min · Last ${U.fmtNum(sg.spindleLoadPct)} %` : `${MODE_DE[sg.mode] || sg.mode}${loading ? ' · Teil wird eingelegt' : ''} · Spindel steht`;
       l2 = `${prog}${sg.program && sg.program !== '–' ? ' · Zähler ' + U.fmtNum(sg.partCounter) : ''}${lv >= 3 && sg.toolInSpindleName ? ' · ' + sg.toolInSpindleName : ''}`;
     }
     if (sg.alarm) l1 = `Alarm ${sg.alarm}`;
@@ -1402,6 +1414,11 @@
     const ek = gatewayGroups().filter(g => g.kind === 'edge').map(g => g.key);
     const lat = ek.length ? Math.round(ek.reduce((a, k) => a + gwLatency(k), 0) / ek.length) : null;
     setT(ovRefs['h-gw'], ek.length ? `Ø Latenz ${lat} ms` : 'kein Edge-Gateway');
+    if (ovRefs['h-loss']) {
+      let sec = 0, eur = 0;
+      for (const id of IDS()) { if (lvOf(id) !== 0) continue; const kd = S().machines[id].kd || {}; sec += kd.lossSec || 0; eur += kd.lossEur || 0; }
+      setH(ovRefs['h-loss'], sec > 0 ? `Stillstand heute <b>${esc(U.fmtDur(sec))}</b> · ${esc(U.fmtEur(eur))} – nur per Rückmeldung erfasst` : 'heute noch kein Stillstand gemeldet');
+    }
     for (const id in ovRefs.rows) {
       const r = ovRefs.rows[id], m = S().machines[id]; if (!m) continue;
       const lv = liveOf(id);
@@ -1420,7 +1437,7 @@
   // ---------------------------------------------------------------- Datenfluss-Diagramm
   function renderFlow(force) {
     const host = ovRefs && ovRefs.flow; if (!host) return;
-    const W = Math.round(host.clientWidth - 28);
+    const W = Math.min(1000, Math.round(host.clientWidth - 28));
     if (!force && Math.abs(W - lastW) < 6) return;
     lastW = W;
     const groups = gatewayGroups();
@@ -1570,7 +1587,7 @@
     WZ.pathKey = a.rec ? a.rec.key : null;
     WZ.scan = { phase: 'idle', t0: 0 };
     WZ.map = null; WZ.test = null; WZ.samples = [];
-    WZ.reached = 0;
+    WZ.step = 0; WZ.reached = 0;
   }
   const selPath = () => { const a = WZ._a || curAnalysis(); return a.options.find(o => o.key === WZ.pathKey) || null; };
   function ctxNow() { return WZ.mode === 'new' ? demoCtx(DEMOS[WZ.demo]) : fullCtx(WZ.id); }
@@ -1965,7 +1982,7 @@
     if (lv === 1) {
       const a = v('current'); if (a) t.push(['Laststrom L1', U.fmtNum(a.sv, 1), 'A', null]);
       if (rows.some(r => sel[r.id] === 'power')) t.push(['Wirkleistung', U.fmtNum(x.kw, 1), 'kW', null]);
-      if (!x.demo || !x.noLight) { const g = rows.find(r => r.kind === 'bit' && ['run', 'wait', 'fault'].includes(sel[r.id])); if (g) t.push(['Signalsäule', LIGHT_DE[x.light] || '–', '', null]); }
+      if (rows.some(r => r.kind === 'bit' && ['run', 'wait', 'fault'].includes(sel[r.id]))) t.push(['Signalsäule', LIGHT_DE[x.light] || '–', '', null]);
       if (x.runtime != null) t.push(['Laufzeit heute', U.fmtDur(x.runtime), '', null]);
     } else {
       const mo = v('mode'); if (mo) t.push(['Betriebsart', mo.txt, '', null]);
@@ -2184,7 +2201,7 @@
     if (t.matches('select[data-map]')) onMapChange(t.dataset.map, t.value);
   }
   function onKey(e) {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.cn-opt[data-act]')) { e.preventDefault(); e.target.click(); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.cn-opt[data-act], .cn-lr[data-act]')) { e.preventDefault(); e.target.click(); }
   }
   function onHover(e) {
     const g = e.target.closest && e.target.closest('.fx-chip'); const host = ovRefs && ovRefs.flow; if (!host) return;
