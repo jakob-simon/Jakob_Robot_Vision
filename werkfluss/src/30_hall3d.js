@@ -2925,7 +2925,8 @@
       const cnt = c.op.target ? ` · ${fmtN(c.op.good)}/${fmtN(c.op.target)}` : '';
       const stName = (c.st.kind === 'machine' ? c.st.id + ' ' : '') + (c.op.stationName || c.st.short);
       const kTxt = c.lim ? (lim.plant ? 'Engpass' : 'kritisch') : '';
-      const lbEl = el('div', { class: 'h3-lb rt off' + (c.lim ? ' lim' : '') + (cur ? ' cur' : ''), style: { '--rc': col } });
+      const lbEl = el('div', { class: 'h3-lb rt off' + (c.lim ? ' lim' : '') + (cur ? ' cur' : '') });
+      lbEl.style.setProperty('--rc', col);
       lbEl.title = `AG ${c.op.seq} · ${c.op.op || ''} – ${stName} · ${c.op.stateLabel || ''}${cnt}${c.lim ? (lim.plant ? ' · Werks-Engpass' : ' · begrenzt den Durchlauf') : ''}`;
       lbEl.innerHTML = `<div class="r1"><span class="n">${n + 1}</span><span class="cc">${esc(stationTag(c.st))}${done ? ' ✓' : ''}</span><span class="o">AG ${c.op.seq} · ${esc(c.op.op || c.op.stationName || '')}</span>${kTxt ? `<span class="k">${kTxt}</span>` : ''}</div><div class="s">${esc(stName)} · ${esc(c.op.stateLabel || '')}${cnt}</div>`;
       R.ui.labels.append(lbEl);
@@ -3890,7 +3891,11 @@
   function syncDrawer() {
     if (!R.root) return;
     const dr = document.getElementById('drawer'), dw = dr && dr.classList.contains('open') && !R.mobile ? Math.round(dr.getBoundingClientRect().width) : 0;
-    if (dw !== R.drawerW) { R.drawerW = dw; R.root.style.setProperty('--dw', dw + 'px'); closeMenus(); layoutModes(); renderSelBar(); renderTip(false); setTimeout(computeUiRects, 260); }
+    if (dw !== R.drawerW) {
+      R.drawerW = dw; R.root.style.setProperty('--dw', dw + 'px'); closeMenus(); layoutModes(); renderSelBar(); renderTip(false);
+      // nach der Drawer-Animation sofort neu einpassen (nicht erst nach zwei 4-Hz-Takten)
+      setTimeout(() => { computeUiRects(); if (R.fit && R.ok) { R.fitPend = layoutSig(); checkFit(); } }, 240);
+    }
   }
   // ================================================================== Aktualisierung 4×/s (Daten → Darstellung)
   /** Geisterschicht: was läuft wirklich (Engine kpis().ghost) – nie pauschal „autonome Maschinen laufen“ */
@@ -4615,5 +4620,7 @@
     focusOrder: (id) => focusOrder(id),
     get ready() { return R.ok; },
     _debug: R,
+    /** Test: Kamera noch in Bewegung oder Einpassung ausstehend */
+    _busy: () => !!(R.tween || R.introPending || R.fitPend || (R.fit && layoutSig() !== R.fit.sig)),
   };
 })();
