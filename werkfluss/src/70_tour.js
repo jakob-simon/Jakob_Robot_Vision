@@ -597,8 +597,19 @@
       mit Datenabfragen, den „Automatisch weiter“ überholen würde. 60_ai: askOffline(), sonst context.tour. */
   function askCopilot(text, context) {
     const A = WF.ai, ctx = Object.assign({}, context || {}, { tour: true, offline: true });
-    if (A && typeof A.askOffline === 'function') { try { A.askOffline(text, ctx); return; } catch (e) { console.error('[tour ai]', e); } }
-    WF.bus.emit('ai:ask', { text, context: ctx });
+    if (!A) return;
+    if (typeof A.askOffline === 'function') { try { A.askOffline(text, ctx); return; } catch (e) { console.error('[tour ai]', e); } }
+    const live = A.status === 'live' || A.status === 'verbinde';
+    if (!live) { WF.bus.emit('ai:ask', { text, context: ctx }); return; }
+    // Claude-Modus (ohne askOffline): die „Lokale Antwort“ des Copilot-Panels nutzen – gleiche Rechnung wie offline,
+    // sofort da, keine Freigabe-Abfrage, kein Live-Aufruf mit Datenabfragen (data-offline ist der Knopf des Panels dafür)
+    try { if (A.open) A.open({ noFocus: true }); } catch (e) { /* weiter */ }
+    const panel = document.querySelector('.ai-panel');
+    if (!panel) return;
+    const b = document.createElement('button');
+    b.type = 'button'; b.hidden = true; b.dataset.offline = text;
+    panel.append(b);
+    try { b.click(); } finally { b.remove(); }
   }
   /** Ein-Klick-Vorbeugung aus der Geisterschicht-Prognose (gleiche Aktion wie in der Meldung „Geisterschicht-Check“) */
   function runGhostAction(mid) {

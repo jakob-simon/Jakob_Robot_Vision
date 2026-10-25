@@ -3674,6 +3674,19 @@
           resolveKey('wait:' + m.id, m.waitCode === 'walking' ? 'Person ist unterwegs' : 'geplante Abwesenheit (Pause/Schicht)');
         }
       }
+      // Hinweis (Insight): Maschine steht bis zum Schichtwechsel, weil Rüsten/Einlegen nicht mehr vor Schichtende passt
+      const hk = 'handover:' + m.id;
+      if (m.state === 'waitOperator' && m.waitCode === 'tooLate' && cur && cur.end - S.t <= 3600 && S.t - m.since >= 600 && !cur.inBreak) {
+        const nextS = nextWorkStart(cur.end), gapSec = Math.max(0, nextS - m.since);
+        if (nextS - cur.end < 1800 && !hasOpen(hk)) {
+          const what = String(m.waitWhat || 'Rüsten'), tk = S.tasks[m.tasks.setup] || S.tasks[m.tasks.load], work = tk ? taskWorkSec(tk) : 0;
+          notify({ key: hk, sev: 'info', role: 'Schichtleitung', entity: { kind: 'machine', id: m.id }, autoResolveT: nextS + 1800,
+            title: `${m.id} ${m.short} steht bis Schichtwechsel ${U.fmtClock(cur.end)}`,
+            body: `${what}${work ? ' (ca. ' + U.fmtDur(work) + ')' : ''} passt nicht mehr vor ${U.fmtClock(cur.end)} · Stillstand ca. ${U.fmtDur(gapSec)} (≈ ${U.fmtEur(m.rate * gapSec / 3600)})`,
+            suggestion: brief(`${what.split(' – ')[0]} passt nicht mehr vor Schichtende ${U.fmtClock(cur.end)}, nächste Schicht ab ${U.fmtClock(nextS)}`, 'Rüsten überschichtig beginnen und mit Übergabe-Notiz an die nächste Schicht übergeben'),
+            actions: [{ label: 'Maschine öffnen', action: { type: 'select', kind: 'machine', id: m.id } }] });
+        }
+      } else if (hasOpen(hk) && m.state !== 'waitOperator') resolveKey(hk, 'Maschine arbeitet wieder');
       // Erstteil wartet: nur in der Schichtzeit eine Warnung (nachts ist niemand da – geplant „Bereit“)
       if (m.fpi && m.fpi.stage === 'wait' && cur && !cur.inBreak && S.t - Math.max(m.fpi.t0, S.shiftStats.startT) >= CFG.fpiWarnSec && !hasOpen('fpi:' + m.id)) {
         const tk = S.tasks[m.tasks.fpi], who = tk && tk.assignee ? pname(tk.assignee) + ' ist unterwegs' : availability(tk).text;
